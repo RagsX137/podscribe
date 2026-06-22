@@ -473,3 +473,70 @@ def test_cmd_consolidate_no_summary_does_not_prompt(tmp_path, monkeypatch, capsy
     rc = cmd_consolidate(args)
     assert rc == 1
 
+
+def test_show_with_ambiguous_prefix_lists_candidates(tmp_path, monkeypatch, capsys):
+    """Two meetings with same prefix → list them and return 1."""
+    monkeypatch.chdir(tmp_path)
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_show, build_parser
+
+    pod = init_pod("sam-chen")
+    for dt in [datetime(2026, 6, 22, 14, 30, 0), datetime(2026, 6, 22, 14, 31, 0)]:
+        m = start_meeting(pod, dt)
+        append_segment(m, Segment(1.0, 5.0, "hello"))
+        finalize_meeting(m)
+
+    args = build_parser().parse_args(["show", "sam-chen", "2026-06-22-14"])
+    rc = cmd_show(args)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "Multiple meetings match" in captured.err
+    assert "2026-06-22-1430-sam-chen" in captured.err
+    assert "2026-06-22-1431-sam-chen" in captured.err
+
+
+def test_enhance_with_ambiguous_prefix_lists_candidates(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    from unittest.mock import patch
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_enhance, build_parser
+
+    pod = init_pod("sam-chen")
+    for dt in [datetime(2026, 6, 22, 14, 30, 0), datetime(2026, 6, 22, 14, 31, 0)]:
+        m = start_meeting(pod, dt)
+        append_segment(m, Segment(1.0, 5.0, "hello"))
+        finalize_meeting(m)
+
+    with patch("podscribe.cli.load_project_config", return_value={
+        "llm": {"model": "qwen3.6", "prompt_template": "test"}
+    }):
+        args = build_parser().parse_args(["enhance", "sam-chen", "2026-06-22-14"])
+        rc = cmd_enhance(args)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "Multiple meetings match" in captured.err
+
+
+def test_consolidate_with_ambiguous_prefix_lists_candidates(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_consolidate, build_parser
+
+    pod = init_pod("sam-chen")
+    for dt in [datetime(2026, 6, 22, 14, 30, 0), datetime(2026, 6, 22, 14, 31, 0)]:
+        m = start_meeting(pod, dt)
+        append_segment(m, Segment(1.0, 5.0, "hello"))
+        finalize_meeting(m)
+
+    args = build_parser().parse_args(["consolidate", "sam-chen", "2026-06-22-14"])
+    rc = cmd_consolidate(args)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "Multiple meetings match" in captured.err
+

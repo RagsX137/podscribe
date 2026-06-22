@@ -37,6 +37,30 @@ def _hms(sec: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+def _resolve_meeting(meetings, prefix, pod_name):
+    """Resolve a meeting by ID prefix. Returns (meeting, None) on success, (None, error_message) on failure.
+
+    - "latest" → meetings[0]
+    - unique prefix → that meeting
+    - 0 matches → error
+    - 2+ matches → list candidates, error
+    """
+    if prefix == "latest":
+        if not meetings:
+            return None, f"No meetings for pod '{pod_name}'."
+        return meetings[0], None
+    matches = [m for m in meetings if m.id.startswith(prefix)]
+    if not matches:
+        return None, f"No meeting matching '{prefix}' for pod '{pod_name}'."
+    if len(matches) > 1:
+        listing = "\n".join(f"  • {m.id}" for m in matches)
+        return None, (
+            f"Multiple meetings match '{prefix}':\n{listing}\n"
+            f"Use a longer prefix to disambiguate."
+        )
+    return matches[0], None
+
+
 def cmd_init(args) -> int:
     """Initialize a new pod."""
     if pod_exists(args.name):
@@ -176,14 +200,10 @@ def cmd_show(args) -> int:
         print(f"No meetings for pod '{args.pod}'.")
         return 1
     meeting_id = args.meeting or "latest"
-    if meeting_id == "latest":
-        meeting = meetings[0]
-    else:
-        matching = [m for m in meetings if m.id.startswith(meeting_id)]
-        if not matching:
-            print(f"No meeting matching '{meeting_id}'. Try `podscribe list`.", file=sys.stderr)
-            return 1
-        meeting = matching[0]
+    meeting, err = _resolve_meeting(meetings, meeting_id, args.pod)
+    if err is not None:
+        print(err, file=sys.stderr)
+        return 1
     print(read_transcript(meeting))
     return 0
 
@@ -256,14 +276,10 @@ def cmd_enhance(args) -> int:
         print(f"No meetings for pod '{args.pod}'.", file=sys.stderr)
         return 1
 
-    if args.meeting == "latest":
-        meeting = meetings[0]
-    else:
-        matching = [m for m in meetings if m.id.startswith(args.meeting)]
-        if not matching:
-            print(f"No meeting matching '{args.meeting}'.", file=sys.stderr)
-            return 1
-        meeting = matching[0]
+    meeting, err = _resolve_meeting(meetings, args.meeting, args.pod)
+    if err is not None:
+        print(err, file=sys.stderr)
+        return 1
 
     transcript = read_transcript(meeting)
     if len(transcript.strip()) < 50:
@@ -345,14 +361,10 @@ def cmd_consolidate(args) -> int:
         print(f"No meetings for pod '{args.pod}'.", file=sys.stderr)
         return 1
 
-    if args.meeting == "latest":
-        meeting = meetings[0]
-    else:
-        matching = [m for m in meetings if m.id.startswith(args.meeting)]
-        if not matching:
-            print(f"No meeting matching '{args.meeting}'.", file=sys.stderr)
-            return 1
-        meeting = matching[0]
+    meeting, err = _resolve_meeting(meetings, args.meeting, args.pod)
+    if err is not None:
+        print(err, file=sys.stderr)
+        return 1
 
     date_str = fmt_date(datetime.fromisoformat(meeting.started_at))
     enhanced_path = pod.summaries_dir_for(date_str) / f"{meeting.id}.md"
