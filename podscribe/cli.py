@@ -5,9 +5,12 @@ import argparse
 import signal
 import sys
 import time
+import wave
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+import numpy as np
 
 from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_project_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
@@ -121,6 +124,13 @@ def cmd_record(args) -> int:
     start_monotonic = time.monotonic()
     segment_count = 0
 
+    wav_writer = None
+    if args.keep_audio:
+        wav_writer = wave.open(str(meeting.audio_path), "wb")
+        wav_writer.setnchannels(1)
+        wav_writer.setsampwidth(2)
+        wav_writer.setframerate(16000)
+
     def handle_sigint(sig, frame):
         capture.stop()
 
@@ -128,6 +138,12 @@ def cmd_record(args) -> int:
 
     try:
         for audio_segment in capture.segments():
+            if wav_writer is not None:
+                try:
+                    pcm = np.clip(audio_segment * 32767, -32768, 32767).astype(np.int16)
+                    wav_writer.writeframes(pcm.tobytes())
+                except OSError as e:
+                    print(f"  ⚠ audio write failed: {e}", file=sys.stderr)
             kwargs = {}
             if glossary_prompt:
                 kwargs["initial_prompt"] = glossary_prompt
@@ -146,6 +162,8 @@ def cmd_record(args) -> int:
                 segment_count += 1
     finally:
         capture.stop()
+        if wav_writer is not None:
+            wav_writer.close()
         meeting.duration_sec = int(time.monotonic() - start_monotonic)
         meeting.ended_at = datetime.now().isoformat(timespec="seconds")
         finalize_meeting(meeting, keep_audio=args.keep_audio)

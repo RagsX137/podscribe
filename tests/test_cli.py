@@ -540,3 +540,80 @@ def test_consolidate_with_ambiguous_prefix_lists_candidates(tmp_path, monkeypatc
     captured = capsys.readouterr()
     assert "Multiple meetings match" in captured.err
 
+
+def test_cmd_record_writes_wav_with_keep_audio(tmp_path, monkeypatch):
+    """--keep-audio produces a real, replayable WAV file with the right content."""
+    import wave
+    monkeypatch.chdir(tmp_path)
+    from unittest.mock import patch, MagicMock
+    import numpy as np
+    from podscribe.storage import init_pod
+    from podscribe.cli import cmd_record, build_parser
+
+    pod = init_pod("sam-chen")
+
+    # Simulate one 0.5s segment of float32 audio at 16kHz
+    fake_segment = np.zeros(8000, dtype=np.float32)
+
+    # Mock the Transcriber to return a deterministic result
+    mock_transcriber = MagicMock()
+    mock_transcriber.model_name = "base"
+    mock_transcriber.transcribe.return_value = [{"text": "hello", "start": 0, "end": 0.5}]
+
+    mock_capture = MagicMock()
+    mock_capture.vad_aggressiveness = 2
+    mock_capture.had_overflow = False
+    mock_capture.segments.return_value = iter([fake_segment])
+    mock_capture.stop = MagicMock(side_effect=lambda: None)
+
+    with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
+        with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
+            with patch("podscribe.cli.signal.signal"):
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5]):
+                    args = build_parser().parse_args(["record", "sam-chen", "--keep-audio", "--model", "base"])
+                    rc = cmd_record(args)
+                    assert rc == 0
+
+    raw_files = list(tmp_path.glob("pods/sam-chen/transcripts/*/*.raw"))
+    assert len(raw_files) == 1
+    raw_path = raw_files[0]
+
+    with wave.open(str(raw_path), "rb") as w:
+        assert w.getnchannels() == 1
+        assert w.getsampwidth() == 2
+        assert w.getframerate() == 16000
+        frames = w.readframes(w.getnframes())
+        assert len(frames) == 8000 * 2
+
+
+def test_cmd_record_omits_audio_by_default(tmp_path, monkeypatch):
+    """Without --keep-audio, no .raw file is created."""
+    monkeypatch.chdir(tmp_path)
+    from unittest.mock import patch, MagicMock
+    import numpy as np
+    from podscribe.storage import init_pod
+    from podscribe.cli import cmd_record, build_parser
+
+    pod = init_pod("sam-chen")
+
+    fake_segment = np.zeros(8000, dtype=np.float32)
+    mock_transcriber = MagicMock()
+    mock_transcriber.model_name = "base"
+    mock_transcriber.transcribe.return_value = [{"text": "hello", "start": 0, "end": 0.5}]
+    mock_capture = MagicMock()
+    mock_capture.vad_aggressiveness = 2
+    mock_capture.had_overflow = False
+    mock_capture.segments.return_value = iter([fake_segment])
+    mock_capture.stop = MagicMock(side_effect=lambda: None)
+
+    with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
+        with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
+            with patch("podscribe.cli.signal.signal"):
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5]):
+                    args = build_parser().parse_args(["record", "sam-chen", "--model", "base"])
+                    rc = cmd_record(args)
+                    assert rc == 0
+
+    raw_files = list(tmp_path.glob("pods/sam-chen/transcripts/*/*.raw"))
+    assert raw_files == []
+
