@@ -94,6 +94,8 @@ def load_consolidate_prompt() -> str:
 
 def save_consolidate_prompt(prompt: str) -> None:
     """Save consolidate prompt to podscribe.yaml."""
+    if not prompt.strip():
+        raise ValueError("Consolidate prompt cannot be empty")
     cfg = load_project_config()
     if "consolidate" not in cfg:
         cfg["consolidate"] = {}

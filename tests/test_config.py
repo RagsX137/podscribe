@@ -203,6 +203,28 @@ def test_consolidate_prompt_loads_from_project_config(tmp_path, monkeypatch):
     assert loaded == "From file {{summary}}"
 
 
+def test_consolidate_prompt_empty_raises(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    import pytest
+    with pytest.raises(ValueError, match="cannot be empty"):
+        save_consolidate_prompt("")
+
+
+def test_consolidate_prompt_blank_raises(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    import pytest
+    with pytest.raises(ValueError, match="cannot be empty"):
+        save_consolidate_prompt("   ")
+
+
+def test_consolidate_prompt_empty_consolidate_key(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import save_project_config
+    save_project_config({"consolidate": {}})
+    prompt = load_consolidate_prompt()
+    assert "quick_summary" in prompt
+
+
 def test_consolidate_prompt_save_updates_yaml(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     save_consolidate_prompt("Saved prompt")
