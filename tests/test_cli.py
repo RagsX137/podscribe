@@ -363,3 +363,30 @@ def test_enhance_parser_has_no_latest_flag():
     with pytest.raises(SystemExit):
         parser.parse_args(["enhance", "sam-chen", "2026-06-22-1430", "--latest"])
 
+
+def test_cmd_enhance_prints_summary_path_not_transcript_path(tmp_path, monkeypatch, capsys):
+    """Misleading print: 'Saving transcript' but writes the summary."""
+    monkeypatch.chdir(tmp_path)
+    from unittest.mock import patch
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_enhance, build_parser
+
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    append_segment(meeting, Segment(1.0, 5.0, "hello world"))
+    finalize_meeting(meeting)
+
+    with patch("podscribe.cli.enhance_transcript", return_value="Enhanced output."):
+        with patch("podscribe.cli.load_project_config", return_value={
+            "llm": {"model": "qwen3.6", "prompt_template": "test"}
+        }):
+            args = build_parser().parse_args(["enhance", "sam-chen"])
+            rc = cmd_enhance(args)
+            assert rc == 0
+
+    captured = capsys.readouterr()
+    assert "Enhanced summary will be saved to" in captured.out
+    assert "Saving transcript to" not in captured.out
+

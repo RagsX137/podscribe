@@ -276,7 +276,7 @@ def cmd_enhance(args) -> int:
     enhanced_path = summary_dir / f"{meeting.id}.md"
 
     print(f"Enhancing transcript for {pod.name}/{date_str}/{meeting.id}...")
-    print(f"Saving transcript to {pod.name}/{date_str}/{meeting.id}...")
+    print(f"Enhanced summary will be saved to {pod.name}/{date_str}/{meeting.id}...")
     print(f"  Using Large Language Model: {llm_config['model']}")
     print(f"  Ollama URL: http://localhost:11434")
     print()
