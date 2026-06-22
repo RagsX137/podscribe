@@ -350,3 +350,27 @@ def test_cmd_consolidate_with_no_log(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "Test summary" in captured.out
 
+
+def test_cmd_show_empty_meeting_defaults_to_latest(tmp_path, monkeypatch, capsys):
+    """`podscribe show <pod> ""` should resolve to latest, not crash.
+
+    Regression guard: cmd_show referenced args.latest which the show
+    subparser does not define, raising AttributeError on a falsy meeting.
+    """
+    monkeypatch.chdir(tmp_path)
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_show, build_parser
+
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    append_segment(meeting, Segment(1.0, 5.0, "hello world"))
+    finalize_meeting(meeting)
+
+    args = build_parser().parse_args(["show", "sam-chen", ""])
+    rc = cmd_show(args)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "hello world" in captured.out
+

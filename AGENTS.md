@@ -96,13 +96,11 @@ xcode-select --install        # required for webrtcvad C extension
 pip install -e .              # installs all deps
 ```
 
-Declared in `pyproject.toml`: `mlx-whisper`, `webrtcvad`, `sounddevice`, `numpy`, `pyyaml`.
-**`requests`** is used by `llm.py` (enhance command) but **not declared in pyproject.toml**. Install manually if using enhance: `pip install requests`.
+Declared in `pyproject.toml`: `mlx-whisper`, `webrtcvad`, `sounddevice`, `numpy`, `pyyaml`, `requests`.
 `mlx-whisper` uses Apple MLX (no separate install). Model downloads cached automatically.
 
 ## Gotchas
 
-- **`requests` is an undeclared dependency** — needed only for `enhance` command, not core recording
 - **README is slightly stale** — mentions `pywhispercpp` but code uses `mlx-whisper` since commit `05270bf`
 - **Audio modules lazy-imported** in `cmd_record` — `audio.py` and `transcriber.py` are not loaded for non-recording commands
 - **Test isolation**: must `monkeypatch.chdir(tmp_path)` before any disk ops; tests share `tmp_path` per function
@@ -110,3 +108,13 @@ Declared in `pyproject.toml`: `mlx-whisper`, `webrtcvad`, `sounddevice`, `numpy`
 - **`.raw` audio deleted by default** on `finalize_meeting` unless `keep_audio=True`
 - **Ollama must be running** (`ollama serve`) for `enhance` command
 - **`__pycache__` dirs checked in** to source tree but gitignored
+
+## Working directory rules
+
+- **All work files must live inside this project folder.** Do not use `/tmp`, `~/Desktop`,
+  or any other path outside the project. Use `.scratch/` (gitignored) for throwaway
+  scripts and outputs. Clean up `.scratch/` when the task is done.
+- **Never commit generated data into the repo root.** Test outputs, dumps, and reviews
+  go in `.scratch/` or a feature branch.
+
+

@@ -175,7 +175,7 @@ def cmd_show(args) -> int:
     if not meetings:
         print(f"No meetings for pod '{args.pod}'.")
         return 1
-    meeting_id = args.meeting if args.meeting else ("latest" if args.latest else "latest")
+    meeting_id = args.meeting or "latest"
     if meeting_id == "latest":
         meeting = meetings[0]
     else:
