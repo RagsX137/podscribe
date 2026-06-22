@@ -62,10 +62,10 @@ def test_start_meeting_creates_files(tmp_path, monkeypatch):
     pod = init_pod("sam-chen")
     when = datetime(2026, 6, 29, 14, 30, 0)
     meeting = start_meeting(pod, when)
-    assert meeting.id == "2026-06-29-1430-sam-chen"
+    assert meeting.id == "2026-06-29-143000-sam-chen"
     assert meeting.audio_path.exists()
     date_str = fmt_date(when)
-    expected = pod.transcripts_dir_for(date_str) / "2026-06-29-1430-sam-chen.md"
+    expected = pod.transcripts_dir_for(date_str) / "2026-06-29-143000-sam-chen.md"
     assert meeting.transcript_path == expected
 
 
@@ -102,7 +102,7 @@ def test_finalize_writes_metadata(tmp_path, monkeypatch):
     data = json.loads(meeting.metadata_path.read_text())
     assert data["pod_name"] == "sam-chen"
     assert data["duration_sec"] == 600
-    assert data["id"] == "2026-06-29-1430-sam-chen"
+    assert data["id"] == "2026-06-29-143000-sam-chen"
 
 
 def test_finalize_deletes_audio_by_default(tmp_path, monkeypatch):
@@ -155,11 +155,11 @@ def test_list_meetings_sorts_chronologically_across_months(tmp_path, monkeypatch
     meetings = list_meetings(pod)
     ids = [m.id for m in meetings]
     expected = [
-        "2026-12-31-1000-sam-chen",
-        "2026-07-01-1000-sam-chen",
-        "2026-06-22-1000-sam-chen",
-        "2026-01-22-1000-sam-chen",
-        "2026-01-09-1000-sam-chen",
+        "2026-12-31-100000-sam-chen",
+        "2026-07-01-100000-sam-chen",
+        "2026-06-22-100000-sam-chen",
+        "2026-01-22-100000-sam-chen",
+        "2026-01-09-100000-sam-chen",
     ]
     assert ids == expected
 

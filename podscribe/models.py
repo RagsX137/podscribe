@@ -23,9 +23,9 @@ def validate_pod_name(name: str) -> None:
 
 
 def make_meeting_id(pod_name: str, when: Optional[datetime] = None) -> str:
-    """Generate a deterministic meeting ID: YYYY-MM-DD-HHMM-<pod-name>."""
+    """Generate a deterministic meeting ID: YYYY-MM-DD-HHMMSS-<pod-name>."""
     when = when or datetime.now()
-    return when.strftime("%Y-%m-%d-%H%M-") + pod_name
+    return when.strftime("%Y-%m-%d-%H%M%S-") + pod_name
 
 
 def fmt_date(when: datetime) -> str:

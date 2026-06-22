@@ -56,19 +56,19 @@ class TestValidatePodName:
 
 class TestMakeMeetingId:
     def test_format(self):
-        when = datetime(2026, 6, 29, 14, 30, 0)
-        assert make_meeting_id("sam-chen", when) == "2026-06-29-1430-sam-chen"
+        when = datetime(2026, 6, 29, 14, 30, 12)
+        assert make_meeting_id("sam-chen", when) == "2026-06-29-143012-sam-chen"
 
     def test_format_single_digit_hour(self):
-        when = datetime(2026, 6, 29, 9, 5, 0)
-        assert make_meeting_id("alex", when) == "2026-06-29-0905-alex"
+        when = datetime(2026, 6, 29, 9, 5, 7)
+        assert make_meeting_id("alex", when) == "2026-06-29-090507-alex"
 
     def test_default_time(self):
         mid = make_meeting_id("sam-chen")
         assert mid.endswith("-sam-chen")
-        # Date prefix should be 16 chars: YYYY-MM-DD-HHMM-
+        # Date prefix should be 18 chars: YYYY-MM-DD-HHMMSS-
         assert mid.startswith("20")  # year prefix
-        assert len(mid) == 16 + len("sam-chen")
+        assert len(mid) == 18 + len("sam-chen")
 
 
 class TestPod:

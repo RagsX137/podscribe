@@ -493,8 +493,8 @@ def test_show_with_ambiguous_prefix_lists_candidates(tmp_path, monkeypatch, caps
     assert rc == 1
     captured = capsys.readouterr()
     assert "Multiple meetings match" in captured.err
-    assert "2026-06-22-1430-sam-chen" in captured.err
-    assert "2026-06-22-1431-sam-chen" in captured.err
+    assert "2026-06-22-143000-sam-chen" in captured.err
+    assert "2026-06-22-143100-sam-chen" in captured.err
 
 
 def test_enhance_with_ambiguous_prefix_lists_candidates(tmp_path, monkeypatch, capsys):
