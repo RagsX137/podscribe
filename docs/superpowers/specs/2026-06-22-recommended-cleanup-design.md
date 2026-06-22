@@ -17,7 +17,7 @@ gemma4 is "garbage" and Qwen is worth the wait.
 
 | # | Review § | Fix | Files |
 |---|---|---|---|
-| 1 | §1.1 | `--keep-audio` actually writes int16 PCM to `.raw` (WAV format) | `cli.py`, `podscribe/audio.py` (signatures), `pyproject.toml` |
+| 1 | §1.1 | `--keep-audio` actually writes int16 PCM to `.raw` (WAV format) | `cli.py` |
 | 2 | §1.2 | Meeting ID: `HHMM` → `HHMMSS` | `podscribe/models.py` |
 | 3 | §1.3 | `preserve_speakers` toggle in LLM config | `podscribe/llm.py`, `podscribe/config.py`, `podscribe.yaml` |
 | 4 | §1.4 | Fix misleading "Saving transcript" print | `podscribe/cli.py` |
@@ -121,6 +121,11 @@ llm:
 
 **Resolution order:** pod-level `llm.preserve_speakers` > project-level
 `podscribe.yaml` `llm.preserve_speakers` > default `true`.
+
+**Validation:** the config loader must reject non-boolean values (e.g. a string
+"yes" or an int 1) with a clear error. Use `isinstance(value, bool)` after
+`yaml.safe_load`; if not a bool, raise a `ConfigError` pointing at the
+offending key.
 
 **Behavior** (in `llm.py:build_enhance_prompt`): when `preserve_speakers` is
 true, prepend this fixed preamble to the template before the existing glossary
@@ -228,8 +233,11 @@ First-seen casing is preserved (we only append, never overwrite).
 `stream: true`. New dependency: `tqdm>=4.64` (added to `pyproject.toml` and
 `requirements.txt`).
 
-**Public signature:** unchanged. Returns `Optional[str]`. Stats are printed
-internally to stderr.
+**Public signature change:** `enhance_transcript(model, prompt, *, max_retries=3, show_progress=True)`.
+The old `timeout` kwarg is removed (now hardcoded to 1800s, but no longer
+overridable — we never want a shorter timeout). Returns `Optional[str]`.
+Stats are printed internally to stderr. No caller changes required at the
+call-site level (all kwargs are new with defaults).
 
 **Behavior:**
 
@@ -334,13 +342,12 @@ def make_streaming_response(chunks, final_stats=None):
     resp = MagicMock()
     resp.raise_for_status = MagicMock()
     resp.iter_lines = MagicMock(return_value=iter(lines))
-    resp.__enter__ = MagicMock(return_value=resp)
-    resp.__exit__ = MagicMock(return_value=False)
     return resp
 ```
 
-**Test count:** 124 passing → ~140 passing. The `base.en` smoke test gets a
-trivial one-line fix; net new ≈ 16 tests.
+**Test count:** 124 passing → ~146 passing. The `base.en` smoke test gets a
+trivial one-line fix; the `meeting_id_format` test is updated in place; net
+new ≈ 22 tests.
 
 ## Documentation
 
