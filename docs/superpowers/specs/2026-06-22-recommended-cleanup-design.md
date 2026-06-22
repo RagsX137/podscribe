@@ -122,10 +122,17 @@ llm:
 **Resolution order:** pod-level `llm.preserve_speakers` > project-level
 `podscribe.yaml` `llm.preserve_speakers` > default `true`.
 
+**Pod-level key location:** lives under the pod's existing `llm:` map
+(`pods/<name>/config.yaml`), parallel to the project-level key. If a pod
+config has no `llm:` section at all (the common case today — AGENTS.md says
+the pod-level `llm` section is optional), the key is simply absent and
+resolution falls through to the project-level value, then to the default.
+
 **Validation:** the config loader must reject non-boolean values (e.g. a string
 "yes" or an int 1) with a clear error. Use `isinstance(value, bool)` after
 `yaml.safe_load`; if not a bool, raise a `ConfigError` pointing at the
-offending key.
+offending key. `bool(value)` coercion is **not** acceptable — `bool(1)` is
+`True` and `bool("no")` is `True`, so coercion would silently accept junk.
 
 **Behavior** (in `llm.py:build_enhance_prompt`): when `preserve_speakers` is
 true, prepend this fixed preamble to the template before the existing glossary
@@ -191,10 +198,14 @@ if not summary_path.exists():
 
 ### 8. Remove dead `--latest` flag (§2.4)
 
-Delete `add_argument("--latest", "-l", ...)` from the enhance and consolidate
-subparsers. `args.meeting` already defaults to `"latest"`. The show subparser
-was already fixed in the in-flight commit (it was reading `args.latest` which
-didn't exist on the show parser).
+Delete `add_argument("--latest", "-l", ...)` from the **enhance** subparser
+only. `args.meeting` already defaults to `"latest"`. The consolidate subparser
+does not have a `--latest` flag — it has `--no-log` / `-n` (podscribe/cli.py:504)
+which is unrelated and stays as-is.
+
+The show subparser bug it implies is the `args.latest` `AttributeError` that
+the in-flight pre-requisite change #2 fixes (see "Pre-requisite" section
+above).
 
 ### 9. Case-insensitive glossary dedup (§2.5)
 
@@ -236,8 +247,14 @@ First-seen casing is preserved (we only append, never overwrite).
 **Public signature change:** `enhance_transcript(model, prompt, *, max_retries=3, show_progress=True)`.
 The old `timeout` kwarg is removed (now hardcoded to 1800s, but no longer
 overridable — we never want a shorter timeout). Returns `Optional[str]`.
-Stats are printed internally to stderr. No caller changes required at the
-call-site level (all kwargs are new with defaults).
+Stats are printed internally to stderr.
+
+**Caller impact:** removing `timeout` is technically a public-signature break.
+The only current caller, `cmd_enhance` (podscribe/cli.py:284), calls
+`enhance_transcript(llm_config["model"], prompt)` with no kwargs, so no
+call-site change is needed today. Anyone with external scripts or tests
+passing `timeout=...` would need to drop it (and would already be aware of
+the function's behavior). No test currently passes `timeout=`.
 
 **Behavior:**
 
@@ -279,7 +296,7 @@ Only `README.md`. No new sections, no rewrite. Specific edits:
 |---|---|
 | Model section | `pywhispercpp` → `mlx-whisper`. Note: "Models download automatically from HuggingFace on first use." |
 | `--model` flag docs | Default `large-v3-turbo` (was `large-v3`). Add short-name → HF-path table. |
-| Tests section | "45 unit tests" → "124 unit tests, all offline". Add note that the smoke test requires `mlx-whisper` + network. |
+| Tests section | "45 unit tests" → "126 offline unit tests + 1 smoke test requiring network". Add note that the smoke test requires `mlx-whisper` + network and is skipped with `-k "not transcriber"`. |
 | Storage layout | Replace flat `pods/<name>/transcripts/YYYY-MM-DD-HHMM-<pod>.md` with the actual two-level layout: `pods/<name>/transcripts/DD-MMM-YYYY/<meeting-id>.md` plus `summaries/` and `meetings.csv`. |
 | Commands | Add `consolidate`, `cons` alias, `config consolidate show|set`. |
 | LLM section | Mention Ollama requirement, default Qwen 27B, document `preserve_speakers` toggle. |
@@ -291,7 +308,7 @@ Only `README.md`. No new sections, no rewrite. Specific edits:
 | Failure mode | Behavior |
 |---|---|
 | §1.1 audio write fails | `try/except` around `wav_writer.writeframes`, warn to stderr, continue recording. |
-| §1.3 unknown `preserve_speakers` value | `bool(value)` coercion in config loader; raise on non-coercible. |
+| §1.3 unknown `preserve_speakers` value | Strict `isinstance(value, bool)` check in config loader; raise `ConfigError` on anything else (e.g. `1`, `"yes"`, `null`). |
 | §2.1 ambiguous prefix | Print candidates + return 1 (no further action). |
 | §2.2 short transcript | Return 1, no LLM call (saves 3-10 min). |
 | §2.3 missing summary | Return 1 with exact `enhance` command to run. |
@@ -345,15 +362,16 @@ def make_streaming_response(chunks, final_stats=None):
     return resp
 ```
 
-**Test count:** 124 passing → ~146 passing. The `base.en` smoke test gets a
-trivial one-line fix; the `meeting_id_format` test is updated in place; net
-new ≈ 22 tests.
+**Test count:** 127 collected today (126 offline + 1 network smoke test) →
+~149 after this PR lands. The `base.en` smoke test gets a trivial one-line
+fix; the `meeting_id_format` test is updated in place; net new ≈ 22 tests.
 
 ## Documentation
 
 `README.md` updates per §3.6 table above. `KT-HANDOFF.md` left as-is (user
-choice). `AGENTS.md` does not need changes — the in-flight commit already
-added the `requests` declaration and cleaned up the gotcha section.
+choice). `AGENTS.md` does not need additional changes — the in-flight
+pre-requisite change #1 already declares `requests` and cleans up the
+"undeclared dependency" gotcha.
 
 ## Sequencing (commit order)
 
