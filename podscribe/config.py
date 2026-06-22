@@ -1,4 +1,4 @@
-"""Pod and project configuration: load and save config.yaml."""
+"""Pod, project, and leadership configuration: load/save YAML configs."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,6 +8,7 @@ import yaml
 from .models import Pod
 
 PROJECT_CONFIG_PATH = Path("podscribe.yaml")
+LEADERSHIP_CONFIG_PATH = Path("leadership_team.yaml")
 
 
 def save_pod_config(pod: Pod) -> None:
@@ -60,3 +61,22 @@ def save_project_config(data: dict) -> None:
     """Save project-level config to podscribe.yaml."""
     with PROJECT_CONFIG_PATH.open("w") as f:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+
+
+def load_leadership_glossary() -> list:
+    """Load global glossary from leadership_team.yaml."""
+    if not LEADERSHIP_CONFIG_PATH.exists():
+        return []
+    with LEADERSHIP_CONFIG_PATH.open() as f:
+        data = yaml.safe_load(f) or {}
+    return data.get("glossary") or []
+
+
+def get_effective_glossary(pod: Pod) -> list:
+    """Merge leadership-team glossary with pod-specific glossary.
+
+    Leadership terms come first, then pod-specific terms.
+    """
+    leadership = load_leadership_glossary()
+    pod_terms = pod.glossary or []
+    return leadership + pod_terms

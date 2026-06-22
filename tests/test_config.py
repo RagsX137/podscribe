@@ -4,7 +4,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from podscribe.config import load_pod_config, save_pod_config, load_project_config, save_project_config
+from podscribe.config import (
+    get_effective_glossary,
+    load_leadership_glossary,
+    load_pod_config,
+    load_project_config,
+    save_pod_config,
+    save_project_config,
+)
 from podscribe.models import Pod
 
 
@@ -92,3 +99,73 @@ def test_project_config_missing_returns_empty(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     loaded = load_project_config()
     assert loaded == {}
+
+
+def test_load_leadership_glossary_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert load_leadership_glossary() == []
+
+
+def test_load_leadership_glossary_empty(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "leadership_team.yaml").write_text("glossary: []\n")
+    assert load_leadership_glossary() == []
+
+
+def test_load_leadership_glossary_with_entries(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "leadership_team.yaml").write_text(
+        "glossary:\n"
+        "  - term: CEO Name\n"
+        "    category: person\n"
+        "  - term: Big Project\n"
+        "    category: project\n"
+    )
+    glossary = load_leadership_glossary()
+    assert len(glossary) == 2
+    assert glossary[0]["term"] == "CEO Name"
+    assert glossary[1]["category"] == "project"
+
+
+def test_get_effective_glossary_leadership_only(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "leadership_team.yaml").write_text(
+        "glossary:\n"
+        "  - term: CEO Name\n"
+        "    category: person\n"
+    )
+    pod = Pod(name="sam-chen", base_path=tmp_path / "pods" / "sam-chen")
+    merged = get_effective_glossary(pod)
+    assert len(merged) == 1
+    assert merged[0]["term"] == "CEO Name"
+
+
+def test_get_effective_glossary_both_layers(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "leadership_team.yaml").write_text(
+        "glossary:\n"
+        "  - term: CEO Name\n"
+        "    category: person\n"
+    )
+    pod = Pod(
+        name="sam-chen",
+        glossary=[{"term": "Sam Chen", "category": "person"}],
+        base_path=tmp_path / "pods" / "sam-chen",
+    )
+    merged = get_effective_glossary(pod)
+    assert len(merged) == 2
+    # leadership comes first
+    assert merged[0]["term"] == "CEO Name"
+    assert merged[1]["term"] == "Sam Chen"
+
+
+def test_get_effective_glossary_no_leadership(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = Pod(
+        name="sam-chen",
+        glossary=[{"term": "Sam Chen", "category": "person"}],
+        base_path=tmp_path / "pods" / "sam-chen",
+    )
+    merged = get_effective_glossary(pod)
+    assert len(merged) == 1
+    assert merged[0]["term"] == "Sam Chen"

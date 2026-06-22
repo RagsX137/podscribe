@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .config import load_project_config, save_project_config
+from .config import get_effective_glossary, load_leadership_glossary, load_project_config, save_project_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .llm import build_enhance_prompt, enhance_transcript
 from .models import Segment, fmt_date
@@ -61,7 +61,8 @@ def cmd_record(args) -> int:
         return 1
 
     pod = load_pod(args.pod)
-    glossary_prompt = format_glossary_prompt(pod.glossary) if pod.glossary else None
+    effective_glossary = get_effective_glossary(pod)
+    glossary_prompt = format_glossary_prompt(effective_glossary) if effective_glossary else None
     meeting = start_meeting(pod)
     transcriber = Transcriber(model=args.model)
     capture = AudioCapture(
@@ -210,13 +211,22 @@ def cmd_context_list(args) -> int:
         print(f"No pod '{args.pod}'.", file=sys.stderr)
         return 1
     pod = load_pod(args.pod)
-    if not pod.glossary:
+    leadership = load_leadership_glossary()
+    effective = get_effective_glossary(pod)
+    if not effective:
         print(f"No glossary entries for pod '{args.pod}'.")
         return 0
     print(f"Glossary for {pod.name} ({pod.display_name}):")
-    for entry in pod.glossary:
-        cat = f" ({entry['category']})" if entry.get("category") else ""
-        print(f"  • {entry['term']}{cat}")
+    if leadership:
+        print("  [leadership team — all pods]")
+        for entry in leadership:
+            cat = f" ({entry['category']})" if entry.get("category") else ""
+            print(f"  • {entry['term']}{cat}")
+    if pod.glossary:
+        print(f"  [pod-specific — {pod.name}]")
+        for entry in pod.glossary:
+            cat = f" ({entry['category']})" if entry.get("category") else ""
+            print(f"  • {entry['term']}{cat}")
     return 0
 
 
@@ -252,8 +262,9 @@ def cmd_enhance(args) -> int:
         meeting = matching[0]
 
     transcript = read_transcript(meeting)
+    effective_glossary = get_effective_glossary(pod)
     prompt = build_enhance_prompt(
-        llm_config["prompt_template"], pod.glossary, transcript
+        llm_config["prompt_template"], effective_glossary, transcript
     )
 
     date_str = fmt_date(datetime.fromisoformat(meeting.started_at))

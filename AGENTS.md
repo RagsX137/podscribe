@@ -15,7 +15,7 @@ podscribe/
 ├── transcriber.py  — mlx_whisper.transcribe wrapper (Apple MLX)
 ├── storage.py      — pods/<name>/ per pod, transcripts .md/.json, raw .raw (deleted by default)
 ├── models.py       — Pod, Meeting, Segment dataclasses + ID/name helpers
-├── config.py       — load/save pod config.yaml + project podscribe.yaml
+├── config.py       — load/save pod config.yaml + project podscribe.yaml + leadership_team.yaml
 ├── glossary.py     — glossary add/remove/format for Whisper initial_prompt
 └── llm.py          — requests-based Ollama client (enhance command)
 ```
@@ -36,7 +36,7 @@ podscribe/
 | `record` | `--model` (default `base`), `--vad-aggressiveness` 0-3, `--device`, `--keep-audio`; Ctrl+C to stop; audio lazy-imported |
 | `list` | Lists pods + meetings newest-first |
 | `show <pod> <id-prefix\|latest>` | Reads from `.md` transcript file |
-| `context` | Subcommands: `add`, `remove`, `list`; stored in per-pod `config.yaml` glossary |
+| `context` | Subcommands: `add`, `remove`, `list`; glossary merged from `leadership_team.yaml` + per-pod `config.yaml` |
 | `enhance` | Requires Ollama at localhost:11434 + `llm` section in pod or project config |
 | `config llm {show\|set}` | Project-level LLM config in `podscribe.yaml` (repo root) |
 
@@ -52,8 +52,10 @@ podscribe/
 ## Storage layout
 
 ```
+leadership_team.yaml                       — global glossary (repo root)
+podscribe.yaml                             — project LLM config (repo root)
 pods/<name>/
-├── config.yaml                            — pod metadata, glossary, llm config
+├── config.yaml                            — pod metadata, pod-specific glossary, optional llm
 └── <DD-MMM-YYYY>/
     ├── transcripts/
     │   ├── <meeting-id>.md                — incremental transcript (one timestamped line per segment)
@@ -67,10 +69,12 @@ Transcript format: `# Meeting: <id>` header, then `[HH:MM:SS] text` lines, appen
 
 ## Config
 
-Two config layers:
-- **Per-pod**: `pods/<name>/config.yaml` — hand-editable YAML with `glossary` and `llm` sections
+Three config layers:
+- **Leadership team**: `leadership_team.yaml` at repo root — global glossary entries (names, projects) that apply across all pods
+- **Per-pod**: `pods/<name>/config.yaml` — pod-specific glossary, metadata, optional `llm` section
 - **Project-level**: `podscribe.yaml` at repo root — `llm` section used as fallback when pod has none
 
+Effective glossary (used during record/enhance) = `leadership_team.yaml` terms + per-pod `config.yaml` terms.
 Glossary `initial_prompt` format: `"Please transcribe the following names and project names correctly: <terms>."`
 
 ## Tests
