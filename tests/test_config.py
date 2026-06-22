@@ -6,9 +6,11 @@ import yaml
 
 from podscribe.config import (
     get_effective_glossary,
+    load_consolidate_prompt,
     load_leadership_glossary,
     load_pod_config,
     load_project_config,
+    save_consolidate_prompt,
     save_pod_config,
     save_project_config,
 )
@@ -169,3 +171,41 @@ def test_get_effective_glossary_no_leadership(tmp_path, monkeypatch):
     merged = get_effective_glossary(pod)
     assert len(merged) == 1
     assert merged[0]["term"] == "Sam Chen"
+
+
+def test_consolidate_prompt_default_fallback(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt = load_consolidate_prompt()
+    assert "quick_summary" in prompt
+    assert "action_items" in prompt
+
+
+def test_consolidate_prompt_save_and_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    save_consolidate_prompt("Custom prompt {{summary}}")
+    loaded = load_consolidate_prompt()
+    assert loaded == "Custom prompt {{summary}}"
+
+
+def test_consolidate_prompt_overwrites(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    save_consolidate_prompt("First prompt")
+    save_consolidate_prompt("Second prompt")
+    loaded = load_consolidate_prompt()
+    assert loaded == "Second prompt"
+
+
+def test_consolidate_prompt_loads_from_project_config(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import save_project_config
+    save_project_config({"consolidate": {"prompt": "From file {{summary}}"}})
+    loaded = load_consolidate_prompt()
+    assert loaded == "From file {{summary}}"
+
+
+def test_consolidate_prompt_save_updates_yaml(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    save_consolidate_prompt("Saved prompt")
+    from podscribe.config import load_project_config
+    cfg = load_project_config()
+    assert cfg["consolidate"]["prompt"] == "Saved prompt"

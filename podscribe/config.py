@@ -72,6 +72,35 @@ def load_leadership_glossary() -> list:
     return data.get("glossary") or []
 
 
+CONSOLIDATE_PROMPT_DEFAULT = """Given the following enhanced meeting summary, extract structured information.
+
+Return ONLY valid YAML with these fields:
+- quick_summary: One-sentence summary of the meeting
+- key_topics: Bullet list of topics discussed
+- action_items: List of things the manager needs to follow up on
+- blockers: List of any blockers or concerns raised
+- next_steps: List of plans for next meeting
+
+Enhanced summary:
+{{summary}}"""
+
+
+def load_consolidate_prompt() -> str:
+    """Load consolidate prompt from podscribe.yaml, or return default."""
+    cfg = load_project_config()
+    prompt = cfg.get("consolidate", {}).get("prompt")
+    return prompt if prompt else CONSOLIDATE_PROMPT_DEFAULT
+
+
+def save_consolidate_prompt(prompt: str) -> None:
+    """Save consolidate prompt to podscribe.yaml."""
+    cfg = load_project_config()
+    if "consolidate" not in cfg:
+        cfg["consolidate"] = {}
+    cfg["consolidate"]["prompt"] = prompt
+    save_project_config(cfg)
+
+
 def get_effective_glossary(pod: Pod) -> list:
     """Merge leadership-team glossary with pod-specific glossary.
 
