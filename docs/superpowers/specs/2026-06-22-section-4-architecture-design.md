@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-22
 **Status:** Approved
-**Branch:** `feature/section-4-architecture` (off `main` after `fix/recommended-cleanup` lands)
+**Branch:** `fix/recommended-fixes-architecture` (off `main` after `fix/recommended-cleanup` lands)
 **Source review:** `Recommended_fixes.md` §4 (root of repo)
 **Scope:** All 7 findings (4.1 – 4.7) in a single PR.
 
@@ -21,7 +21,7 @@ and `Path` are stdlib; `rg` is optional with a Python fallback).
 | 4.1 refactor | Narrow: helper returns `(text, err)`; caller picks the path |
 | 4.2 list filters | `cmd list` gains `--all`, `--since`, `--recent`, `--type` |
 | 4.3 global CSV | Project-root `pods/meetings.csv`, written alongside per-pod CSV |
-| 4.4 cache | mtime check on every get; key includes pod.glossary snapshot |
+| 4.4 cache | mtime check on every get; key = `(mtime, id(pod.glossary), len(pod.glossary))` |
 | 4.5 storage layout | Additive optional subdir; unspecified = no subdir |
 | 4.5 type values | Fixed enum (7 values) validated at record time |
 | 4.6 search output | `pod-name:DD-MMM-YYYY:<meeting-id>:[HH:MM:SS]:<line-text>` |
@@ -55,9 +55,7 @@ reachability-check pattern. Extract it.
 **Signature:**
 
 ```python
-def _run_enhance(
-    pod: Pod, meeting: Meeting, prompt: str, model: str,
-) -> tuple[Optional[str], Optional[str]]:
+def _run_enhance(prompt: str, model: str) -> tuple[Optional[str], Optional[str]]:
     """Run LLM enhance. Returns (text, None) on success, (None, error) on failure.
 
     The error string is what gets printed to stderr; it owns the Ollama-
@@ -74,7 +72,7 @@ def _run_enhance(
 `cmd_enhance` after the prompt-build:
 
 ```python
-text, err = _run_enhance(pod, meeting, prompt, llm_config["model"])
+text, err = _run_enhance(prompt, llm_config["model"])
 if err is not None:
     print(err, file=sys.stderr)
     return 1
@@ -89,7 +87,7 @@ return 0
 `cmd_consolidate` after the prompt-build:
 
 ```python
-text, err = _run_enhance(pod, meeting, prompt, model_name)
+text, err = _run_enhance(prompt, model_name)
 if err is not None:
     print(err, file=sys.stderr)
     return 1
@@ -143,16 +141,19 @@ def _read_effective_glossary(pod: Pod) -> list:
 ```
 
 **Why `id(pod.glossary)` + `len()`:** `pod.glossary` is a list that may be
-mutated in place (e.g. `add_entry` appends). `id()` catches reference
-changes (e.g. `pod.glossary = new_list`); `len()` is a cheap sanity check
-for in-place mutation. The full correctness invariant is that any
-mutation of `pod.glossary` either goes through the same `Pod` object (in
-which case `id()` matches and the cache is still valid) or replaces the
-list (in which case `id()` differs and the cache invalidates).
+mutated in place (e.g. `add_entry` appends, `remove_entry` pops). `id()`
+catches reference replacement (e.g. `pod.glossary = new_list`); `len()`
+catches in-place append/remove. Both components are needed: `id()` alone
+misses in-place mutation; `len()` alone misses a same-length replacement.
 
-**`save_pod_config` is a no-op for invalidation** because the cached value
-includes `pod.glossary` directly, not a serialised snapshot. If the caller
-mutates the list and writes to disk, the cache is still correct.
+This is correct for the `add_entry`/`remove_entry` mutation paths (the
+only ones the codebase uses). Indexed assignment (`pod.glossary[0] = ...`)
+would not invalidate the cache, but no code path does this.
+
+**`save_pod_config` is a no-op for invalidation** because the cache key
+is derived from the in-memory `pod.glossary` object, not the on-disk
+state. If the caller mutates the list and writes to disk, the cache key
+already reflects the mutation.
 
 **`stat()` is sub-microsecond on macOS.** The per-segment hit during record
 is now: 1 stat + 1 dict comparison + 1 list copy instead of a file read.
@@ -271,7 +272,16 @@ them. `cmd_show` doesn't care.
 **File:** `podscribe/storage.py` (additions)
 
 **Path:** `pods/meetings.csv` (project root, alongside `podscribe.yaml`).
-Same schema as the per-pod file (`storage.py:CSV_COLUMNS`).
+Same schema as the per-pod file (`storage.py:CSV_COLUMNS`), enriched with
+four new columns to support §5 team-digest commands.
+
+**CSV schema enrichment:** `CSV_COLUMNS` gains `pod_name`, `type`,
+`started_at`, and `duration_sec` (appended after the existing columns).
+`cmd_consolidate` populates them from the `Meeting` object already in
+scope (`meeting.type`, `pod.name`, `meeting.started_at`,
+`meeting.duration_sec`). Existing CSV files without these columns are
+forward-compatible: `csv.DictReader` returns `None` or `""` for missing
+columns in old rows.
 
 **Writer additions:**
 
@@ -334,8 +344,11 @@ scope). The global row may briefly disagree with the per-pod row until
 the next consolidate run for that meeting; this matches the existing
 "eventually consistent" posture of the system.
 
-**`list --all` mode** (4.2) reads `read_global_log()` instead of scanning
-per-pod CSVs.
+**Not consumed by `list` in this PR:** The global CSV is infrastructure
+for §5 team-digest commands. `list --all` (4.2) reads JSON sidecars via
+`list_meetings()`, which has all fields (including `type` after 4.5) and
+covers freshly-recorded meetings that haven't been consolidated yet. The
+global CSV only contains consolidated meetings.
 
 ---
 
@@ -359,7 +372,7 @@ podscribe list [<pod>] [--all] [--since 7d|YYYY-MM-DD] [--recent N] [--type <typ
 - `--recent N`: limit to N most recent
 - `--type TYPE`: filter to one meeting type (uses 4.5 enum)
 
-**Output:** markdown table.
+**Output:** fixed-width text table, sorted newest-first by `started_at`.
 
 ```
 POD              TYPE       DATE          MEETING ID                          DURATION
@@ -367,31 +380,51 @@ sam-chen         1on1       22-JUN-2026   2026-06-22-143012-sam-chen          00
 priya-rao        retro      21-JUN-2026   2026-06-21-094512-priya-rao         00:18:02
 ```
 
-**Backend:**
+**Backend:** `list_meetings()` (JSON sidecars) for all modes — same data
+source as the current `cmd_list`. This preserves the existing behavior of
+showing freshly-recorded meetings (not just consolidated ones). The global
+CSV from 4.3 is NOT used by `list`; it is infrastructure for §5.
 
 ```python
 def cmd_list(args) -> int:
-    if args.all or args.pod is None:
-        rows = read_global_log()
+    pods_dir = Path("pods")
+    if not pods_dir.exists():
+        print("(no pods)")
+        return 0
+
+    if args.pod:
+        pod_names = [args.pod]
     else:
-        rows = _read_pod_log(args.pod)
+        pod_names = sorted(p.name for p in pods_dir.iterdir() if p.is_dir())
+
+    meetings = []
+    for pod_name in pod_names:
+        try:
+            pod = load_pod(pod_name)
+            meetings.extend(list_meetings(pod))
+        except Exception:
+            continue
+
     # Apply filters
     if args.since:
         cutoff = _parse_since(args.since)  # datetime
-        rows = [r for r in rows if _csv_date(r["date"]) >= cutoff.date()]
+        meetings = [m for m in meetings
+                    if datetime.fromisoformat(m.started_at) >= cutoff]
     if args.type:
         try:
             valid_type = parse_meeting_type(args.type)
         except ValueError as e:
             print(str(e), file=sys.stderr)
             return 1
-        rows = [r for r in rows if r.get("type") == valid_type]
+        meetings = [m for m in meetings if m.type == valid_type]
+    # Sort newest-first (global, across all pods)
+    meetings.sort(key=lambda m: m.started_at, reverse=True)
     if args.recent:
-        rows = rows[:args.recent]
-    if not rows:
+        meetings = meetings[:args.recent]
+    if not meetings:
         print("(no meetings)")
         return 0
-    # print markdown table
+    # print fixed-width table
     ...
 ```
 
@@ -399,9 +432,43 @@ def cmd_list(args) -> int:
 - `7d`, `24h`, `30m` → duration string parsed by a small helper
 - `2026-06-15` → ISO date
 
-**Edge case:** global CSV is empty (no consolidates yet). `list --all`
-prints `(no meetings)` and returns 0. The per-pod fallback for
-`list <pod>` still works (reads `pods/<pod>/meetings.csv`).
+```python
+def _parse_since(s: str) -> datetime:
+    """Parse --since: duration (7d, 24h, 30m) or ISO date (2026-06-15).
+    Returns the cutoff datetime. Raises ValueError on unparseable input.
+    """
+    s = s.strip()
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        pass
+    m = re.match(r"^(\d+)([dhm])$", s)
+    if not m:
+        raise ValueError(
+            f"Invalid --since '{s}'. Use durations (7d, 24h, 30m) "
+            f"or ISO date (2026-06-15)."
+        )
+    n = int(m.group(1))
+    unit = m.group(2)
+    delta = {"d": timedelta(days=n), "h": timedelta(hours=n),
+             "m": timedelta(minutes=n)}[unit]
+    return datetime.now() - delta
+```
+
+`cmd_list` calls `_parse_since` in a try/except; on `ValueError`, prints
+the error and returns 1.
+
+**Edge cases:**
+
+| Case | Behavior |
+|---|---|
+| No pods exist | Prints `(no pods)`, returns 0 |
+| Pod has no meetings | Prints `(no meetings)`, returns 0 |
+| `--since` with no matches | Prints `(no meetings)`, returns 0 |
+| `--type` with no matches | Prints `(no meetings)`, returns 0 |
+| Invalid `--since` value | Prints error, returns 1 |
+| Invalid `--type` value | `parse_meeting_type` raises; prints error, returns 1 |
+| Pod directory can't load | Silently skipped (existing behavior) |
 
 ---
 
@@ -480,7 +547,7 @@ attached to a terminal and the user didn't explicitly pass `--color` /
 | File is undecodable | Skip with a warning to stderr; continue |
 | Path has 3 levels but `--type` not set | Include the file (typed meetings are still searchable) |
 | Path has 2 levels and `--type 1on1` set | Exclude the file (no type set → can't match) |
-| `--since 7d` and file has no `started_at` | Use file mtime as a fallback for date filter |
+| `--since 7d` and filename doesn't start with a date | Skip file (can't determine date) |
 | Empty result | Print `No matches.` and return 0 |
 
 ---
@@ -553,11 +620,14 @@ def import_archive(
     """
     pods_in_tar = set()
     other_members = []
+    cwd_resolved = Path.cwd().resolve()
+    cwd_str = str(cwd_resolved)
     with tarfile.open(archive_path, "r:gz") as tar:
         for member in tar.getmembers():
-            # Path-traversal check
-            target = (Path.cwd() / member.name).resolve()
-            if not str(target).startswith(str(Path.cwd().resolve())):
+            # Path-traversal check (prefix + os.sep prevents /Users/foo matching /Users/fooevil)
+            target = (cwd_resolved / member.name).resolve()
+            target_str = str(target)
+            if not (target_str == cwd_str or target_str.startswith(cwd_str + os.sep)):
                 raise ValueError(f"Unsafe path in tarball: {member.name}")
             # Categorize
             parts = Path(member.name).parts
@@ -583,26 +653,38 @@ def import_archive(
             print(f"Would also import: {[m.name for m in other_members]}")
         return 0
 
-    # Extract
+    # Extract — skip root-level podscribe.yaml (project config is not migrated)
     with tarfile.open(archive_path, "r:gz") as tar:
-        _safe_extract(tar, path=Path.cwd())
+        members = []
+        for member in tar.getmembers():
+            p = Path(member.name)
+            if p.name == "podscribe.yaml" and len(p.parts) == 1:
+                print(f"  Note: skipping {member.name} (project config not overwritten)",
+                      file=sys.stderr)
+                continue
+            members.append(member)
+        _safe_extract(tar, path=Path.cwd(), members=members)
     print(f"Imported: {sorted(pods_in_tar)}")
     return 0
 
 
-def _safe_extract(tar: tarfile.TarFile, path: Path = Path(".")) -> None:
-    """Extract every member with a path-traversal check.
+def _safe_extract(
+    tar: tarfile.TarFile, path: Path, members: list,
+) -> None:
+    """Extract specific members with a path-traversal check.
 
     Python 3.12 added `tar.extractall(filter="data")` for this purpose,
     but the project supports Python 3.10+. This function is the manual
     equivalent and works on all supported versions.
     """
     cwd_resolved = path.resolve()
-    for member in tar.getmembers():
+    cwd_str = str(cwd_resolved)
+    for member in members:
         target = (path / member.name).resolve()
-        if not str(target).startswith(str(cwd_resolved) + sep) and target != cwd_resolved:
+        target_str = str(target)
+        if not (target_str == cwd_str or target_str.startswith(cwd_str + os.sep)):
             raise ValueError(f"Unsafe path in tarball: {member.name}")
-    tar.extractall(path=path)
+    tar.extractall(path=path, members=members)
 ```
 
 The test suite covers both the happy path and the path-traversal
@@ -632,7 +714,7 @@ podscribe import --force pods-2026-06-22.tar.gz
 | `out` is a directory | Error: "out path is a directory" |
 | `out` already exists | Overwrite (tarfile opens in `w:gz` mode, truncates) |
 | Tarball contains a pod not in local repo | Import as new (always allowed) |
-| Tarball contains root-level `podscribe.yaml` | Imported, but does NOT replace local `podscribe.yaml` (project config is intentionally not migrated; documented in `--help`) |
+| Tarball contains root-level `podscribe.yaml` | Skipped during extraction (project config is not migrated); warning printed to stderr. `leadership_team.yaml` IS imported (global glossary is shared data, not project config). |
 | Tarball is malformed / not gzip | `tarfile.ReadError`, exit 1 with tar's error message |
 | Path traversal in member | Refuse the entire import, exit 1 |
 | Local pod exists and `--force` is set | Replace the pod's directory contents (the imported `transcripts/` and `summaries/` overwrite local files) |
@@ -643,18 +725,18 @@ podscribe import --force pods-2026-06-22.tar.gz
 
 | File | Change |
 |---|---|
-| `podscribe/cli.py` | New `_run_enhance`; both `cmd_enhance` and `cmd_consolidate` use it; `cmd_record` accepts `--type`; new `cmd_search`, `cmd_export`, `cmd_import`; new flags on `cmd_list` |
-| `podscribe/storage.py` | `start_meeting` accepts `meeting_type`; `list_meetings` globs 2- and 3-level; `append_log_row` also writes to global CSV; new `global_log_path()`, `append_global_log_row()`, `read_global_log()` |
+| `podscribe/cli.py` | New `_run_enhance(prompt, model)`; both `cmd_enhance` and `cmd_consolidate` use it; `cmd_record` accepts `--type`; `cmd_list` rewritten to use `list_meetings()` + in-memory filters with new `_parse_since` helper; new `cmd_search`, `cmd_export`, `cmd_import`; new `--all`/`--since`/`--recent`/`--type` flags on `cmd_list`; `cmd_consolidate` `log_fields` enriched with `pod_name`, `type`, `started_at`, `duration_sec` |
+| `podscribe/storage.py` | `CSV_COLUMNS` enriched with `pod_name`, `type`, `started_at`, `duration_sec`; `start_meeting` accepts `meeting_type`; `list_meetings` globs 2- and 3-level; `append_log_row` also writes to global CSV; new `global_log_path()`, `append_global_log_row()`, `read_global_log()` |
 | `podscribe/config.py` | `get_effective_glossary` caches with mtime key; new `_leadership_yaml_path()` and `_read_effective_glossary()` helpers |
 | `podscribe/models.py` | `MEETING_TYPES` tuple; `parse_meeting_type`; `Meeting.type: Optional[str] = None` field |
 | `podscribe/export.py` (new) | `create_export`, `import_archive`, `_iter_export_members`, `_safe_extract` |
 | `podscribe/search.py` (new) | `SearchMatch` dataclass; `search` iterator; `_rg_search` and `_python_search` backends |
 | `podscribe/__init__.py` | No change |
-| `tests/test_cli.py` | New tests: `--type`, `search` invocation, `export`/`import` invocation, list filters |
-| `tests/test_storage.py` | New tests: typed subdir start_meeting, 3-level glob, global CSV mirror |
+| `tests/test_cli.py` | New tests: `--type`, `search` invocation, `export`/`import` invocation, list filters, `_parse_since` |
+| `tests/test_storage.py` | New tests: typed subdir start_meeting, 3-level glob, global CSV mirror, enriched CSV columns |
 | `tests/test_config.py` | New test: mtime invalidation |
 | `tests/test_models.py` | New test: `parse_meeting_type` accepts/rejects |
-| `tests/test_export.py` (new) | Round-trip: create + import a tarball; verify path-traversal rejection; verify `--force` and `--dry-run`; verify exclusions |
+| `tests/test_export.py` (new) | Round-trip: create + import a tarball; verify path-traversal rejection; verify `--force` and `--dry-run`; verify exclusions; verify `podscribe.yaml` skipped on import |
 | `tests/test_search.py` (new) | `rg` and `python` backends, all filters, color flag, empty-result behavior |
 | `README.md` | New section: list filters, search, export/import, --type, glossary cache note |
 
@@ -671,11 +753,12 @@ transcripts/22-JUN-2026/1on1/<id>.raw      ← deleted by default
 
 enhance → summary in summaries/22-JUN-2026/<id>.md
 consolidate → reads summary, calls _run_enhance, updates
-              pods/<pod>/meetings.csv AND pods/meetings.csv
+               pods/<pod>/meetings.csv AND pods/meetings.csv (enriched schema)
 
-list --all → reads pods/meetings.csv (4.2 + 4.3)
-list <pod> → reads pods/<pod>/meetings.csv (existing)
-list --type 1on1 → filters by type from JSON sidecar OR global CSV
+list [<pod>] [--all] [--since 7d] [--type 1on1] [--recent N]
+  → list_meetings() per pod (JSON sidecars — all meetings, not just consolidated)
+  → in-memory filter by started_at, type, recency
+  → global CSV (4.3) NOT used by list; reserved for §5 team-digest commands
 
 search "Project Helios" --pod sam-chen
   → rg -F "Project Helios" pods/sam-chen/transcripts
@@ -687,7 +770,8 @@ export --out pods-2026-06-22.tar.gz
   → excludes .raw, __pycache__, .venv
 
 import pods-2026-06-22.tar.gz
-  → safe extract with path-traversal check
+  → safe extract with path-traversal check (os.sep prefix match)
+  → skips root-level podscribe.yaml (project config not migrated)
   → refuses to overwrite existing pods (--force to override)
 ```
 
@@ -701,7 +785,8 @@ import pods-2026-06-22.tar.gz
 | 4.5 invalid `--type` | `parse_meeting_type` raises `ValueError`; `cmd_record` prints and exits 1 |
 | 4.5 existing 2-level data | `list_meetings` glob matches both; no migration needed |
 | 4.3 global CSV write fails | Logged to stderr; per-pod write still succeeds |
-| 4.2 `--since` parse fails | `cmd_list` prints usage hint and exits 1 |
+| 4.2 `--since` parse fails | `_parse_since` raises `ValueError`; `cmd_list` prints error and exits 1 |
+| 4.2 `--type` parse fails | `parse_meeting_type` raises `ValueError`; `cmd_list` prints error and exits 1 |
 | 4.6 `rg` not installed | Silent fallback to Python `rglob`; no warning |
 | 4.6 file is undecodable | Skip with warning; continue |
 | 4.7 export path is a directory | `tarfile` raises `IsADirectoryError`; caught and reported |
@@ -710,7 +795,7 @@ import pods-2026-06-22.tar.gz
 
 ## Testing strategy
 
-**~34 new tests:**
+**~37 new tests:**
 
 | Section | Test name | Asserts |
 |---|---|---|
@@ -730,10 +815,14 @@ import pods-2026-06-22.tar.gz
 | 4.3 | `test_append_log_row_writes_global` | After call, `pods/meetings.csv` has the row |
 | 4.3 | `test_global_log_failure_does_not_break_pod_log` | Mock `OSError` on global write; per-pod file still has the row |
 | 4.3 | `test_read_global_log_empty_when_no_file` | Returns `[]` |
-| 4.2 | `test_cmd_list_all_reads_global` | `--all` flag invokes `read_global_log` |
-| 4.2 | `test_cmd_list_filters_by_since` | `--since 7d` excludes older rows |
-| 4.2 | `test_cmd_list_filters_by_type` | `--type 1on1` excludes others |
-| 4.2 | `test_cmd_list_limits_by_recent` | `--recent 5` returns at most 5 |
+| 4.3 | `test_consolidate_writes_enriched_csv_columns` | After consolidate, per-pod CSV has `pod_name`, `type`, `started_at`, `duration_sec` |
+| 4.2 | `test_cmd_list_all_iterates_pods` | `--all` (or no pod arg) calls `list_meetings` for each pod dir |
+| 4.2 | `test_cmd_list_filters_by_since` | `--since 7d` excludes older meetings (filter on `Meeting.started_at`) |
+| 4.2 | `test_cmd_list_filters_by_type` | `--type 1on1` excludes meetings with other/no type |
+| 4.2 | `test_cmd_list_limits_by_recent` | `--recent 5` returns at most 5, sorted newest-first |
+| 4.2 | `test_parse_since_duration` | `7d` → 7-day cutoff; `24h` → 24-hour cutoff; `30m` → 30-min cutoff |
+| 4.2 | `test_parse_since_iso_date` | `2026-06-15` → datetime(2026, 6, 15) |
+| 4.2 | `test_parse_since_rejects_invalid` | `garbage` → `ValueError` |
 | 4.6 | `test_search_python_backend` | `rg` not on PATH (mocked); uses `rglob`; yields matches |
 | 4.6 | `test_search_uses_rg_when_available` | `rg` on PATH; shells out with `-F` |
 | 4.6 | `test_search_filters_by_pod` | Only that pod's files scanned |
@@ -747,9 +836,10 @@ import pods-2026-06-22.tar.gz
 | 4.7 | `test_import_force_overwrites` | `--force` succeeds; pod replaced |
 | 4.7 | `test_import_dry_run_no_writes` | `--dry-run`; no files change |
 | 4.7 | `test_import_rejects_path_traversal` | Tarball with `pods/../../etc/passwd` → `ValueError` |
+| 4.7 | `test_import_skips_podscribe_yaml` | Tarball with root `podscribe.yaml`; after import, local file unchanged |
 | 4.7 | `test_export_import_roundtrip` | Create tarball, delete pod, import, pod is back |
 
-**Test count:** 127 (current) → ~161 after this PR lands.
+**Test count:** 155 (current) → ~192 after this PR lands.
 
 ## Documentation
 
@@ -783,8 +873,12 @@ import pods-2026-06-22.tar.gz
 **Commit rationale:**
 - 1-2: refactors with no user-facing change. Smallest blast radius first.
 - 3-5: 4.5 broken into 3 commits (model, CLI, storage) so each is bisectable.
-- 6: 4.3 is the foundation for 4.2's `--all` mode.
-- 7: 4.2 depends on 4.3 and 4.5.
+- 6: 4.3 global CSV is infrastructure for §5 team-digest commands. It is
+  NOT consumed by `list` in this PR. Landing it separately keeps the
+  commit bisectable — if 4.2's list filters break, 4.3 is not the culprit.
+- 7: 4.2 depends on 4.5 (for `--type` filter via `parse_meeting_type` and
+  `Meeting.type`). It does NOT depend on 4.3 — `list` uses `list_meetings()`
+  (JSON sidecars), not the global CSV.
 - 8: 4.6 is independent.
 - 9-10: 4.7 split into export and import.
 - 11-12: docs + smoke test.
@@ -794,7 +888,9 @@ import pods-2026-06-22.tar.gz
 One PR, one revert. If any commit regresses, `git revert <merge-sha>` ships
 clean. The PR has no data migrations:
 - Existing 2-level layouts continue to work (3-level glob matches both).
-- Existing per-pod CSVs are unchanged.
+- Existing per-pod CSVs are unchanged; new columns (`pod_name`, `type`,
+  `started_at`, `duration_sec`) are appended — `csv.DictReader` returns
+  `None`/`""` for missing columns in old rows.
 - Existing JSON sidecars gain a `"type": null` field; old code reading
   the sidecar without expecting `type` is forward-compatible.
 - Glossary cache invalidates correctly via mtime; no stale-cache risk.
