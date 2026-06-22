@@ -155,11 +155,16 @@ def finalize_meeting(meeting: Meeting, *, keep_audio: bool = False) -> None:
 
 
 def list_meetings(pod: Pod) -> List[Meeting]:
-    """List all meetings in a pod, newest first."""
+    """List all meetings in a pod, newest first.
+
+    Sorted by started_at (parsed from the JSON sidecar) rather than by
+    date-dir path string, so single-digit days and cross-month orderings
+    are chronological. Meetings missing a sidecar are skipped.
+    """
     meetings = []
     if not pod.base_path.exists():
         return meetings
-    for json_path in sorted(pod.base_path.glob("transcripts/*/*.json"), reverse=True):
+    for json_path in pod.base_path.glob("transcripts/*/*.json"):
         try:
             with json_path.open() as f:
                 data = json.load(f)
@@ -179,6 +184,7 @@ def list_meetings(pod: Pod) -> List[Meeting]:
             ))
         except (json.JSONDecodeError, KeyError, ValueError):
             continue
+    meetings.sort(key=lambda m: m.started_at, reverse=True)
     return meetings
 
 

@@ -135,6 +135,35 @@ def test_list_meetings_newest_first(tmp_path, monkeypatch):
     assert meetings[1].id.startswith("2026-06-22")
 
 
+def test_list_meetings_sorts_chronologically_across_months(tmp_path, monkeypatch):
+    """list_meetings must sort by started_at, not by date-dir path string.
+
+    Date dirs are DD-MMM-YYYY (e.g. 9-JUL-2026, 31-DEC-2026) which sort
+    lexicographically in the wrong order. Regression guard.
+    """
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    dates = [
+        datetime(2026, 1, 9, 10, 0, 0),
+        datetime(2026, 1, 22, 10, 0, 0),
+        datetime(2026, 6, 22, 10, 0, 0),
+        datetime(2026, 7, 1, 10, 0, 0),
+        datetime(2026, 12, 31, 10, 0, 0),
+    ]
+    for dt in dates:
+        finalize_meeting(start_meeting(pod, dt))
+    meetings = list_meetings(pod)
+    ids = [m.id for m in meetings]
+    expected = [
+        "2026-12-31-1000-sam-chen",
+        "2026-07-01-1000-sam-chen",
+        "2026-06-22-1000-sam-chen",
+        "2026-01-22-1000-sam-chen",
+        "2026-01-09-1000-sam-chen",
+    ]
+    assert ids == expected
+
+
 def test_list_meetings_empty(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     pod = init_pod("sam-chen")
