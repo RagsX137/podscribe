@@ -9,18 +9,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .config import get_effective_glossary, load_leadership_glossary, load_project_config, save_project_config
+from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_project_config, save_project_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
-from .llm import build_enhance_prompt, enhance_transcript
+from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields
 from .models import Segment, fmt_date
 from .storage import (
+    append_log_row,
     append_segment,
     finalize_meeting,
     init_pod,
     list_meetings,
     load_pod,
+    log_entry_exists,
+    log_path,
     pod_exists,
     read_transcript,
+    rewrite_log_row,
     save_pod_config,
     start_meeting,
 )
@@ -312,6 +316,131 @@ def cmd_config_llm_set(args) -> int:
     return 0
 
 
+def cmd_config_consolidate_show(args) -> int:
+    cfg = load_project_config().get("consolidate")
+    if not cfg or not cfg.get("prompt"):
+        print("No consolidate prompt set. Using default.")
+        return 0
+    print(cfg["prompt"])
+    return 0
+
+
+def cmd_config_consolidate_set(args) -> int:
+    save_consolidate_prompt(args.prompt)
+    return 0
+
+
+def cmd_consolidate(args) -> int:
+    """Extract structured fields from enhanced summary and update CSV log."""
+    if not pod_exists(args.pod):
+        print(f"No pod '{args.pod}'.", file=sys.stderr)
+        return 1
+
+    pod = load_pod(args.pod)
+    meetings = list_meetings(pod)
+    if not meetings:
+        print(f"No meetings for pod '{args.pod}'.", file=sys.stderr)
+        return 1
+
+    if args.meeting == "latest":
+        meeting = meetings[0]
+    else:
+        matching = [m for m in meetings if m.id.startswith(args.meeting)]
+        if not matching:
+            print(f"No meeting matching '{args.meeting}'.", file=sys.stderr)
+            return 1
+        meeting = matching[0]
+
+    date_str = fmt_date(datetime.fromisoformat(meeting.started_at))
+    enhanced_path = pod.summaries_dir_for(date_str) / f"{meeting.id}.md"
+
+    if not enhanced_path.exists():
+        print(f"No enhanced summary for {meeting.id}. Run enhance first? [y/N] ", end="", file=sys.stderr)
+        try:
+            answer = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+        if answer in ("y", "yes"):
+            llm_config = pod.llm if pod.llm else load_project_config().get("llm")
+            if not llm_config or not llm_config.get("model") or not llm_config.get("prompt_template"):
+                print("LLM not configured. Set up LLM config first.", file=sys.stderr)
+                return 1
+            transcript = read_transcript(meeting)
+            effective_glossary = get_effective_glossary(pod)
+            prompt = build_enhance_prompt(llm_config["prompt_template"], effective_glossary, transcript)
+            result = enhance_transcript(llm_config["model"], prompt)
+            if result is None:
+                print("Failed to reach Ollama.", file=sys.stderr)
+                return 1
+            enhanced_path.parent.mkdir(parents=True, exist_ok=True)
+            enhanced_path.write_text(result)
+            print(f"Enhanced summary saved to {enhanced_path}")
+        else:
+            print("Aborted.", file=sys.stderr)
+            return 1
+
+    enhanced_text = enhanced_path.read_text()
+
+    prompt_template = load_consolidate_prompt()
+    prompt = build_consolidate_prompt(prompt_template, enhanced_text)
+
+    llm_config = pod.llm if pod.llm else load_project_config().get("llm")
+    model_name = llm_config.get("model", "qwen3.6") if llm_config else "qwen3.6"
+    response = enhance_transcript(model_name, prompt)
+    if response is None:
+        print("Failed to reach Ollama for extraction.", file=sys.stderr)
+        return 1
+
+    fields = extract_structured_fields(response)
+    if fields is None:
+        print("Failed to parse structured fields from LLM response.", file=sys.stderr)
+        return 1
+
+    quick_summary = fields.get("quick_summary", "")
+    key_topics = "|".join(fields.get("key_topics", [])) if isinstance(fields.get("key_topics"), list) else str(fields.get("key_topics", ""))
+    action_items = "|".join(fields.get("action_items", [])) if isinstance(fields.get("action_items"), list) else str(fields.get("action_items", ""))
+    blockers = "|".join(fields.get("blockers", [])) if isinstance(fields.get("blockers"), list) else str(fields.get("blockers", ""))
+    next_steps = "|".join(fields.get("next_steps", [])) if isinstance(fields.get("next_steps"), list) else str(fields.get("next_steps", ""))
+
+    print(f"Extracted: {quick_summary}")
+    print(f"  Topics: {key_topics}")
+    print(f"  Actions: {action_items}")
+    print(f"  Blockers: {blockers}")
+    print(f"  Next: {next_steps}")
+
+    if not args.no_log:
+        log_fields = {
+            "date": date_str,
+            "person": pod.display_name,
+            "meeting_id": meeting.id,
+            "quick_summary": quick_summary,
+            "key_topics": key_topics,
+            "action_items": action_items,
+            "blockers": blockers,
+            "next_steps": next_steps,
+            "summary_file": str(enhanced_path.relative_to(pod.base_path)) if enhanced_path else "",
+            "transcript_file": str(meeting.transcript_path.relative_to(pod.base_path)) if meeting.transcript_path else "",
+        }
+        if log_entry_exists(pod, meeting.id):
+            print(f"Log entry exists for {meeting.id}. Rewrite? [y/N] ", end="")
+            try:
+                answer = input().strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = "n"
+            if answer in ("y", "yes"):
+                rewrite_log_row(pod, meeting.id, log_fields)
+                print(f"Log entry rewritten for {meeting.id}")
+            else:
+                print("Skipping log update.")
+        else:
+            append_log_row(pod, log_fields)
+            print(f"Log entry appended to {log_path(pod)}")
+    else:
+        print("Skipping CSV log (--no-log)")
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="podscribe",
@@ -368,6 +497,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_enh.add_argument("--latest", "-l", action="store_true", help="Use latest meeting")
     p_enh.set_defaults(func=cmd_enhance)
 
+    # consolidate
+    p_cons = sub.add_parser("consolidate", help="Extract structured fields from enhanced summary and update CSV log.")
+    p_cons.add_argument("pod", help="Pod name")
+    p_cons.add_argument("meeting", nargs="?", default="latest", help="Meeting ID prefix (default: latest)")
+    p_cons.add_argument("--no-log", "-n", action="store_true", help="Skip CSV log update")
+    p_cons.set_defaults(func=cmd_consolidate)
+
     # config
     p_cfg = sub.add_parser("config", help="Manage project-level config.")
     cfg_sub = p_cfg.add_subparsers(dest="action", required=True)
@@ -380,6 +516,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_llm_set.add_argument("prompt_template", help="Prompt template with {{transcript}} placeholder")
     p_llm_set.set_defaults(func=cmd_config_llm_set)
 
+    p_cfg_cons = cfg_sub.add_parser("consolidate", help="Manage consolidate prompt.")
+    cons_sub = p_cfg_cons.add_subparsers(dest="consolidate_action", required=True)
+    p_cons_show = cons_sub.add_parser("show", help="Show consolidate prompt.")
+    p_cons_show.set_defaults(func=cmd_config_consolidate_show)
+    p_cons_set = cons_sub.add_parser("set", help="Set consolidate prompt.")
+    p_cons_set.add_argument("prompt", help="Prompt template with {{summary}} placeholder")
+    p_cons_set.set_defaults(func=cmd_config_consolidate_set)
+
     return p
 
 
@@ -389,8 +533,8 @@ def rewrite_argv(argv: list[str]) -> list[str]:
     `podscribe <pod> <command> [args]` → `<command> <pod> [args]`
     `start` → `record`, `summarize` → `enhance`
     """
-    known_commands = {"init", "record", "list", "show", "context", "enhance", "config"}
-    aliases = {"start": "record", "summarize": "enhance"}
+    known_commands = {"init", "record", "list", "show", "context", "enhance", "config", "consolidate"}
+    aliases = {"start": "record", "summarize": "enhance", "cons": "consolidate"}
 
     if not argv:
         return argv

@@ -1,4 +1,6 @@
 """Tests for CLI command structure (no audio, no model)."""
+from unittest.mock import patch
+
 import pytest
 
 from podscribe.cli import build_parser, rewrite_argv
@@ -212,3 +214,70 @@ def test_config_llm_set():
     assert args.llm_action == "set"
     assert args.model == "qwen3.6"
     assert args.prompt_template == "Fix spelling: {{transcript}}"
+
+
+def test_consolidate_args_default_latest():
+    parser = build_parser()
+    args = parser.parse_args(["consolidate", "sam-chen"])
+    assert args.command == "consolidate"
+    assert args.pod == "sam-chen"
+    assert args.meeting == "latest"
+    assert args.no_log is False
+
+
+def test_consolidate_args_with_meeting():
+    parser = build_parser()
+    args = parser.parse_args(["consolidate", "sam-chen", "2026-06-22"])
+    assert args.command == "consolidate"
+    assert args.pod == "sam-chen"
+    assert args.meeting == "2026-06-22"
+
+
+def test_consolidate_no_log_flag():
+    parser = build_parser()
+    args = parser.parse_args(["consolidate", "sam-chen", "--no-log"])
+    assert args.no_log is True
+
+
+def test_consolidate_no_log_flag_short():
+    parser = build_parser()
+    args = parser.parse_args(["consolidate", "sam-chen", "-n"])
+    assert args.no_log is True
+
+
+def test_consolidate_alias_pod_first():
+    """`podscribe <pod> consolidate` rewrites correctly."""
+    args = _parse(["sam-chen", "consolidate"])
+    assert args.command == "consolidate"
+    assert args.pod == "sam-chen"
+
+
+def test_consolidate_alias_short():
+    """`podscribe cons <pod>` rewrites to `consolidate <pod>`."""
+    args = _parse(["cons", "sam-chen"])
+    assert args.command == "consolidate"
+    assert args.pod == "sam-chen"
+
+
+def test_consolidate_alias_pod_first_short():
+    """`podscribe <pod> cons` rewrites to `consolidate <pod>`."""
+    args = _parse(["sam-chen", "cons"])
+    assert args.command == "consolidate"
+    assert args.pod == "sam-chen"
+
+
+def test_config_consolidate_show():
+    parser = build_parser()
+    args = parser.parse_args(["config", "consolidate", "show"])
+    assert args.command == "config"
+    assert args.action == "consolidate"
+    assert args.consolidate_action == "show"
+
+
+def test_config_consolidate_set():
+    parser = build_parser()
+    args = parser.parse_args(["config", "consolidate", "set", "Extract {{summary}}"])
+    assert args.command == "config"
+    assert args.action == "consolidate"
+    assert args.consolidate_action == "set"
+    assert args.prompt == "Extract {{summary}}"
