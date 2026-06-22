@@ -7,15 +7,13 @@ from pathlib import Path
 from typing import List, Optional
 
 from .config import load_pod_config, save_pod_config
-from .models import Meeting, Pod, Segment, make_meeting_id
+from .models import Meeting, Pod, Segment, fmt_date, make_meeting_id
 
 
 def init_pod(name: str, **kwargs) -> Pod:
     """Create a new pod with directory structure and config."""
     pod = Pod(name=name, **kwargs)
-    pod.config_path.parent.mkdir(parents=True, exist_ok=True)
-    pod.transcripts_dir.mkdir(parents=True, exist_ok=True)
-    pod.prep_dir.mkdir(parents=True, exist_ok=True)
+    pod.base_path.mkdir(parents=True, exist_ok=True)
     save_pod_config(pod)
     return pod
 
@@ -36,9 +34,12 @@ def start_meeting(pod: Pod, when: Optional[datetime] = None) -> Meeting:
     """Create a Meeting record and its file paths. Touches audio file for cleanup."""
     when = when or datetime.now()
     meeting_id = make_meeting_id(pod.name, when)
-    transcript_path = pod.transcripts_dir / f"{meeting_id}.md"
-    metadata_path = pod.transcripts_dir / f"{meeting_id}.json"
-    audio_path = pod.transcripts_dir / f"{meeting_id}.raw"
+    date_str = fmt_date(when)
+    transcript_dir = pod.transcripts_dir_for(date_str)
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = transcript_dir / f"{meeting_id}.md"
+    metadata_path = transcript_dir / f"{meeting_id}.json"
+    audio_path = transcript_dir / f"{meeting_id}.raw"
     audio_path.touch()
     return Meeting(
         id=meeting_id,
@@ -87,9 +88,9 @@ def finalize_meeting(meeting: Meeting, *, keep_audio: bool = False) -> None:
 def list_meetings(pod: Pod) -> List[Meeting]:
     """List all meetings in a pod, newest first."""
     meetings = []
-    if not pod.transcripts_dir.exists():
+    if not pod.base_path.exists():
         return meetings
-    for json_path in sorted(pod.transcripts_dir.glob("*.json"), reverse=True):
+    for json_path in sorted(pod.base_path.glob("transcripts/*/*.json"), reverse=True):
         try:
             with json_path.open() as f:
                 data = json.load(f)

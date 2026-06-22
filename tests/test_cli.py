@@ -191,3 +191,24 @@ def test_show_pod_first():
     assert args.command == "show"
     assert args.pod == "sam-chen"
     assert args.meeting == "latest"
+
+
+def test_config_llm_show():
+    parser = build_parser()
+    args = parser.parse_args(["config", "llm", "show"])
+    assert args.command == "config"
+    assert args.action == "llm"
+    assert args.llm_action == "show"
+
+
+def test_config_llm_set():
+    parser = build_parser()
+    args = parser.parse_args([
+        "config", "llm", "set", "qwen3.6",
+        "Fix spelling: {{transcript}}",
+    ])
+    assert args.command == "config"
+    assert args.action == "llm"
+    assert args.llm_action == "set"
+    assert args.model == "qwen3.6"
+    assert args.prompt_template == "Fix spelling: {{transcript}}"

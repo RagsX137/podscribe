@@ -119,7 +119,7 @@ class AudioCapture:
                     silence_count += 1
                     if silence_count >= 5:
                         trim = min(silence_count, len(speech_samples))
-                        seg = np.concatenate(speech_samples[:-trim]) if trim < len(speech_samples) else np.array([], dtype=np.float32)
+                        seg = np.concatenate(speech_samples[:len(speech_samples)-trim]) if trim < len(speech_samples) else np.array([], dtype=np.float32)
                         if len(seg) / SAMPLE_RATE >= MIN_SEGMENT_SEC:
                             yield seg
                         speech_samples = []
@@ -132,7 +132,7 @@ class AudioCapture:
             self._stream.close()
             if speech_samples and speech_active:
                 trim = min(silence_count, len(speech_samples))
-                seg = np.concatenate(speech_samples[:-trim]) if trim < len(speech_samples) else np.array([], dtype=np.float32)
+                seg = np.concatenate(speech_samples[:len(speech_samples)-trim]) if trim < len(speech_samples) else np.array([], dtype=np.float32)
                 if len(seg) / SAMPLE_RATE >= MIN_SEGMENT_SEC:
                     yield seg
 

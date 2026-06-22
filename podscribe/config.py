@@ -1,4 +1,4 @@
-"""Pod configuration: load and save config.yaml."""
+"""Pod and project configuration: load and save config.yaml."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,6 +6,8 @@ from pathlib import Path
 import yaml
 
 from .models import Pod
+
+PROJECT_CONFIG_PATH = Path("podscribe.yaml")
 
 
 def save_pod_config(pod: Pod) -> None:
@@ -44,3 +46,17 @@ def load_pod_config(base_path: Path) -> Pod:
         llm=data.get("llm"),
         base_path=base_path,
     )
+
+
+def load_project_config() -> dict:
+    """Load project-level config from podscribe.yaml."""
+    if PROJECT_CONFIG_PATH.exists():
+        with PROJECT_CONFIG_PATH.open() as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def save_project_config(data: dict) -> None:
+    """Save project-level config to podscribe.yaml."""
+    with PROJECT_CONFIG_PATH.open("w") as f:
+        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)

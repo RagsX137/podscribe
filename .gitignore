@@ -8,3 +8,4 @@ pods/
 .pytest_cache/
 .DS_Store
 *.raw
+.env

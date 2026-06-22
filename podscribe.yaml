@@ -1,0 +1,15 @@
+llm:
+  model: qwen3.6:27b
+  prompt_template: |
+    Analyze this transcript of a team meeting. 
+
+    Glossary of correct names/projects: {{glossary}}
+
+    Provide:
+    1. **Summary** (3-5 bullet points)
+    2. **Action items** (who is responsible for what)
+    3. **Key decisions** made
+    4. **Questions to ask next time** (prep for next 1:1)
+
+    Transcript:
+    {{transcript}}

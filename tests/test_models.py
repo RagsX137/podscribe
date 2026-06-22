@@ -92,8 +92,8 @@ class TestPod:
         pod = Pod(name="sam-chen")
         assert pod.base_path == Path("pods") / "sam-chen"
         assert pod.config_path == Path("pods") / "sam-chen" / "config.yaml"
-        assert pod.transcripts_dir == Path("pods") / "sam-chen" / "transcripts"
-        assert pod.prep_dir == Path("pods") / "sam-chen" / "prep"
+        assert pod.transcripts_dir_for("22-JUN-2026") == Path("pods") / "sam-chen" / "transcripts" / "22-JUN-2026"
+        assert pod.summaries_dir_for("22-JUN-2026") == Path("pods") / "sam-chen" / "summaries" / "22-JUN-2026"
 
     def test_invalid_name_raises(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

@@ -9,9 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from .config import load_project_config, save_project_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .llm import build_enhance_prompt, enhance_transcript
-from .models import Segment
+from .models import Segment, fmt_date
 from .storage import (
     append_segment,
     finalize_meeting,
@@ -45,9 +46,7 @@ def cmd_init(args) -> int:
         notes=args.notes or "",
     )
     print(f"Created pod '{pod.name}' at {pod.base_path}/")
-    print(f"  config:      {pod.config_path}")
-    print(f"  transcripts: {pod.transcripts_dir}/")
-    print(f"  prep:        {pod.prep_dir}/")
+    print(f"  config: {pod.config_path}")
     return 0
 
 
@@ -228,10 +227,12 @@ def cmd_enhance(args) -> int:
         return 1
 
     pod = load_pod(args.pod)
-    if not pod.llm or not pod.llm.get("model") or not pod.llm.get("prompt_template"):
+    llm_config = pod.llm if pod.llm else load_project_config().get("llm")
+    if not llm_config or not llm_config.get("model") or not llm_config.get("prompt_template"):
         print(
             "LLM not configured for this pod. "
-            "Add an 'llm' section to config.yaml with 'model' and 'prompt_template'.",
+            "Add an 'llm' section to config.yaml with 'model' and 'prompt_template', "
+            "or set a project-level config with `podscribe config llm set <model> '<template>'`.",
             file=sys.stderr,
         )
         return 1
@@ -252,15 +253,20 @@ def cmd_enhance(args) -> int:
 
     transcript = read_transcript(meeting)
     prompt = build_enhance_prompt(
-        pod.llm["prompt_template"], pod.glossary, transcript
+        llm_config["prompt_template"], pod.glossary, transcript
     )
 
-    print(f"Enhancing transcript for {meeting.id}...")
-    print(f"  model: {pod.llm['model']}")
+    date_str = fmt_date(datetime.fromisoformat(meeting.started_at))
+    summary_dir = pod.summaries_dir_for(date_str)
+    enhanced_path = summary_dir / f"{meeting.id}.md"
+
+    print(f"Enhancing transcript for {pod.name}/{date_str}/{meeting.id}...")
+    print(f"Saving transcript to {pod.name}/{date_str}/{meeting.id}...")
+    print(f"  Using Large Language Model: {llm_config['model']}")
     print(f"  Ollama URL: http://localhost:11434")
     print()
 
-    result = enhance_transcript(pod.llm["model"], prompt)
+    result = enhance_transcript(llm_config["model"], prompt)
     if result is None:
         print(
             "Failed to reach Ollama. Is it running? "
@@ -269,9 +275,29 @@ def cmd_enhance(args) -> int:
         )
         return 1
 
-    enhanced_path = meeting.transcript_path.with_suffix(".enhanced.md")
+    summary_dir.mkdir(parents=True, exist_ok=True)
     enhanced_path.write_text(result)
     print(f"Enhanced transcript saved to {enhanced_path}")
+    return 0
+
+
+def cmd_config_llm_show(args) -> int:
+    """Show project-level LLM config."""
+    cfg = load_project_config().get("llm")
+    if not cfg:
+        print("No project-level LLM config set.")
+        return 0
+    print(f"model: {cfg.get('model', '(none)')}")
+    print(f"prompt_template: {cfg.get('prompt_template', '(none)')}")
+    return 0
+
+
+def cmd_config_llm_set(args) -> int:
+    """Set project-level LLM config."""
+    cfg = load_project_config()
+    cfg["llm"] = {"model": args.model, "prompt_template": args.prompt_template}
+    save_project_config(cfg)
+    print(f"Project LLM config set: {args.model}")
     return 0
 
 
@@ -294,7 +320,7 @@ def build_parser() -> argparse.ArgumentParser:
     # record
     p_rec = sub.add_parser("record", help="Live record and transcribe a meeting.")
     p_rec.add_argument("pod", help="Pod name")
-    p_rec.add_argument("--model", default="base.en", help="Whisper model (default: base.en)")
+    p_rec.add_argument("--model", default="base", help="Whisper model (default: base)")
     p_rec.add_argument("--vad-aggressiveness", type=int, default=2, choices=[0, 1, 2, 3], help="VAD strictness (0=loose, 3=strict; default 2)")
     p_rec.add_argument("--device", type=int, default=None, help="Input device index (default: system default)")
     p_rec.add_argument("--keep-audio", action="store_true", help="Keep raw audio file (for debugging)")
@@ -327,9 +353,21 @@ def build_parser() -> argparse.ArgumentParser:
     # enhance
     p_enh = sub.add_parser("enhance", help="Enhance transcript via local LLM (Ollama).")
     p_enh.add_argument("pod", help="Pod name")
-    p_enh.add_argument("meeting", nargs="?", help="Meeting ID prefix (default: latest)")
+    p_enh.add_argument("meeting", nargs="?", default="latest", help="Meeting ID prefix (default: latest)")
     p_enh.add_argument("--latest", "-l", action="store_true", help="Use latest meeting")
     p_enh.set_defaults(func=cmd_enhance)
+
+    # config
+    p_cfg = sub.add_parser("config", help="Manage project-level config.")
+    cfg_sub = p_cfg.add_subparsers(dest="action", required=True)
+    p_cfg_llm = cfg_sub.add_parser("llm", help="Manage LLM config.")
+    llm_sub = p_cfg_llm.add_subparsers(dest="llm_action", required=True)
+    p_llm_show = llm_sub.add_parser("show", help="Show project LLM config.")
+    p_llm_show.set_defaults(func=cmd_config_llm_show)
+    p_llm_set = llm_sub.add_parser("set", help="Set project LLM config.")
+    p_llm_set.add_argument("model", help="Ollama model name (e.g. qwen3.6)")
+    p_llm_set.add_argument("prompt_template", help="Prompt template with {{transcript}} placeholder")
+    p_llm_set.set_defaults(func=cmd_config_llm_set)
 
     return p
 
@@ -340,7 +378,7 @@ def rewrite_argv(argv: list[str]) -> list[str]:
     `podscribe <pod> <command> [args]` → `<command> <pod> [args]`
     `start` → `record`, `summarize` → `enhance`
     """
-    known_commands = {"init", "record", "list", "show", "context", "enhance"}
+    known_commands = {"init", "record", "list", "show", "context", "enhance", "config"}
     aliases = {"start": "record", "summarize": "enhance"}
 
     if not argv:

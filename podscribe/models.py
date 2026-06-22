@@ -28,6 +28,11 @@ def make_meeting_id(pod_name: str, when: Optional[datetime] = None) -> str:
     return when.strftime("%Y-%m-%d-%H%M-") + pod_name
 
 
+def fmt_date(when: datetime) -> str:
+    """Format a datetime as DD-MMM-YYYY (e.g. 22-JUN-2026)."""
+    return when.strftime("%d-%b-%Y").upper()
+
+
 @dataclass
 class Pod:
     name: str
@@ -55,13 +60,14 @@ class Pod:
     def config_path(self) -> Path:
         return self.base_path / "config.yaml"
 
-    @property
-    def transcripts_dir(self) -> Path:
-        return self.base_path / "transcripts"
+    def date_dir(self, date_str: str) -> Path:
+        return self.base_path / date_str
 
-    @property
-    def prep_dir(self) -> Path:
-        return self.base_path / "prep"
+    def transcripts_dir_for(self, date_str: str) -> Path:
+        return self.base_path / "transcripts" / date_str
+
+    def summaries_dir_for(self, date_str: str) -> Path:
+        return self.base_path / "summaries" / date_str
 
 
 @dataclass

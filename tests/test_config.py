@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from podscribe.config import load_pod_config, save_pod_config
+from podscribe.config import load_pod_config, save_pod_config, load_project_config, save_project_config
 from podscribe.models import Pod
 
 
@@ -76,3 +76,19 @@ def test_glossary_roundtrip(tmp_path):
     loaded = load_pod_config(pod.base_path)
     assert loaded.glossary == pod.glossary
     assert loaded.llm == pod.llm
+
+
+def test_project_config_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    data = {"llm": {"model": "qwen3.6", "prompt_template": "fix {{transcript}}"}}
+    save_project_config(data)
+    assert (tmp_path / "podscribe.yaml").exists()
+    loaded = load_project_config()
+    assert loaded["llm"]["model"] == "qwen3.6"
+    assert loaded["llm"]["prompt_template"] == "fix {{transcript}}"
+
+
+def test_project_config_missing_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    loaded = load_project_config()
+    assert loaded == {}

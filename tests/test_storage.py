@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from podscribe.models import Segment
+from podscribe.models import Segment, fmt_date
 from podscribe.storage import (
     append_segment,
     finalize_meeting,
@@ -21,8 +21,7 @@ def test_init_pod_creates_structure(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     pod = init_pod("sam-chen", display_name="Sam Chen", role="Senior Engineer")
     assert (tmp_path / "pods" / "sam-chen" / "config.yaml").exists()
-    assert (tmp_path / "pods" / "sam-chen" / "transcripts").is_dir()
-    assert (tmp_path / "pods" / "sam-chen" / "prep").is_dir()
+    assert (tmp_path / "pods" / "sam-chen").is_dir()
     config = (tmp_path / "pods" / "sam-chen" / "config.yaml").read_text()
     assert "name: sam-chen" in config
     assert "display_name: Sam Chen" in config
@@ -59,7 +58,9 @@ def test_start_meeting_creates_files(tmp_path, monkeypatch):
     meeting = start_meeting(pod, when)
     assert meeting.id == "2026-06-29-1430-sam-chen"
     assert meeting.audio_path.exists()
-    assert meeting.transcript_path == pod.transcripts_dir / "2026-06-29-1430-sam-chen.md"
+    date_str = fmt_date(when)
+    expected = pod.transcripts_dir_for(date_str) / "2026-06-29-1430-sam-chen.md"
+    assert meeting.transcript_path == expected
 
 
 def test_append_segment(tmp_path, monkeypatch):
@@ -159,7 +160,7 @@ def test_pods_isolated(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     sam = init_pod("sam-chen", display_name="Sam Chen")
     priya = init_pod("priya-patel", display_name="Priya Patel")
-    assert sam.transcripts_dir != priya.transcripts_dir
+    assert sam.base_path != priya.base_path
     assert sam.config_path != priya.config_path
     # Add transcript to sam only
     m = start_meeting(sam)
