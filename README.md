@@ -33,9 +33,14 @@ podscribe show sam-chen latest
 | Command | What it does |
 |---|---|
 | `podscribe init <name>` | Create a pod (one per person). Flags: `--display-name`, `--role`, `--cadence`, `--notes` |
-| `podscribe record <pod>` | Live mic → transcript → pod storage. Flags: `--model`, `--vad-aggressiveness`, `--device`, `--keep-audio` |
+| `podscribe record <pod>` (alias `start`) | Live mic → transcript → pod storage. Flags: `--model`, `--vad-aggressiveness`, `--device`, `--keep-audio` |
 | `podscribe list` | List all pods and their meetings |
 | `podscribe show <pod> [meeting-id-prefix \| latest]` | View transcript |
+| `podscribe context {add\|remove\|list}` | Manage the glossary (initial_prompt context) for a pod |
+| `podscribe enhance <pod> [meeting]` (alias `summarize`) | LLM cleanup pass via local Ollama |
+| `podscribe consolidate <pod> [meeting] [--no-log]` (alias `cons`) | Extract structured fields from enhanced summary; append to `meetings.csv` |
+| `podscribe config llm {show\|set}` | Project-level LLM config (model, prompt template) in `podscribe.yaml` |
+| `podscribe config consolidate {show\|set}` | Project-level consolidate prompt |
 
 ## Architecture
 
@@ -45,8 +50,8 @@ podscribe show sam-chen latest
 │                                                              │
 │   ┌──────────┐    ┌──────────┐    ┌──────────┐              │
 │   │ Audio    │    │ VAD      │    │ Whisper  │              │
-│   │ capture  │ →  │ (webrtc) │ →  │ (cpp via │              │
-│   │ (sd)     │    │ silence  │    │ pywcpp)  │              │
+│   │ capture  │ →  │ (webrtc) │ →  │ (mlx-    │              │
+│   │ (sd)     │    │ silence  │    │ whisper) │              │
 │   └──────────┘    └──────────┘    └──────────┘              │
 │        ↑                             ↓                       │
 │   16kHz mono                    live text + segments         │
@@ -85,9 +90,20 @@ podscribe/
 ```
 
 Pods are stored under `pods/<name>/`:
-- `config.yaml` — pod metadata
-- `transcripts/YYYY-MM-DD-HHMM-<pod>.md` — markdown transcript (one line per segment, with HH:MM:SS timestamp)
-- `transcripts/YYYY-MM-DD-HHMM-<pod>.json` — meeting metadata (model, duration, etc.)
+
+```
+pods/<name>/
+├── config.yaml
+├── transcripts/
+│   └── DD-MMM-YYYY/           # e.g. 22-JUN-2026
+│       ├── <meeting-id>.md    # e.g. 2026-06-22-143012-sam-chen.md (incremental, one [HH:MM:SS] line per segment)
+│       ├── <meeting-id>.json  # meeting metadata sidecar (model, duration, etc.)
+│       └── <meeting-id>.raw   # raw audio (deleted by default after finalize)
+├── summaries/
+│   └── DD-MMM-YYYY/
+│       └── <meeting-id>.md    # enhanced transcript (output of `podscribe enhance`)
+└── meetings.csv               # consolidated log (output of `podscribe consolidate`)
+```
 
 Each pod has its own directory. Cross-pod rollups come in a later phase.
 
@@ -107,8 +123,36 @@ pip install webrtcvad
 ## Models
 
 - Default: `large-v3-turbo` (~500MB, downloaded on first use via Apple MLX, then cached)
-- mlx-whisper handles download + caching automatically (stored in `~/.cache/huggingface/`)
+- mlx-whisper handles download + caching automatically (stored in `~/.cache/huggingface/`). Models download automatically from HuggingFace on first use.
 - To use a different model: `podscribe record sam-chen --model base`
+
+Only these short names are resolved by `podscribe` itself:
+
+| Short name | HuggingFace path |
+|---|---|
+| `base` | `mlx-community/whisper-base-mlx` |
+| `turbo` | `mlx-community/whisper-large-v3-turbo` |
+| `large-v3-turbo` | `mlx-community/whisper-large-v3-turbo` |
+
+Any other `--model` value is passed through to `mlx-whisper` unchanged, so full HuggingFace paths also work.
+
+## LLM (enhance & consolidate)
+
+- Requires Ollama running locally (`ollama serve`, default `http://localhost:11434`).
+- Default model: `qwen3.6:27b` (27B Qwen is preferred over smaller models for output quality).
+- The LLM section lives in `podscribe.yaml` (project-level) or per-pod `config.yaml`:
+
+  ```yaml
+  llm:
+    model: qwen3.6:27b
+    prompt_template: |
+      You are cleaning up a raw meeting transcript. {{glossary}}
+      Fix punctuation, remove filler, and preserve speaker names.
+    preserve_speakers: true   # default true; when false, strip speaker names
+  ```
+
+- `preserve_speakers: true` (default) keeps speaker names in the enhanced output. Set to `false` to strip them. Resolution order: pod-level `llm.preserve_speakers` > project-level > default `true`.
+- `podscribe consolidate` uses a separate, lighter prompt stored under the `consolidate:` key in `podscribe.yaml`. It extracts structured fields (action items, blockers, next steps) and appends them to `pods/<name>/meetings.csv`.
 
 ## Privacy
 
@@ -119,10 +163,10 @@ pip install webrtcvad
 ## Tests
 
 ```bash
-pytest tests/
+pytest tests/ -v
 ```
 
-45 unit tests cover data models, validation, storage, and CLI. Audio + transcription logic requires real mic + downloaded model — test those manually on your Mac (see below).
+126 offline unit tests + 1 smoke test requiring network. Run with `pytest tests/ -v`. Skip the smoke test with `-k "not transcriber"` (recommended for CI without network). The offline tests cover data models, validation, storage, config, glossary, CLI parsing, and the LLM client. The smoke test (`tests/test_transcriber.py::test_transcriber_accepts_initial_prompt`) downloads a real Whisper model and requires a working `mlx-whisper` install.
 
 ## Manual smoke test (on your Mac)
 
