@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_project_config, save_project_config
+from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_project_config, save_consolidate_prompt, save_project_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields
 from .models import Segment, fmt_date
@@ -317,11 +317,8 @@ def cmd_config_llm_set(args) -> int:
 
 
 def cmd_config_consolidate_show(args) -> int:
-    cfg = load_project_config().get("consolidate")
-    if not cfg or not cfg.get("prompt"):
-        print("No consolidate prompt set. Using default.")
-        return 0
-    print(cfg["prompt"])
+    from .config import load_consolidate_prompt
+    print(load_consolidate_prompt())
     return 0
 
 
@@ -385,7 +382,10 @@ def cmd_consolidate(args) -> int:
     prompt = build_consolidate_prompt(prompt_template, enhanced_text)
 
     llm_config = pod.llm if pod.llm else load_project_config().get("llm")
-    model_name = llm_config.get("model", "qwen3.6") if llm_config else "qwen3.6"
+    if not llm_config or not llm_config.get("model"):
+        print("LLM not configured for this pod. Set up LLM config first.", file=sys.stderr)
+        return 1
+    model_name = llm_config["model"]
     response = enhance_transcript(model_name, prompt)
     if response is None:
         print("Failed to reach Ollama for extraction.", file=sys.stderr)
