@@ -112,3 +112,26 @@ def test_extract_structured_fields_invalid():
 def test_extract_structured_fields_empty():
     result = extract_structured_fields("")
     assert result is None
+
+
+SPEAKER_PREAMBLE_FRAGMENT = "Preserve all names exactly as they appear"
+
+
+def test_build_enhance_prompt_includes_speaker_preamble_by_default():
+    """Default behavior: include the speaker-preservation preamble."""
+    prompt = build_enhance_prompt(TEMPLATE, GLOSSARY, "hello")
+    assert SPEAKER_PREAMBLE_FRAGMENT in prompt
+
+
+def test_build_enhance_prompt_excludes_preamble_when_disabled():
+    prompt = build_enhance_prompt(TEMPLATE, GLOSSARY, "hello", preserve_speakers=False)
+    assert SPEAKER_PREAMBLE_FRAGMENT not in prompt
+
+
+def test_build_enhance_prompt_preamble_appears_before_template():
+    """The preamble should come first, before any template content."""
+    prompt = build_enhance_prompt(TEMPLATE, GLOSSARY, "hello")
+    preamble_pos = prompt.find(SPEAKER_PREAMBLE_FRAGMENT)
+    template_marker_pos = prompt.find("Correct these names")
+    assert preamble_pos < template_marker_pos
+    assert preamble_pos >= 0

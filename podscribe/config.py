@@ -111,3 +111,26 @@ def get_effective_glossary(pod: Pod) -> list:
     leadership = load_leadership_glossary()
     pod_terms = pod.glossary or []
     return leadership + pod_terms
+
+
+def load_preserve_speakers(pod: "Pod") -> bool:
+    """Resolve the preserve_speakers setting for a pod.
+
+    Resolution order: pod-level llm.preserve_speakers > project-level
+    llm.preserve_speakers > default True.
+
+    Raises ValueError if either level is set to a non-boolean value.
+    """
+    for level_name, llm_cfg in [
+        ("pod", pod.llm),
+        ("project", load_project_config().get("llm")),
+    ]:
+        if llm_cfg and "preserve_speakers" in llm_cfg:
+            value = llm_cfg["preserve_speakers"]
+            if not isinstance(value, bool):
+                raise ValueError(
+                    f"{level_name} llm.preserve_speakers must be a boolean, "
+                    f"got {type(value).__name__}: {value!r}"
+                )
+            return value
+    return True

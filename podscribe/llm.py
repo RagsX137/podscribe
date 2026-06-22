@@ -9,8 +9,24 @@ import yaml
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
+SPEAKER_PRESERVATION_PREAMBLE = (
+    "Preserve all names exactly as they appear in the transcript. "
+    "For each action item, name the responsible person "
+    '(e.g. "Sam will review the auth middleware design"). '
+    'If the transcript does not name a person, write "Unassigned — needs owner" '
+    "rather than dropping the item."
+)
 
-def build_enhance_prompt(template: str, glossary: list, transcript: str) -> str:
+
+def build_enhance_prompt(
+    template: str,
+    glossary: list,
+    transcript: str,
+    *,
+    preserve_speakers: bool = True,
+) -> str:
+    if preserve_speakers:
+        template = SPEAKER_PRESERVATION_PREAMBLE + "\n\n" + template
     glossary_text = ", ".join(
         f"{e['term']} ({e.get('category', 'other')})" for e in glossary
     )

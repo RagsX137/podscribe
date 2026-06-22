@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_project_config, save_consolidate_prompt, save_project_config
+from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_project_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields
 from .models import Segment, fmt_date
@@ -289,8 +289,10 @@ def cmd_enhance(args) -> int:
         )
         return 1
     effective_glossary = get_effective_glossary(pod)
+    preserve_speakers = load_preserve_speakers(pod)
     prompt = build_enhance_prompt(
-        llm_config["prompt_template"], effective_glossary, transcript
+        llm_config["prompt_template"], effective_glossary, transcript,
+        preserve_speakers=preserve_speakers,
     )
 
     date_str = fmt_date(datetime.fromisoformat(meeting.started_at))

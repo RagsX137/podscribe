@@ -1,5 +1,6 @@
 llm:
   model: qwen3.6:27b
+  preserve_speakers: true
   prompt_template: |
     Analyze this transcript of a team meeting. 
 

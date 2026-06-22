@@ -231,3 +231,51 @@ def test_consolidate_prompt_save_updates_yaml(tmp_path, monkeypatch):
     from podscribe.config import load_project_config
     cfg = load_project_config()
     assert cfg["consolidate"]["prompt"] == "Saved prompt"
+
+
+@pytest.fixture
+def _pod():
+    return Pod(name="sam-chen", base_path=Path("pods/sam-chen"))
+
+
+def test_load_preserve_speakers_default_true(tmp_path, monkeypatch, _pod):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import load_preserve_speakers
+    assert load_preserve_speakers(_pod) is True
+
+
+def test_load_preserve_speakers_project_level(tmp_path, monkeypatch, _pod):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "podscribe.yaml").write_text(
+        "llm:\n  model: qwen3.6\n  prompt_template: x\n  preserve_speakers: false\n"
+    )
+    from podscribe.config import load_preserve_speakers
+    assert load_preserve_speakers(_pod) is False
+
+
+def test_load_preserve_speakers_pod_overrides_project(tmp_path, monkeypatch, _pod):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "podscribe.yaml").write_text(
+        "llm:\n  model: qwen3.6\n  prompt_template: x\n  preserve_speakers: false\n"
+    )
+    _pod.llm = {"model": "qwen3.6", "prompt_template": "x", "preserve_speakers": True}
+    from podscribe.config import load_preserve_speakers
+    assert load_preserve_speakers(_pod) is True
+
+
+def test_load_preserve_speakers_rejects_non_bool_at_pod_level(tmp_path, monkeypatch, _pod):
+    monkeypatch.chdir(tmp_path)
+    _pod.llm = {"model": "qwen3.6", "prompt_template": "x", "preserve_speakers": "yes"}
+    from podscribe.config import load_preserve_speakers
+    with pytest.raises(ValueError, match="must be a boolean"):
+        load_preserve_speakers(_pod)
+
+
+def test_load_preserve_speakers_rejects_non_bool_at_project_level(tmp_path, monkeypatch, _pod):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "podscribe.yaml").write_text(
+        "llm:\n  model: qwen3.6\n  prompt_template: x\n  preserve_speakers: 1\n"
+    )
+    from podscribe.config import load_preserve_speakers
+    with pytest.raises(ValueError, match="must be a boolean"):
+        load_preserve_speakers(_pod)
