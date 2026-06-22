@@ -266,6 +266,12 @@ def cmd_enhance(args) -> int:
         meeting = matching[0]
 
     transcript = read_transcript(meeting)
+    if len(transcript.strip()) < 50:
+        print(
+            f"Transcript too short to enhance ({len(transcript)} chars).",
+            file=sys.stderr,
+        )
+        return 1
     effective_glossary = get_effective_glossary(pod)
     prompt = build_enhance_prompt(
         llm_config["prompt_template"], effective_glossary, transcript
