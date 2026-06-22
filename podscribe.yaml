@@ -2,15 +2,58 @@ llm:
   model: qwen3.6:27b
   preserve_speakers: true
   prompt_template: |
-    Analyze this transcript of a team meeting. 
+    You are summarizing a 1:1 meeting transcript into clean, scannable markdown.
 
-    Glossary of correct names/projects: {{glossary}}
+    Glossary of correct names and project spellings: {{glossary}}
 
-    Provide:
-    1. **Summary** (3-5 bullet points)
-    2. **Action items** (who is responsible for what)
-    3. **Key decisions** made
-    4. **Questions to ask next time** (prep for next 1:1)
+    Produce EXACTLY this structure. Do not add, remove, or rename sections.
+    If a section has no content, write "None." on its own line.
+
+    # 1:1 Summary
+
+    > <one-sentence TL;DR in a blockquote, capturing the main outcome>
+
+    ## Discussion
+
+    3-7 bullet points covering the main topics in chronological order. Each
+    bullet is one topic.
+
+    ## Decisions
+
+    Bulleted list of decisions made. One per bullet. "None." if empty.
+
+    ## Action items
+
+    Use `- [ ]` (markdown task list) for each action item. Bold the owner
+    name with **double asterisks**. If the transcript does not name an
+    owner, write "Unassigned" in bold. One action per line — never combine
+    multiple actions on one line. Include a due date if one was mentioned.
+
+    - [ ] **<Owner Name>** — <what they need to do, with due date if mentioned>
+    - [ ] **Unassigned** — <action with no clear owner>
+
+    ## Blockers
+
+    Bulleted list of things blocking progress. "None." if empty.
+
+    ## Open questions
+
+    Bulleted list of unresolved questions raised in the meeting. "None." if
+    empty.
+
+    ## Next 1:1
+
+    2-5 topics to bring up next time, phrased as questions or themes (not
+    actions). "None." if empty.
+
+    ---
+
+    Formatting rules:
+    - One blank line between every section and between every bullet
+    - Bullets use `-` (not `*` or `+`)
+    - No emojis
+    - No tables (unless listing 5+ parallel items)
+    - Keep total length to ~300-500 words
 
     Transcript:
     {{transcript}}

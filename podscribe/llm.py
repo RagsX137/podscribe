@@ -13,6 +13,18 @@ from tqdm import tqdm
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
+ANTI_HALLUCINATION_PREAMBLE = (
+    "Strict grounding rules — read carefully:\n"
+    "1. Every claim must come from the transcript. Do NOT use outside "
+    "knowledge, training data, or assumptions about the people or projects "
+    "mentioned.\n"
+    "2. If something is unclear, missing, or you do not understand it, "
+    "say so explicitly — e.g. 'Not mentioned in the transcript', "
+    "'I don't know', or 'Unclear from the transcript'. Do NOT guess.\n"
+    "3. Never invent names, dates, action items, decisions, or other facts. "
+    "If the transcript does not say it, do not write it."
+)
+
 SPEAKER_PRESERVATION_PREAMBLE = (
     "Preserve all names exactly as they appear in the transcript. "
     "For each action item, name the responsible person "
@@ -30,7 +42,13 @@ def build_enhance_prompt(
     preserve_speakers: bool = True,
 ) -> str:
     if preserve_speakers:
-        template = SPEAKER_PRESERVATION_PREAMBLE + "\n\n" + template
+        template = (
+            ANTI_HALLUCINATION_PREAMBLE
+            + "\n\n"
+            + SPEAKER_PRESERVATION_PREAMBLE
+            + "\n\n"
+            + template
+        )
     glossary_text = ", ".join(
         f"{e['term']} ({e.get('category', 'other')})" for e in glossary
     )
@@ -96,28 +114,29 @@ def enhance_transcript(
                     mininterval=0.5, dynamic_ncols=True,
                 )
 
-            for line in resp.iter_lines(decode_unicode=True):
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if "response" in chunk:
-                    text_parts.append(chunk["response"])
-                    if bar is not None:
-                        bar.update(1)
-                if chunk.get("done"):
-                    stats = {
-                        "prompt_eval_count": chunk.get("prompt_eval_count", 0),
-                        "eval_count": chunk.get("eval_count", 0),
-                        "total_duration_ns": chunk.get("total_duration", 0),
-                        "eval_duration_ns": chunk.get("eval_duration", 0),
-                    }
-                    break
-
-            if bar is not None:
-                bar.close()
+            try:
+                for line in resp.iter_lines(decode_unicode=True):
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if "response" in chunk:
+                        text_parts.append(chunk["response"])
+                        if bar is not None:
+                            bar.update(1)
+                    if chunk.get("done"):
+                        stats = {
+                            "prompt_eval_count": chunk.get("prompt_eval_count", 0),
+                            "eval_count": chunk.get("eval_count", 0),
+                            "total_duration_ns": chunk.get("total_duration", 0),
+                            "eval_duration_ns": chunk.get("eval_duration", 0),
+                        }
+                        break
+            finally:
+                if bar is not None:
+                    bar.close()
 
             if show_progress:
                 pe = stats.get("prompt_eval_count", 0)
@@ -140,7 +159,7 @@ def enhance_transcript(
             pass
 
         if attempt < max_retries - 1:
-            time.sleep(delays[attempt])
+            time.sleep(delays[min(attempt, len(delays) - 1)])
 
     return None
 

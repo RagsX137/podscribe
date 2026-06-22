@@ -142,6 +142,7 @@ def test_extract_structured_fields_empty():
 
 
 SPEAKER_PREAMBLE_FRAGMENT = "Preserve all names exactly as they appear"
+ANTI_HALLUCINATION_FRAGMENT = "Strict grounding rules"
 
 
 def test_build_enhance_prompt_includes_speaker_preamble_by_default():
@@ -162,6 +163,26 @@ def test_build_enhance_prompt_preamble_appears_before_template():
     template_marker_pos = prompt.find("Correct these names")
     assert preamble_pos < template_marker_pos
     assert preamble_pos >= 0
+
+
+def test_build_enhance_prompt_includes_anti_hallucination_preamble_by_default():
+    """Default behavior: include the anti-hallucination preamble."""
+    prompt = build_enhance_prompt(TEMPLATE, GLOSSARY, "hello")
+    assert ANTI_HALLUCINATION_FRAGMENT in prompt
+
+
+def test_build_enhance_prompt_excludes_anti_hallucination_when_disabled():
+    prompt = build_enhance_prompt(TEMPLATE, GLOSSARY, "hello", preserve_speakers=False)
+    assert ANTI_HALLUCINATION_FRAGMENT not in prompt
+
+
+def test_build_enhance_prompt_anti_hallucination_comes_before_speaker():
+    """Anti-hallucination rule should come first — it's the most important."""
+    prompt = build_enhance_prompt(TEMPLATE, GLOSSARY, "hello")
+    ah_pos = prompt.find(ANTI_HALLUCINATION_FRAGMENT)
+    sp_pos = prompt.find(SPEAKER_PREAMBLE_FRAGMENT)
+    assert ah_pos < sp_pos
+    assert ah_pos >= 0
 
 
 def test_enhance_streams_and_returns_full_text():
@@ -227,3 +248,30 @@ def test_enhance_uses_30_minute_timeout():
     with patch("podscribe.llm.requests.post", return_value=resp) as mock_post:
         enhance_transcript("qwen3.6:27b", "go", show_progress=False)
     assert mock_post.call_args.kwargs["timeout"] == 1800
+
+
+def test_enhance_closes_progress_bar_on_stream_error():
+    """If iter_lines raises mid-stream, the tqdm bar must still be closed."""
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.iter_lines = MagicMock(side_effect=requests.ConnectionError("stream dropped"))
+    bar_mock = MagicMock()
+    with patch("podscribe.llm.requests.post", return_value=resp):
+        with patch("podscribe.llm.tqdm", return_value=bar_mock):
+            with patch("podscribe.llm.time.sleep"):
+                with patch("podscribe.llm._ollama_model_info", return_value={}):
+                    result = enhance_transcript(
+                        "qwen3.6:27b", "go", show_progress=True, max_retries=1
+                    )
+    assert result is None
+    bar_mock.close.assert_called()
+
+
+def test_enhance_high_max_retries_doesnt_crash():
+    """max_retries > len(delays) should not cause IndexError on the backoff."""
+    with patch("podscribe.llm.requests.post", side_effect=requests.ConnectionError):
+        with patch("podscribe.llm.time.sleep"):
+            result = enhance_transcript(
+                "qwen3.6:27b", "go", max_retries=6, show_progress=False
+            )
+    assert result is None
