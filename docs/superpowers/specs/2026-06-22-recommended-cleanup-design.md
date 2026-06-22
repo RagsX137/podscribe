@@ -303,7 +303,7 @@ Only `README.md`. No new sections, no rewrite. Specific edits:
 
 ## Testing strategy
 
-**New tests (~16):**
+**New tests (~22):**
 
 | Fix | Test name | Asserts |
 |---|---|---|
