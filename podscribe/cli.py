@@ -126,10 +126,14 @@ def cmd_record(args) -> int:
 
     wav_writer = None
     if args.keep_audio:
-        wav_writer = wave.open(str(meeting.audio_path), "wb")
-        wav_writer.setnchannels(1)
-        wav_writer.setsampwidth(2)
-        wav_writer.setframerate(16000)
+        try:
+            wav_writer = wave.open(str(meeting.audio_path), "wb")
+            wav_writer.setnchannels(1)
+            wav_writer.setsampwidth(2)
+            wav_writer.setframerate(16000)
+        except OSError as e:
+            print(f"  ⚠ audio write failed: {e}", file=sys.stderr)
+            wav_writer = None
 
     def handle_sigint(sig, frame):
         capture.stop()
@@ -300,9 +304,10 @@ def cmd_enhance(args) -> int:
         return 1
 
     transcript = read_transcript(meeting)
-    if len(transcript.strip()) < 50:
+    stripped_len = len(transcript.strip())
+    if stripped_len < 50:
         print(
-            f"Transcript too short to enhance ({len(transcript)} chars).",
+            f"Transcript too short to enhance ({stripped_len} chars).",
             file=sys.stderr,
         )
         return 1

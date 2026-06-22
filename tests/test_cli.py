@@ -617,3 +617,74 @@ def test_cmd_record_omits_audio_by_default(tmp_path, monkeypatch):
     raw_files = list(tmp_path.glob("pods/sam-chen/transcripts/*/*.raw"))
     assert raw_files == []
 
+
+def test_cmd_record_survives_wav_open_failure(tmp_path, monkeypatch, capsys):
+    """If wave.open fails with --keep-audio, recording should continue and finalize."""
+    monkeypatch.chdir(tmp_path)
+    from unittest.mock import patch, MagicMock
+    import numpy as np
+    from podscribe.storage import init_pod
+    from podscribe.cli import cmd_record, build_parser
+
+    pod = init_pod("sam-chen")
+
+    fake_segment = np.zeros(8000, dtype=np.float32)
+    mock_transcriber = MagicMock()
+    mock_transcriber.model_name = "base"
+    mock_transcriber.transcribe.return_value = [{"text": "hello", "start": 0, "end": 0.5}]
+    mock_capture = MagicMock()
+    mock_capture.vad_aggressiveness = 2
+    mock_capture.had_overflow = False
+    mock_capture.segments.return_value = iter([fake_segment])
+    mock_capture.stop = MagicMock(side_effect=lambda: None)
+
+    with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
+        with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
+            with patch("podscribe.cli.signal.signal"):
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5]):
+                    with patch("podscribe.cli.wave.open", side_effect=OSError("disk full")):
+                        args = build_parser().parse_args(
+                            ["record", "sam-chen", "--keep-audio", "--model", "base"]
+                        )
+                        rc = cmd_record(args)
+                        assert rc == 0
+
+    captured = capsys.readouterr()
+    assert "audio write failed" in captured.err
+    json_files = list(tmp_path.glob("pods/sam-chen/transcripts/*/*.json"))
+    assert len(json_files) == 1, "finalize_meeting must still write metadata"
+
+
+def test_cmd_enhance_short_transcript_message_shows_stripped_length(
+    tmp_path, monkeypatch, capsys
+):
+    """The 'too short' message should report the stripped length, not the raw length."""
+    monkeypatch.chdir(tmp_path)
+    from datetime import datetime
+    from unittest.mock import patch
+    from podscribe.storage import init_pod, start_meeting, finalize_meeting
+    from podscribe.cli import cmd_enhance, build_parser
+
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    meeting.transcript_path.write_text("   \n\n\n   hi   \n\n\n   ")
+    finalize_meeting(meeting)
+
+    (tmp_path / "podscribe.yaml").write_text(
+        "llm:\n  model: qwen3.6:27b\n  prompt_template: x\n"
+    )
+
+    llm_called = []
+    with patch(
+        "podscribe.cli.enhance_transcript",
+        side_effect=lambda *a, **kw: llm_called.append(True) or "no",
+    ):
+        args = build_parser().parse_args(["enhance", "sam-chen", meeting.id])
+        rc = cmd_enhance(args)
+        assert rc == 1
+
+    assert llm_called == [], "LLM should not be called for short transcript"
+    captured = capsys.readouterr()
+    assert "2 chars" in captured.err
+    assert "16 chars" not in captured.err
+
