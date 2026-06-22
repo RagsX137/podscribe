@@ -106,13 +106,13 @@ pip install webrtcvad
 
 ## Models
 
-- Default: `large-v3-turbo` (~500MB, downloaded on first use, then cached)
-- pywhispercpp handles download + caching automatically
-- To use a different model: `podscribe record sam-chen --model large-v3`
+- Default: `large-v3-turbo` (~500MB, downloaded on first use via Apple MLX, then cached)
+- mlx-whisper handles download + caching automatically (stored in `~/.cache/huggingface/`)
+- To use a different model: `podscribe record sam-chen --model base`
 
 ## Privacy
 
-- **All processing local.** Whisper runs via whisper.cpp on your machine. No network calls during recording or transcription.
+- **All processing local.** Whisper runs via Apple MLX on your machine. No network calls during recording or transcription.
 - **Raw audio deleted by default** after transcript is saved. Use `--keep-audio` for debugging.
 - **Pods are isolated.** Each person's data lives in its own directory. Easy to back up, share, or delete one without touching others.
 
@@ -154,7 +154,7 @@ Start with `2`. If you see lots of "…" or empty segments in transcripts, raise
 
 ## Troubleshooting
 
-**"No module named pywhispercpp"** — `pip install pywhispercpp` (or `pip install -e .` to install everything).
+Model download is handled by `mlx-whisper` automatically via Hugging Face Hub.
 
 **"No module named webrtcvad"** — needs C build tools: `xcode-select --install` then `pip install webrtcvad`.
 

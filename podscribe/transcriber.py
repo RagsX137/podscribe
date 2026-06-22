@@ -5,7 +5,7 @@ from typing import List
 
 import numpy as np
 
-DEFAULT_MODEL = "base"
+DEFAULT_MODEL = "large-v3-turbo"
 
 MODEL_MAP = {
     "base": "mlx-community/whisper-base-mlx",

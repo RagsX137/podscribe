@@ -22,7 +22,7 @@ podscribe demo start
 ```
 
 Options:
-- `--model large-v3-turbo` — Whisper model (default: `base.en`)
+- `--model small` — Whisper model (default: `large-v3-turbo`)
 - `--vad-aggressiveness 0-3` — VAD strictness (default `2`, `0`=loose, `3`=strict)
 - `--keep-audio` — keep raw audio file after recording
 - `--device <N>` — input device index

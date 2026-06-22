@@ -331,7 +331,7 @@ def build_parser() -> argparse.ArgumentParser:
     # record
     p_rec = sub.add_parser("record", help="Live record and transcribe a meeting.")
     p_rec.add_argument("pod", help="Pod name")
-    p_rec.add_argument("--model", default="base", help="Whisper model (default: base)")
+    p_rec.add_argument("--model", default="large-v3-turbo", help="Whisper model (default: large-v3-turbo)")
     p_rec.add_argument("--vad-aggressiveness", type=int, default=2, choices=[0, 1, 2, 3], help="VAD strictness (0=loose, 3=strict; default 2)")
     p_rec.add_argument("--device", type=int, default=None, help="Input device index (default: system default)")
     p_rec.add_argument("--keep-audio", action="store_true", help="Keep raw audio file (for debugging)")

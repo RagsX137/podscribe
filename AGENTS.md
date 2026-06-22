@@ -25,7 +25,7 @@ podscribe/
 - **Pod-first syntax**: `podscribe <pod> record` → rewritten to `record <pod>` by `rewrite_argv`
 - **Aliases**: `start` → `record`, `summarize` → `enhance`
 - See `cli.py:rewrite_argv` for exact rewrite logic
-- **`--model` default is `base`** (maps to `mlx-community/whisper-base-mlx`); README incorrectly says `large-v3-turbo`
+- **`--model` default is `large-v3-turbo`** (maps to `mlx-community/whisper-large-v3-turbo`)
 - README is outdated — mentions `pywhispercpp` but the code uses `mlx-whisper`
 
 ## Commands
@@ -33,7 +33,7 @@ podscribe/
 | Command | Notes |
 |---------|-------|
 | `init <name>` | Name must be kebab-case `^[a-z0-9]+(-[a-z0-9]+)*$`; flags: `--display-name`, `--role`, `--cadence`, `--notes` |
-| `record` | `--model` (default `base`), `--vad-aggressiveness` 0-3, `--device`, `--keep-audio`; Ctrl+C to stop; audio lazy-imported |
+| `record` | `--model` (default `large-v3-turbo`), `--vad-aggressiveness` 0-3, `--device`, `--keep-audio`; Ctrl+C to stop; audio lazy-imported |
 | `list` | Lists pods + meetings newest-first |
 | `show <pod> <id-prefix\|latest>` | Reads from `.md` transcript file |
 | `context` | Subcommands: `add`, `remove`, `list`; glossary merged from `leadership_team.yaml` + per-pod `config.yaml` |
@@ -103,7 +103,7 @@ Declared in `pyproject.toml`: `mlx-whisper`, `webrtcvad`, `sounddevice`, `numpy`
 ## Gotchas
 
 - **`requests` is an undeclared dependency** — needed only for `enhance` command, not core recording
-- **README is stale**: says `pywhispercpp`/`large-v3-turbo` default; actual code uses `mlx-whisper` with `base` default
+- **README is slightly stale** — mentions `pywhispercpp` but code uses `mlx-whisper` since commit `05270bf`
 - **Audio modules lazy-imported** in `cmd_record` — `audio.py` and `transcriber.py` are not loaded for non-recording commands
 - **Test isolation**: must `monkeypatch.chdir(tmp_path)` before any disk ops; tests share `tmp_path` per function
 - **Model validation is in `Pod.__post_init__`** — constructing a `Pod` with invalid name raises `ValueError`

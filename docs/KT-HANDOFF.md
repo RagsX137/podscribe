@@ -57,4 +57,4 @@ Saves to `<meeting-id>.enhanced.md`. You control the prompt — edit it in YAML 
 
 ## Model
 
-Default changed to `base.en` (fast, 141MB). Use `--model large-v3-turbo` for accuracy.
+Default is `large-v3-turbo` (~500MB, best accuracy). Use `--model base` for speed.
