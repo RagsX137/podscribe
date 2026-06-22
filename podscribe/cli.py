@@ -358,29 +358,12 @@ def cmd_consolidate(args) -> int:
     enhanced_path = pod.summaries_dir_for(date_str) / f"{meeting.id}.md"
 
     if not enhanced_path.exists():
-        print(f"No enhanced summary for {meeting.id}. Run enhance first? [y/N] ", end="", file=sys.stderr)
-        try:
-            answer = input().strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            answer = "n"
-        if answer in ("y", "yes"):
-            llm_config = pod.llm if pod.llm else load_project_config().get("llm")
-            if not llm_config or not llm_config.get("model") or not llm_config.get("prompt_template"):
-                print("LLM not configured. Set up LLM config first.", file=sys.stderr)
-                return 1
-            transcript = read_transcript(meeting)
-            effective_glossary = get_effective_glossary(pod)
-            prompt = build_enhance_prompt(llm_config["prompt_template"], effective_glossary, transcript)
-            result = enhance_transcript(llm_config["model"], prompt)
-            if result is None:
-                print("Failed to reach Ollama.", file=sys.stderr)
-                return 1
-            enhanced_path.parent.mkdir(parents=True, exist_ok=True)
-            enhanced_path.write_text(result)
-            print(f"Enhanced summary saved to {enhanced_path}")
-        else:
-            print("Aborted.", file=sys.stderr)
-            return 1
+        print(
+            f"No enhanced summary for {meeting.id}. "
+            f"Run `podscribe enhance {pod.name} {meeting.id}` first.",
+            file=sys.stderr,
+        )
+        return 1
 
     enhanced_text = enhanced_path.read_text()
 

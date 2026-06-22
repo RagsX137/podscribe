@@ -287,9 +287,9 @@ def test_cmd_consolidate_no_meetings(tmp_path, monkeypatch, capsys):
     assert "No meetings" in captured.err
 
 
-def test_cmd_consolidate_no_enhanced_summary(tmp_path, monkeypatch, capsys):
+def test_cmd_consolidate_no_enhanced_summary_errors_out(tmp_path, monkeypatch, capsys):
+    """Missing summary: hard error with the exact enhance command to run, no prompt."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("builtins.input", lambda: "n")
     from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
     from podscribe.models import Segment
     from datetime import datetime
@@ -305,6 +305,7 @@ def test_cmd_consolidate_no_enhanced_summary(tmp_path, monkeypatch, capsys):
     assert rc == 1
     captured = capsys.readouterr()
     assert "No enhanced summary" in captured.err
+    assert "podscribe enhance sam-chen" in captured.err
 
 
 def test_cmd_consolidate_with_no_log(tmp_path, monkeypatch, capsys):
@@ -449,4 +450,26 @@ def test_cmd_enhance_rejects_short_transcript(tmp_path, monkeypatch, capsys):
     assert llm_called == []
     captured = capsys.readouterr()
     assert "too short" in captured.err
+
+
+def test_cmd_consolidate_no_summary_does_not_prompt(tmp_path, monkeypatch, capsys):
+    """Missing summary: must NOT call input() — should be a hard error."""
+    monkeypatch.chdir(tmp_path)
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_consolidate, build_parser
+
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    append_segment(meeting, Segment(1.0, 5.0, "hello world"))
+    finalize_meeting(meeting)
+
+    def fail_if_called(*a, **kw):
+        raise AssertionError("input() should not be called")
+
+    monkeypatch.setattr("builtins.input", fail_if_called)
+    args = build_parser().parse_args(["consolidate", "sam-chen"])
+    rc = cmd_consolidate(args)
+    assert rc == 1
 
