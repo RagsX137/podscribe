@@ -1,13 +1,82 @@
 """Pod and meeting storage layer."""
 from __future__ import annotations
 
+import csv
 import json
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
 from .config import load_pod_config, save_pod_config
 from .models import Meeting, Pod, Segment, fmt_date, make_meeting_id
+
+
+CSV_COLUMNS = [
+    "date", "person", "meeting_id", "quick_summary",
+    "key_topics", "action_items", "blockers", "next_steps",
+    "summary_file", "transcript_file",
+]
+
+
+def log_path(pod: Pod) -> Path:
+    return pod.base_path / "meetings.csv"
+
+
+def log_entry_exists(pod: Pod, meeting_id: str) -> bool:
+    path = log_path(pod)
+    if not path.exists():
+        return False
+    with path.open() as f:
+        for row in csv.DictReader(f):
+            if row.get("meeting_id") == meeting_id:
+                return True
+    return False
+
+
+def append_log_row(pod: Pod, fields: dict) -> None:
+    path = log_path(pod)
+    new_row = {col: fields.get(col, "") for col in CSV_COLUMNS}
+    file_exists = path.exists()
+    with path.open("a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(new_row)
+
+
+def update_log_row(pod: Pod, meeting_id: str, fields: dict) -> None:
+    path = log_path(pod)
+    if not path.exists():
+        append_log_row(pod, fields)
+        return
+    with path.open() as f:
+        rows = list(csv.DictReader(f))
+    updated = {col: fields.get(col, "") for col in CSV_COLUMNS}
+    out_rows = []
+    found = False
+    for row in rows:
+        if row.get("meeting_id") == meeting_id:
+            out_rows.append(updated)
+            found = True
+        else:
+            out_rows.append(row)
+    if not found:
+        out_rows.append(updated)
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".csv")
+    try:
+        with os.fdopen(fd, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+            writer.writeheader()
+            writer.writerows(out_rows)
+        os.replace(tmp_path, path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
+
+
+rewrite_log_row = update_log_row
 
 
 def init_pod(name: str, **kwargs) -> Pod:

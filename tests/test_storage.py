@@ -1,4 +1,5 @@
 """Tests for storage layer."""
+import csv
 import json
 from datetime import datetime
 
@@ -6,14 +7,19 @@ import pytest
 
 from podscribe.models import Segment, fmt_date
 from podscribe.storage import (
+    append_log_row,
     append_segment,
     finalize_meeting,
     init_pod,
     list_meetings,
     load_pod,
+    log_entry_exists,
+    log_path,
     pod_exists,
     read_transcript,
+    rewrite_log_row,
     start_meeting,
+    update_log_row,
 )
 
 
@@ -168,3 +174,119 @@ def test_pods_isolated(tmp_path, monkeypatch):
     finalize_meeting(m)
     assert list_meetings(sam)
     assert not list_meetings(priya)
+
+
+def test_log_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    path = log_path(pod)
+    assert path == pod.base_path / "meetings.csv"
+
+
+def test_append_and_read_log_row(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    fields = {
+        "date": "2026-06-22",
+        "person": "Sam Chen",
+        "meeting_id": "2026-06-22-1430-sam-chen",
+        "quick_summary": "Synced on Q3 roadmap",
+        "key_topics": "Q3 roadmap|API review",
+        "action_items": "Unblock API review",
+        "blockers": "Stalled on VP sign-off",
+        "next_steps": "Check in Friday",
+        "summary_file": "summaries/2026-06-22-1430-sam-chen.md",
+        "transcript_file": "transcripts/2026-06-22-1430-sam-chen.md",
+    }
+    append_log_row(pod, fields)
+    path = log_path(pod)
+    assert path.exists()
+    with path.open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["meeting_id"] == fields["meeting_id"]
+    assert rows[0]["quick_summary"] == fields["quick_summary"]
+
+
+def test_log_entry_exists_found(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    fields = {"meeting_id": "2026-06-22-1430-sam-chen"}
+    append_log_row(pod, fields)
+    assert log_entry_exists(pod, "2026-06-22-1430-sam-chen") is True
+    assert log_entry_exists(pod, "2026-06-23-1430-sam-chen") is False
+
+
+def test_log_entry_exists_no_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    assert log_entry_exists(pod, "anything") is False
+
+
+def test_rewrite_log_row(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    fields = {
+        "meeting_id": "2026-06-22-1430-sam-chen",
+        "quick_summary": "Old summary",
+        "key_topics": "",
+        "action_items": "",
+        "blockers": "",
+        "next_steps": "",
+        "date": "",
+        "person": "",
+        "summary_file": "",
+        "transcript_file": "",
+    }
+    append_log_row(pod, fields)
+    fields["quick_summary"] = "Updated summary"
+    rewrite_log_row(pod, "2026-06-22-1430-sam-chen", fields)
+    path = log_path(pod)
+    with path.open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["quick_summary"] == "Updated summary"
+
+
+def test_rewrite_log_row_unmatched_id(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    append_log_row(pod, {"meeting_id": "2026-06-22-1430-sam-chen"})
+    rewrite_log_row(pod, "nonexistent-id", {
+        "meeting_id": "2026-06-23-1430-sam-chen",
+        "quick_summary": "New row",
+        "date": "2026-06-23",
+    })
+    path = log_path(pod)
+    with path.open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 2
+    assert rows[1]["meeting_id"] == "2026-06-23-1430-sam-chen"
+    assert rows[1]["quick_summary"] == "New row"
+
+
+def test_update_log_row_unmatched_id(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    append_log_row(pod, {"meeting_id": "2026-06-22-1430-sam-chen"})
+    update_log_row(pod, "nonexistent-id", {
+        "meeting_id": "2026-06-23-1430-sam-chen",
+        "quick_summary": "New row via update",
+    })
+    path = log_path(pod)
+    with path.open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 2
+    assert rows[1]["meeting_id"] == "2026-06-23-1430-sam-chen"
+    assert rows[1]["quick_summary"] == "New row via update"
+
+
+def test_append_multiple_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    append_log_row(pod, {"meeting_id": "id-1"})
+    append_log_row(pod, {"meeting_id": "id-2"})
+    path = log_path(pod)
+    with path.open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 2
