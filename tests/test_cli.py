@@ -281,3 +281,72 @@ def test_config_consolidate_set():
     assert args.action == "consolidate"
     assert args.consolidate_action == "set"
     assert args.prompt == "Extract {{summary}}"
+
+
+def test_cmd_consolidate_no_pod(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.cli import cmd_consolidate, build_parser
+    args = build_parser().parse_args(["consolidate", "nope"])
+    rc = cmd_consolidate(args)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "No pod" in captured.err
+
+
+def test_cmd_consolidate_no_meetings(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.storage import init_pod
+    from podscribe.cli import cmd_consolidate, build_parser
+    init_pod("sam-chen")
+    args = build_parser().parse_args(["consolidate", "sam-chen"])
+    rc = cmd_consolidate(args)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "No meetings" in captured.err
+
+
+def test_cmd_consolidate_no_enhanced_summary(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", lambda: "n")
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_consolidate, build_parser
+
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    append_segment(meeting, Segment(1.0, 5.0, "hello world"))
+    finalize_meeting(meeting)
+
+    args = build_parser().parse_args(["consolidate", "sam-chen"])
+    rc = cmd_consolidate(args)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "No enhanced summary" in captured.err
+
+
+def test_cmd_consolidate_with_no_log(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_consolidate, build_parser
+
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    append_segment(meeting, Segment(1.0, 5.0, "hello world"))
+    finalize_meeting(meeting)
+    date_str = "22-JUN-2026"
+    summary_dir = pod.summaries_dir_for(date_str)
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    enhanced = summary_dir / f"{meeting.id}.md"
+    enhanced.write_text("# Enhanced\nWe talked about Q3 plans.")
+
+    with patch("podscribe.cli.enhance_transcript", return_value="quick_summary: Test summary"):
+        with patch("podscribe.cli.load_project_config", return_value={"llm": {"model": "qwen3.6", "prompt_template": "test"}}):
+            args = build_parser().parse_args(["consolidate", "sam-chen", "--no-log"])
+            rc = cmd_consolidate(args)
+            assert rc == 0
+    captured = capsys.readouterr()
+    assert "Test summary" in captured.out
+
