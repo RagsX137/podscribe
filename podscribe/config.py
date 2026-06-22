@@ -1,0 +1,46 @@
+"""Pod configuration: load and save config.yaml."""
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from .models import Pod
+
+
+def save_pod_config(pod: Pod) -> None:
+    """Save pod config to YAML at pod.config_path."""
+    data = {
+        "name": pod.name,
+        "display_name": pod.display_name,
+        "role": pod.role,
+        "cadence": pod.cadence,
+        "notes": pod.notes,
+        "created_at": pod.created_at,
+    }
+    if pod.glossary:
+        data["glossary"] = pod.glossary
+    if pod.llm:
+        data["llm"] = pod.llm
+    with pod.config_path.open("w") as f:
+        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+
+
+def load_pod_config(base_path: Path) -> Pod:
+    """Load pod config from YAML at base_path/config.yaml."""
+    config_path = base_path / "config.yaml"
+    if not config_path.exists():
+        raise FileNotFoundError(f"No pod config found at {config_path}")
+    with config_path.open() as f:
+        data = yaml.safe_load(f) or {}
+    return Pod(
+        name=data["name"],
+        display_name=data.get("display_name", ""),
+        role=data.get("role", ""),
+        cadence=data.get("cadence", "weekly"),
+        notes=data.get("notes", ""),
+        created_at=data.get("created_at", ""),
+        glossary=data.get("glossary"),
+        llm=data.get("llm"),
+        base_path=base_path,
+    )

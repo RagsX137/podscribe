@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "podscribe"
+version = "0.1.0"
+description = "Local-first live transcription for 1:1s and team meetings. Pod-isolated. Privacy-respecting."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Mavis"}]
+license = {text = "MIT"}
+
+dependencies = [
+    "pywhispercpp>=1.2.0",
+    "webrtcvad>=2.0.10",
+    "sounddevice>=0.4.6",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+podscribe = "podscribe.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["podscribe*"]
