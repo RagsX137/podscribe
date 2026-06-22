@@ -1,9 +1,11 @@
 """Ollama HTTP client for transcript enhancement."""
 from __future__ import annotations
 
+import re
 from typing import List, Optional
 
 import requests
+import yaml
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
@@ -38,3 +40,39 @@ def enhance_transcript(
         return None
     except ValueError:
         return None
+
+
+def build_consolidate_prompt(template: str, summary: str) -> str:
+    prompt = template.replace("{{summary}}", summary)
+    if "{{summary}}" not in template:
+        prompt += "\n\n" + summary
+    return prompt
+
+
+def extract_structured_fields(response: str) -> Optional[dict]:
+    """Parse YAML structured fields from LLM response.
+
+    Tries full response first, then fenced code blocks.
+    Returns dict with known fields or None.
+    """
+    text = response.strip()
+    if not text:
+        return None
+
+    for source in [text, _extract_fenced_yaml(text)]:
+        if source is None:
+            continue
+        try:
+            data = yaml.safe_load(source)
+            if isinstance(data, dict):
+                return data
+        except yaml.YAMLError:
+            continue
+    return None
+
+
+def _extract_fenced_yaml(text: str) -> Optional[str]:
+    match = re.search(r"```(?:yaml)?\s*\n(.*?)\n```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return None

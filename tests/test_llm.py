@@ -1,8 +1,14 @@
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from podscribe.llm import build_enhance_prompt, enhance_transcript
+from podscribe.llm import (
+    build_consolidate_prompt,
+    build_enhance_prompt,
+    enhance_transcript,
+    extract_structured_fields,
+)
 
 
 GLOSSARY = [
@@ -54,3 +60,55 @@ def test_enhance_transcript_http_error():
     with patch("podscribe.llm.requests.post", return_value=mock_resp):
         result = enhance_transcript("llama3.2", "fix this")
         assert result is None
+
+
+ENHANCED_SUMMARY = "We discussed the Q3 roadmap. Sam is blocked on API review. Next steps: check in Friday."
+
+
+def test_build_consolidate_prompt_inserts_summary():
+    prompt = build_consolidate_prompt("Extract: {{summary}}", ENHANCED_SUMMARY)
+    assert ENHANCED_SUMMARY in prompt
+    assert "Extract:" in prompt
+
+
+def test_build_consolidate_prompt_no_var():
+    """If template doesn't contain {{summary}}, it's appended."""
+    prompt = build_consolidate_prompt("Extract fields", ENHANCED_SUMMARY)
+    assert ENHANCED_SUMMARY in prompt
+
+
+def test_extract_structured_fields_valid_yaml():
+    response = """
+quick_summary: Synced on Q3 roadmap
+key_topics:
+  - Q3 roadmap
+  - API review
+action_items:
+  - Unblock API review
+blockers:
+  - Stalled on VP sign-off
+next_steps:
+  - Check in Friday
+"""
+    result = extract_structured_fields(response)
+    assert result is not None
+    assert result["quick_summary"] == "Synced on Q3 roadmap"
+    assert "API review" in result["key_topics"]
+    assert "Unblock API review" in result["action_items"]
+
+
+def test_extract_structured_fields_fenced_yaml():
+    response = "Some text\n```yaml\nquick_summary: Synced\nkey_topics: []\n```\nmore text"
+    result = extract_structured_fields(response)
+    assert result is not None
+    assert result["quick_summary"] == "Synced"
+
+
+def test_extract_structured_fields_invalid():
+    result = extract_structured_fields("not yaml at all")
+    assert result is None
+
+
+def test_extract_structured_fields_empty():
+    result = extract_structured_fields("")
+    assert result is None
