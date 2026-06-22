@@ -139,35 +139,17 @@ def test_start_alias_toplevel():
 
 
 def test_summarize_alias_pod_first():
-    """`podscribe <pod> summarize --latest` rewrites to `enhance <pod> --latest`."""
-    args = _parse(["demo", "summarize", "--latest"])
+    """`podscribe <pod> summarize` rewrites to `enhance <pod>`."""
+    args = _parse(["demo", "summarize"])
     assert args.command == "enhance"
     assert args.pod == "demo"
-    assert args.latest is True
 
 
 def test_summarize_alias_toplevel():
-    """`podscribe summarize <pod> --latest` rewrites to `enhance <pod> --latest`."""
-    args = _parse(["summarize", "demo", "--latest"])
+    """`podscribe summarize <pod>` rewrites to `enhance <pod>`."""
+    args = _parse(["summarize", "demo"])
     assert args.command == "enhance"
     assert args.pod == "demo"
-    assert args.latest is True
-
-
-def test_enhance_latest_flag():
-    """`podscribe enhance <pod> --latest` sets latest flag."""
-    args = _parse(["enhance", "demo", "--latest"])
-    assert args.command == "enhance"
-    assert args.pod == "demo"
-    assert args.latest is True
-
-
-def test_enhance_latest_flag_short():
-    """`podscribe enhance <pod> -l` sets latest flag."""
-    args = _parse(["enhance", "demo", "-l"])
-    assert args.command == "enhance"
-    assert args.pod == "demo"
-    assert args.latest is True
 
 
 def test_standard_syntax_still_works():
@@ -373,4 +355,11 @@ def test_cmd_show_empty_meeting_defaults_to_latest(tmp_path, monkeypatch, capsys
     assert rc == 0
     captured = capsys.readouterr()
     assert "hello world" in captured.out
+
+
+def test_enhance_parser_has_no_latest_flag():
+    """--latest/-l is dead code; args.meeting defaults to 'latest'."""
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["enhance", "sam-chen", "2026-06-22-1430", "--latest"])
 

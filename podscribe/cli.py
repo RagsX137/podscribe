@@ -494,7 +494,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_enh = sub.add_parser("enhance", help="Enhance transcript via local LLM (Ollama).")
     p_enh.add_argument("pod", help="Pod name")
     p_enh.add_argument("meeting", nargs="?", default="latest", help="Meeting ID prefix (default: latest)")
-    p_enh.add_argument("--latest", "-l", action="store_true", help="Use latest meeting")
     p_enh.set_defaults(func=cmd_enhance)
 
     # consolidate
