@@ -930,7 +930,7 @@ Expected: all 7 pass.
 pytest tests/ -v -k "not transcriber"
 ```
 
-Expected: 133 tests pass (was 126, +7 new glossary tests).
+Expected: 141 tests pass (was 134 after T7, +7 new glossary tests).
 
 - [ ] **Step 6: Commit**
 
@@ -1169,7 +1169,7 @@ from .config import get_effective_glossary, load_consolidate_prompt, load_leader
 pytest tests/ -v -k "not transcriber"
 ```
 
-Expected: 146 tests pass (was 133, +8 from this task — 3 preamble tests + 5 config tests).
+Expected: 149 tests pass (was 141 after T8, +8 from this task — 3 preamble tests + 5 config tests).
 
 - [ ] **Step 11: Update `podscribe.yaml` (optional but recommended)**
 
@@ -1603,7 +1603,7 @@ Expected: pass.
 pytest tests/ -v -k "not transcriber"
 ```
 
-Expected: 143 tests pass (no count change — just an update).
+Expected: 154 tests pass (no count change from T10 — just the in-place update to `test_meeting_id_format`).
 
 - [ ] **Step 7: Commit**
 
