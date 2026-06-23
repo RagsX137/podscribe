@@ -367,4 +367,14 @@ def test_last_pod_coexists_with_existing_keys(tmp_path, monkeypatch):
     save_last_pod("sam-chen")
     cfg = load_project_config()
     assert cfg["llm"]["model"] == "qwen3.6:27b"
+    assert cfg["llm"]["prompt_template"] == "x"
     assert cfg["last_pod"] == "sam-chen"
+
+
+def test_save_last_pod_rejects_empty_and_non_string(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="non-empty string"):
+        save_last_pod("")
+    with pytest.raises(ValueError, match="non-empty string"):
+        save_last_pod(123)
+    assert load_last_pod() is None  # nothing was written
