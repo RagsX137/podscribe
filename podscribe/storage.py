@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime
@@ -243,3 +244,46 @@ def read_transcript(meeting: Meeting) -> str:
     if not meeting.transcript_path or not meeting.transcript_path.exists():
         raise FileNotFoundError(f"No transcript at {meeting.transcript_path}")
     return meeting.transcript_path.read_text()
+
+
+def _parse_since(value: str):
+    """Parse a since value into a date.
+
+    Accepts:
+    - ISO date: "2026-06-15"
+    - Duration: "7d", "24h", "30m" (days, hours, minutes back from today)
+    """
+    from datetime import datetime, timedelta
+    if not value:
+        raise ValueError("empty value")
+
+    # ISO date
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        pass
+
+    # Duration
+    m = re.match(r"^(\d+)([dhm])$", value)
+    if m:
+        amount, unit = int(m.group(1)), m.group(2)
+        delta = {
+            "d": timedelta(days=amount),
+            "h": timedelta(hours=amount),
+            "m": timedelta(minutes=amount),
+        }[unit]
+        return (datetime.now() - delta).date()
+
+    raise ValueError(
+        f"cannot parse '{value}' as YYYY-MM-DD or duration (e.g. 7d, 24h)"
+    )
+
+
+def _read_pod_log_rows(pod_name: str) -> list:
+    """Read all rows from a single pod's meetings.csv."""
+    pod = load_pod_config(Path("pods") / pod_name)
+    path = log_path(pod)
+    if not path.exists():
+        return []
+    with path.open() as f:
+        return list(csv.DictReader(f))

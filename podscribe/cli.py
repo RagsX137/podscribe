@@ -17,6 +17,7 @@ from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields
 from .models import Segment, fmt_date
 from .storage import (
+    _read_pod_log_rows,
     append_log_row,
     append_segment,
     finalize_meeting,
@@ -26,6 +27,7 @@ from .storage import (
     log_entry_exists,
     log_path,
     pod_exists,
+    read_global_log,
     read_transcript,
     rewrite_log_row,
     save_pod_config,
@@ -202,34 +204,75 @@ def cmd_record(args) -> int:
 
 
 def cmd_list(args) -> int:
-    """List all pods and their meetings."""
-    pods_dir = Path("pods")
-    if not pods_dir.exists():
-        print("No pods yet. Run `podscribe init <name>` to create one.")
-        return 0
-    found_any = False
-    for pod_dir in sorted(pods_dir.iterdir()):
-        if not pod_dir.is_dir():
-            continue
+    """List pods and their meetings, with optional filters."""
+    from .models import parse_meeting_type
+    from .storage import _parse_since
+
+    # Validate --type and --since up front (before the empty-log short-circuit).
+    valid_type = None
+    if args.type:
         try:
-            pod = load_pod(pod_dir.name)
-        except Exception as e:
-            print(f"  [{pod_dir.name}] (error loading: {e})")
-            continue
-        found_any = True
-        meetings = list_meetings(pod)
-        header = f"[{pod.name}] {pod.display_name}"
-        if pod.role:
-            header += f" — {pod.role}"
-        print(header)
-        if not meetings:
-            print("  (no meetings yet)")
-        for m in meetings:
-            dur = f"{m.duration_sec // 60}m{m.duration_sec % 60:02d}s" if m.duration_sec else "?"
-            print(f"  • {m.started_at} ({dur}) → {m.id}")
-    if not found_any:
-        print("No pods yet. Run `podscribe init <name>` to create one.")
+            valid_type = parse_meeting_type(args.type)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 1
+
+    if args.since:
+        try:
+            cutoff = _parse_since(args.since)
+        except ValueError as e:
+            print(f"Invalid --since: {e}", file=sys.stderr)
+            return 1
+
+    # Determine scope: per-pod or all
+    if args.all or args.pod is None:
+        rows = read_global_log()
+        if not rows and not (Path("pods") / "meetings.csv").exists():
+            print("No meetings yet. Record + consolidate a meeting to populate the log.")
+            return 0
+    else:
+        if not pod_exists(args.pod):
+            print(f"No pod '{args.pod}'.", file=sys.stderr)
+            return 1
+        rows = _read_pod_log_rows(args.pod)
+
+    # Filter
+    if args.since:
+        rows = [r for r in rows if _row_date(r) >= cutoff]
+
+    if valid_type is not None:
+        rows = [r for r in rows if r.get("type") == valid_type]
+
+    if args.recent is not None:
+        if args.recent < 0:
+            print("--recent must be non-negative", file=sys.stderr)
+            return 1
+        rows = rows[:args.recent]
+
+    if not rows:
+        print("(no meetings match the filters)")
+        return 0
+
+    # Render markdown table
+    headers = ["pod", "type", "date", "meeting_id", "duration"]
+    lines = [" | ".join(headers), " | ".join("---" for _ in headers)]
+    for r in rows:
+        pod_name = r.get("pod_name") or r.get("person") or "?"
+        lines.append(" | ".join([
+            pod_name,
+            r.get("type") or "-",
+            r.get("date") or "-",
+            r.get("meeting_id") or "-",
+            r.get("duration") or "-",
+        ]))
+    print("\n".join(lines))
     return 0
+
+
+def _row_date(row: dict):
+    """Parse a date string from a row's 'date' field (DD-MMM-YYYY)."""
+    from datetime import datetime
+    return datetime.strptime(row["date"], "%d-%b-%Y").date()
 
 
 def cmd_show(args) -> int:
@@ -515,6 +558,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     # list
     p_list = sub.add_parser("list", help="List all pods and their meetings.")
+    p_list.add_argument("pod", nargs="?", help="Pod name (omit to list all pods)")
+    p_list.add_argument(
+        "--all", action="store_true",
+        help="List meetings across all pods (uses global meetings.csv)",
+    )
+    p_list.add_argument(
+        "--since", metavar="DURATION|DATE",
+        help='Filter to meetings on/after this. Examples: "7d", "24h", "2026-06-15"',
+    )
+    p_list.add_argument(
+        "--recent", type=int, metavar="N",
+        help="Limit to the N most recent meetings",
+    )
+    p_list.add_argument(
+        "--type", metavar="TYPE",
+        help="Filter by meeting type (1on1, retro, skip-level, design-review, standup, interview, other)",
+    )
     p_list.set_defaults(func=cmd_list)
 
     # show
