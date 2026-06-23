@@ -209,12 +209,17 @@ def cmd_record(args) -> int:
         print(str(e), file=sys.stderr)
         return 1
 
-    from .audio import AudioCapture
-    from .transcriber import Transcriber
-
     if not pod_exists(args.pod):
         print(f"No pod '{args.pod}'. Run `podscribe init {args.pod}` first.", file=sys.stderr)
         return 1
+
+    if sys.stdout.isatty() and sys.stderr.isatty():
+        from .tui import record_view
+        pod = load_pod(args.pod)
+        return record_view(pod, args)
+
+    from .audio import AudioCapture
+    from .transcriber import Transcriber
 
     pod = load_pod(args.pod)
     effective_glossary = get_effective_glossary(pod)
@@ -457,6 +462,10 @@ def cmd_enhance(args) -> int:
         print(err, file=sys.stderr)
         return 1
 
+    if sys.stdout.isatty() and sys.stderr.isatty():
+        from .tui import enhance_view
+        return enhance_view(pod, meeting)
+
     transcript = read_transcript(meeting)
     stripped_len = len(transcript.strip())
     if stripped_len < 50:
@@ -674,6 +683,10 @@ def cmd_consolidate(args) -> int:
     if err is not None:
         print(err, file=sys.stderr)
         return 1
+
+    if sys.stdout.isatty() and sys.stderr.isatty():
+        from .tui import consolidate_screen
+        return consolidate_screen(pod, meeting)
 
     def _prompt_plain() -> bool:
         print(f"Log entry exists for {meeting.id}. Rewrite? [y/N] ", end="")

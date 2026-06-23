@@ -9,7 +9,7 @@ import requests
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 
 from .cli import _resolve_meeting
 from .config import load_last_pod, load_project_config, save_last_pod
@@ -33,6 +33,14 @@ C_DIM = "color(244)"
 
 OLLAMA_URL = "http://localhost:11434"
 
+# readchar key codes for arrow keys / enter
+KEY_UP = "\x1b[A"
+KEY_DOWN = "\x1b[B"
+KEY_ENTER = "\r"
+
+# ---------------------------------------------------------------------------
+# Key reading + Ollama probe
+# ---------------------------------------------------------------------------
 
 def read_key() -> str:
     """Read a single key. Wrapper so tests can monkeypatch."""
@@ -47,6 +55,73 @@ def probe_ollama() -> bool:
     except requests.RequestException:
         return False
 
+
+# ---------------------------------------------------------------------------
+# Generic interactive menu (arrow keys + number keys)
+# ---------------------------------------------------------------------------
+
+def _select_menu(
+    console: Console,
+    title: str,
+    items: list[tuple[str, str]],
+    *,
+    quit_label: str = "Back",
+) -> Optional[str]:
+    """Interactive menu with arrow-key + number-key navigation.
+
+    items: list of (value, label) pairs. The value is returned on selection.
+    Returns the selected value, or None for quit (q / Ctrl+C).
+
+    Navigation:
+      ↑/↓     — move selection
+      Enter   — select highlighted item
+      1-9     — jump to item by number
+      q/Ctrl+C — quit
+    """
+    if not items:
+        return None
+
+    entries = list(items) + [(None, quit_label)]
+    selected = 0
+
+    def _render() -> Panel:
+        lines = []
+        for i, (val, label) in enumerate(entries):
+            if val is None:
+                cursor = f"[{C_DIM}]  [/{C_DIM}]"
+                text = f"[{C_DIM}]{label}[/{C_DIM}]"
+            elif i == selected:
+                cursor = f"[{C_PINK}]\u25b6[/{C_PINK}]"
+                text = f"[{C_PINK}]{label}[/{C_PINK}]"
+            else:
+                cursor = "  "
+                text = label
+            num = f"[{C_LILAC}]{i + 1 if i < len(items) else 'q'}[/{C_LILAC}]" if i < 9 else " "
+            lines.append(f"  {cursor} {num}  {text}")
+        return Panel("\n".join(lines), title=title, border_style=C_LILAC)
+
+    with Live(_render(), console=console, refresh_per_second=30) as live:
+        while True:
+            k = read_key()
+            if k == KEY_UP:
+                selected = (selected - 1) % len(entries)
+                live.update(_render())
+            elif k == KEY_DOWN:
+                selected = (selected + 1) % len(entries)
+                live.update(_render())
+            elif k in (KEY_ENTER, "\n"):
+                return entries[selected][0]
+            elif k.isdigit():
+                idx = int(k) - 1
+                if 0 <= idx < len(entries):
+                    return entries[idx][0]
+            elif k in ("q", "\x03"):
+                return None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _list_pod_names() -> list[str]:
     pods_dir = Path("pods")
@@ -68,24 +143,54 @@ def _resolve_pod(name_hint: Optional[str]) -> Optional[Pod]:
 
 
 def _pick_pod(console: Console) -> Optional[Pod]:
-    """Show a numbered list and prompt the user to pick a pod."""
+    """Show an interactive pod picker. Returns the selected Pod, or None."""
     names = _list_pod_names()
     if not names:
         return None
-    console.print(Panel(
-        "\n".join(f"  [{C_LILAC}][{i+1}][/{C_LILAC}] {n}" for i, n in enumerate(names)),
-        title=f"[{C_PINK}]Choose a pod[/{C_PINK}]",
-        border_style=C_LILAC,
-    ))
-    while True:
-        k = read_key()
-        if k.isdigit():
-            idx = int(k) - 1
-            if 0 <= idx < len(names):
-                return _resolve_pod(names[idx])
-        if k in ("q", "\x03"):
-            return None
+    items = [(n, n) for n in names]
+    choice = _select_menu(console, "Choose a pod", items, quit_label="Cancel")
+    if choice is None:
+        return None
+    return _resolve_pod(choice)
 
+
+def _fmt_meeting_label(meeting) -> str:
+    """Format a meeting as a one-line label for the picker."""
+    from datetime import datetime
+    try:
+        dt = datetime.fromisoformat(meeting.started_at)
+        date_part = dt.strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        date_part = meeting.started_at or meeting.id
+
+    extras = []
+    if meeting.type:
+        extras.append(meeting.type)
+    if meeting.duration_sec:
+        from .cli import _hms
+        extras.append(_hms(meeting.duration_sec))
+    if extras:
+        return f"{date_part}  \u00b7  {'  \u00b7  '.join(extras)}"
+    return date_part
+
+
+def _pick_meeting(console: Console, pod: Pod) -> Optional[object]:
+    """Show an interactive meeting picker. Returns the selected Meeting, or None."""
+    meetings = list_meetings(pod)
+    if not meetings:
+        console.print(f"[red]No meetings for pod '{pod.name}'.[/red]")
+        return None
+    items = [(m.id, _fmt_meeting_label(m)) for m in meetings]
+    choice = _select_menu(console, f"Meetings for {pod.name}", items, quit_label="Cancel")
+    if choice is None:
+        return None
+    match = [m for m in meetings if m.id == choice]
+    return match[0] if match else None
+
+
+# ---------------------------------------------------------------------------
+# Banner + menus
+# ---------------------------------------------------------------------------
 
 def _render_banner(console: Console, pod: Pod, ollama_ok: bool) -> None:
     ollama = (
@@ -102,46 +207,148 @@ def _render_banner(console: Console, pod: Pod, ollama_ok: bool) -> None:
 
 
 def _action_menu(console: Console) -> str:
-    """Render the action menu and return the chosen key."""
-    console.print(
-        f"  [{C_LILAC}][1][/{C_LILAC}] Record     "
-        f"[{C_LILAC}][2][/{C_LILAC}] Enhance     "
-        f"[{C_LILAC}][3][/{C_LILAC}] Consolidate     "
-        f"[{C_LILAC}][4][/{C_LILAC}] Others     "
-        f"[{C_LILAC}][q][/{C_LILAC}] Quit"
-    )
-    while True:
-        k = read_key()
-        if k in ("1", "2", "3", "4", "q", "\x03"):
-            return "q" if k == "\x03" else k
+    """Main action menu. Returns the chosen key ('1'-'4' or 'q')."""
+    items = [
+        ("1", "Record"),
+        ("2", "Enhance"),
+        ("3", "Consolidate"),
+        ("4", "Others"),
+    ]
+    choice = _select_menu(console, "Action", items, quit_label="Quit")
+    return choice if choice is not None else "q"
 
 
 def _others_menu(console: Console) -> str:
-    """Render the Others submenu and return the chosen key."""
+    """Others submenu. Returns the chosen key, or 'q' for back."""
     items = [
-        ("1", "list"),
-        ("2", "show"),
-        ("3", "search"),
-        ("4", "context"),
-        ("5", "export"),
-        ("6", "config"),
-        ("7", "switch pod"),
-        ("q", "back"),
+        ("list", "List all meetings"),
+        ("show", "Show latest transcript"),
+        ("search", "Search transcripts"),
+        ("glossary", "Glossary management"),
+        ("export", "Export data"),
+        ("llm", "LLM config"),
+        ("consolidate-cfg", "Consolidate prompt"),
+        ("switch", "Switch pod"),
     ]
-    console.print(
-        "  " + "    ".join(f"[{C_LILAC}][{k}][/{C_LILAC}] {name}" for k, name in items)
-    )
-    valid = {"1", "2", "3", "4", "5", "6", "7", "q", "\x03"}
-    while True:
-        k = read_key()
-        if k in valid:
-            return "q" if k == "\x03" else k
+    choice = _select_menu(console, "Others", items, quit_label="Back")
+    return choice if choice is not None else "q"
 
+
+def _glossary_menu(console: Console) -> str:
+    """Glossary submenu. Returns the chosen key, or 'q' for back."""
+    items = [
+        ("list", "List glossary terms"),
+        ("add", "Add term"),
+        ("remove", "Remove term"),
+    ]
+    choice = _select_menu(console, "Glossary", items, quit_label="Back")
+    return choice if choice is not None else "q"
+
+
+def _llm_config_menu(console: Console) -> str:
+    """LLM config submenu. Returns the chosen key, or 'q' for back."""
+    items = [
+        ("show", "Show current config"),
+        ("set", "Set model + template"),
+    ]
+    choice = _select_menu(console, "LLM Config", items, quit_label="Back")
+    return choice if choice is not None else "q"
+
+
+def _consolidate_cfg_menu(console: Console) -> str:
+    """Consolidate prompt submenu. Returns the chosen key, or 'q' for back."""
+    items = [
+        ("show", "Show current prompt"),
+        ("set", "Set prompt"),
+    ]
+    choice = _select_menu(console, "Consolidate Prompt", items, quit_label="Back")
+    return choice if choice is not None else "q"
+
+
+# ---------------------------------------------------------------------------
+# Others submenu handlers
+# ---------------------------------------------------------------------------
 
 def _dispatch_cli(argv: list[str]) -> int:
     """Run a one-shot command by re-invoking main() with the given argv."""
     from .cli import main
     return main(argv)
+
+
+def _pause(console: Console) -> None:
+    """Print 'press any key' and wait."""
+    console.print(f"\n[{C_DIM}]Press any key to continue...[/{C_DIM}]")
+    read_key()
+
+
+def _others_glossary(console: Console, pod: Pod) -> None:
+    """Glossary management submenu."""
+    while True:
+        sub = _glossary_menu(console)
+        if sub == "q":
+            return
+        if sub == "list":
+            _dispatch_cli(["context", pod.name, "list"])
+            _pause(console)
+        elif sub == "add":
+            term = Prompt.ask("Term to add", console=console)
+            if not term.strip():
+                continue
+            category = Prompt.ask(
+                "Category (person/project/client/other)",
+                console=console, default="other",
+            )
+            _dispatch_cli(["context", pod.name, "add", term, "--category", category])
+            _pause(console)
+        elif sub == "remove":
+            term = Prompt.ask("Term to remove", console=console)
+            if not term.strip():
+                continue
+            _dispatch_cli(["context", pod.name, "remove", term])
+            _pause(console)
+
+
+def _others_llm_config(console: Console) -> None:
+    """LLM config submenu."""
+    while True:
+        sub = _llm_config_menu(console)
+        if sub == "q":
+            return
+        if sub == "show":
+            _dispatch_cli(["config", "llm", "show"])
+            _pause(console)
+        elif sub == "set":
+            model = Prompt.ask("Model name (e.g. qwen3.6:27b)", console=console)
+            if not model.strip():
+                continue
+            template = Prompt.ask(
+                "Prompt template (use {{transcript}} placeholder)",
+                console=console,
+            )
+            if not template.strip():
+                continue
+            _dispatch_cli(["config", "llm", "set", model, template])
+            _pause(console)
+
+
+def _others_consolidate_cfg(console: Console) -> None:
+    """Consolidate prompt submenu."""
+    while True:
+        sub = _consolidate_cfg_menu(console)
+        if sub == "q":
+            return
+        if sub == "show":
+            _dispatch_cli(["config", "consolidate", "show"])
+            _pause(console)
+        elif sub == "set":
+            prompt = Prompt.ask(
+                "Consolidate prompt (use {{summary}} placeholder)",
+                console=console,
+            )
+            if not prompt.strip():
+                continue
+            _dispatch_cli(["config", "consolidate", "set", prompt])
+            _pause(console)
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +397,6 @@ def record_view(pod: Pod, args) -> int:
         except OSError:
             wav_writer = None
 
-    # Bounded line buffer for the live panel (full transcript still on disk).
     BUFFER_LINES = 200
     lines: list[str] = [
         f"[{C_PINK}]Recording meeting {meeting.id}[/{C_PINK}]",
@@ -198,7 +404,6 @@ def record_view(pod: Pod, args) -> int:
     ]
     console = Console()
 
-    # Latest status dict populated by on_status; consumed by _render.
     status: dict = {"elapsed": 0, "segment_count": 0, "vad_aggr": capture.vad_aggressiveness, "overflow": False}
     status_line = {"text": ""}
 
@@ -416,40 +621,30 @@ def launch() -> int:
             )
             record_view(pod, args)
         elif key == "2":
-            meetings = list_meetings(pod)
-            if not meetings:
-                console.print(f"[red]No meetings for pod '{pod.name}'.[/red]")
-            else:
-                meeting, err = _resolve_meeting(meetings, "latest", pod.name)
-                if err:
-                    console.print(f"[red]{err}[/red]")
-                else:
-                    enhance_view(pod, meeting)
+            meeting = _pick_meeting(console, pod)
+            if meeting is not None:
+                enhance_view(pod, meeting)
         elif key == "3":
-            meetings = list_meetings(pod)
-            if not meetings:
-                console.print(f"[red]No meetings for pod '{pod.name}'.[/red]")
-            else:
-                meeting, err = _resolve_meeting(meetings, "latest", pod.name)
-                if err:
-                    console.print(f"[red]{err}[/red]")
-                else:
-                    consolidate_screen(pod, meeting)
+            meeting = _pick_meeting(console, pod)
+            if meeting is not None:
+                consolidate_screen(pod, meeting)
         elif key == "4":
             sub = _others_menu(console)
             if sub == "q":
                 continue
-            if sub == "7":
+            if sub == "switch":
                 new_pod = _pick_pod(console)
                 if new_pod is not None:
                     pod = new_pod
                     save_last_pod(pod.name)
                 continue
-            if sub == "1":
+            if sub == "list":
                 _dispatch_cli(["list", "--all"])
-            elif sub == "2":
+                _pause(console)
+            elif sub == "show":
                 _dispatch_cli(["show", pod.name, "latest"])
-            elif sub == "3":
+                _pause(console)
+            elif sub == "search":
                 console.print("[dim]Search query:[/dim] ", end="")
                 try:
                     query = input().strip()
@@ -457,9 +652,10 @@ def launch() -> int:
                     query = ""
                 if query:
                     _dispatch_cli(["search", query])
-            elif sub == "4":
-                _dispatch_cli(["context", pod.name, "list"])
-            elif sub == "5":
+                _pause(console)
+            elif sub == "glossary":
+                _others_glossary(console, pod)
+            elif sub == "export":
                 from datetime import datetime
 
                 default_path = f"podscribe-export-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
@@ -469,7 +665,8 @@ def launch() -> int:
                 except (EOFError, KeyboardInterrupt):
                     path = default_path
                 _dispatch_cli(["export", "--out", path])
-            elif sub == "6":
-                _dispatch_cli(["config", "llm", "show"])
-            console.print(f"\n[{C_DIM}]Press any key to continue...[/{C_DIM}]")
-            read_key()
+                _pause(console)
+            elif sub == "llm":
+                _others_llm_config(console)
+            elif sub == "consolidate-cfg":
+                _others_consolidate_cfg(console)

@@ -235,3 +235,70 @@ covers only the leftovers.)
 - Async job system for the 12-report weekly cycle — §6.
 - Backups + pod transfer — §4.7.
 - Optional `meeting.type` for queryability — §4.5.
+
+---
+
+## 9. TUI: Pause / Resume / Marker keys during recording
+
+**Effort estimate:** 1-2 days. **Risk:** Medium-high (threading + signals + audio hardware).
+
+### Problem
+
+During a `record` session, the audio capture loop (`for audio_segment in capture.segments()`)
+is synchronous and blocking — it cannot listen for key presses. The only way to stop is
+Ctrl+C (SIGINT), which finalizes and exits. There is no way to:
+- **Pause** recording (e.g. for a private side conversation) and resume
+- **Insert a marker** (e.g. "## Topic change: Q3 roadmap") into the transcript at a specific
+  timestamp
+- **Stop and discard** (abort without saving)
+
+### Suggested approach
+
+1. **Background key-polling thread.** Spawn a `threading.Thread` that calls
+   `readchar.readkey()` in a loop and pushes keys to a `queue.Queue`. The main record loop
+   checks the queue between segments:
+   ```python
+   key_queue: queue.Queue = queue.Queue()
+   def _key_poller():
+       while running:
+           try:
+               key_queue.put(readchar.readkey(), timeout=0.1)
+           except queue.Full:
+               pass
+   ```
+
+2. **Pause/resume.** On `p` key:
+   - Set a `paused` flag that makes the main loop skip `transcriber.transcribe()` but
+     continue reading from `capture.segments()` (discarding audio). Or call `capture.stop()`
+     and wait for a resume key, then create a new `AudioCapture` — simpler but creates a
+     gap in the WAV file.
+   - Append `\n[paused HH:MM:SS — resumed HH:MM:SS]\n` to the transcript.
+
+3. **Markers.** On `m` key:
+   - Append `\n## Marker: <timestamp>\n` to the transcript immediately (no LLM call).
+   - Store the marker timestamp + elapsed in a list for the JSON sidecar.
+
+4. **Abort.** On `a` key (or Shift+Ctrl+C):
+   - Stop capture, delete the `.raw` and `.md` files, do not call `finalize_meeting`.
+   - Return a non-zero exit code.
+
+### Coordination concerns
+
+- The existing `signal.signal(SIGINT, handle_sigint)` handler must coexist with the
+  key-polling thread. SIGINT still fires on Ctrl+C in the main thread; the key thread
+  sees the key *before* the signal fires. Need to decide: does Ctrl+C stop (current
+  behavior) or does the key thread see it first? Safest: keep SIGINT as stop+finalize,
+  add `a` as a separate abort key.
+- `capture.segments()` blocks on `sounddevice.InputStream` callbacks. If paused by
+  stopping the stream, resuming requires re-creating the stream, which may change the
+  device or buffer size. Test on real hardware.
+- The key-polling thread should be daemon (so it doesn't block exit) and must handle
+  `readchar.readkey()` raising on EOF (non-TTY).
+
+### Why deferred
+
+The threading + signal + audio hardware interaction is the highest-risk part of the TUI.
+The current Ctrl+C-to-stop model works and is well-tested (239 tests). Adding pause/resume
+would require new tests for the threading logic, and manual smoke testing on real audio
+hardware to verify no buffer corruption on resume. Worth doing, but not in the same
+pass as the TUI launcher itself.

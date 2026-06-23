@@ -35,41 +35,64 @@ $ podscribe
 ╭─ podscribe ───────────────────────────────────────────────╮
 │ podscribe  ·  pod: sam-chen  ·  ollama: ◉ online          │
 ╰───────────────────────────────────────────────────────────╯
-  [1] Record     [2] Enhance     [3] Consolidate     [4] Others     [q] Quit
+  ▶ 1  Record
+    2  Enhance
+    3  Consolidate
+    4  Others
+    q  Quit
 ```
 
-**What works:**
+**Navigation:** Use ↑/↓ arrow keys to move the selection (▶), Enter to confirm, or press a number key (1-9) to jump directly to an item. Press `q` or Ctrl+C to quit.
 
-| Key | Action | Notes |
-|-----|--------|-------|
-| `1` | Record | Opens a `rich.live` panel showing the live transcript as it streams from Whisper. Ctrl+C to stop. Uses the pod's glossary. |
-| `2` | Enhance | Opens a `rich.live` panel showing tokens streaming from Ollama in real time. Uses the latest meeting. |
-| `3` | Consolidate | Runs the consolidate flow with a spinner, then a `Confirm` prompt if a log row already exists. Uses the latest meeting. |
-| `4` | Others | Submenu: list, show latest, search, context list, export, config show, switch pod. |
-| `q` | Quit | Exits to the shell. |
-| Ctrl+C | Quit | Treated as `q` at any menu. |
+### Main menu
 
-**Others submenu:**
+| Item | Action | Notes |
+|------|--------|-------|
+| Record | Opens a `rich.live` panel showing the live transcript as it streams from Whisper. Ctrl+C to stop. Uses the pod's glossary. |
+| Enhance | **Meeting picker** → opens a `rich.live` panel showing tokens streaming from Ollama in real time. |
+| Consolidate | **Meeting picker** → runs the consolidate flow with a spinner, then a `Confirm` prompt if a log row already exists. |
+| Others | Submenu for one-shot commands and configuration. |
+| Quit | Exits to the shell. |
 
-| Key | Action |
-|-----|--------|
-| `1` | List all meetings across all pods |
-| `2` | Show latest transcript for the current pod |
-| `3` | Search — prompts for a query, then runs `podscribe search <query>` |
-| `4` | List glossary for the current pod |
-| `5` | Export — prompts for a path (default: `podscribe-export-<timestamp>.tar.gz`) |
-| `6` | Show project LLM config |
-| `7` | Switch pod — numbered pod picker |
-| `q` | Back to the main menu |
+### Meeting picker
 
-**What doesn't work / limitations:**
+When you select Enhance or Consolidate, a meeting picker appears showing all meetings for the current pod, newest first:
 
-- The launcher is **single-key only** (no arrow keys, no mouse). Use number keys and `q`.
-- Record has **no pause/resume/marker** keys — Ctrl+C stops and finalizes, same as the CLI.
-- Enhance and Consolidate from the launcher always use the **latest meeting** — to target a specific meeting by prefix, use the CLI (`podscribe <pod> enhance <prefix>`).
-- The Others submenu covers **read-only operations** only. To add/remove glossary terms, set LLM config, or set the consolidate prompt, use the CLI equivalents.
-- Direct CLI commands (`podscribe <pod> enhance`, `podscribe <pod> record`) do **not** use the `rich.live` panels — they produce plain-text output for piping/ scripting. The live panels are only available through the launcher.
+```
+╭─ Meetings for sam-chen ─────────────────────────────────────╮
+│ ▶ 1  2026-06-22 14:30  ·  1on1  ·  00:32:14                │
+│   2  2026-06-21 10:00  ·  retro  ·  00:10:00               │
+│   3  2026-06-15 15:00                                       │
+│   q  Cancel                                                 │
+╰─────────────────────────────────────────────────────────────╯
+```
+
+Each entry shows the date, time, type (if set), and duration (if finalized). Navigate with ↑/↓ or number keys, Enter to select, `q` to cancel back to the main menu.
+
+### Others submenu
+
+| Item | Action |
+|------|--------|
+| List all meetings | Runs `podscribe list --all` |
+| Show latest transcript | Runs `podscribe show <pod> latest` |
+| Search transcripts | Prompts for a query, then runs `podscribe search <query>` |
+| Glossary management | Submenu: list, **add**, **remove** terms |
+| Export data | Prompts for a path (default: `podscribe-export-<timestamp>.tar.gz`) |
+| LLM config | Submenu: show, **set** model + template |
+| Consolidate prompt | Submenu: show, **set** prompt |
+| Switch pod | Pod picker — numbered list, select to switch |
+| Back | Returns to the main menu |
+
+The Glossary, LLM config, and Consolidate prompt submenus are **read-write** — you can add/remove glossary terms, set the LLM model and prompt template, and set the consolidate prompt directly from the launcher without dropping to the CLI.
+
+### What doesn't work / limitations
+
+- Record has **no pause/resume/marker** keys — Ctrl+C stops and finalizes, same as the CLI. (See `Recommended_fixes.md` §9 for the planned approach.)
 - Non-TTY contexts (pipes, CI, `subprocess`) get a `TTY is required` message and exit code 2 instead of hanging on a key read.
+
+### CLI vs launcher rendering
+
+When invoked directly (`podscribe <pod> record/enhance/consolidate`) in a **TTY**, the CLI now delegates to the same `rich.live` panels as the launcher — you get the live transcript / token stream view. When piped or non-TTY, the CLI falls back to plain-text output for scripting. This means `podscribe sam-chen record` and the launcher's Record produce the same visual experience.
 
 **Remembered pod:** the launcher saves the last-used pod to `podscribe.yaml` (`last_pod` key) on every switch. Delete that key or the whole file to reset.
 
@@ -208,8 +231,20 @@ podscribe sam-chen summarize 2026-06  # specific meeting prefix
 
 #### Streaming output
 
-The enhance call streams tokens from Ollama. When invoked via the launcher (`podscribe` with no args), tokens render live in a `rich.live` panel. When invoked directly (`podscribe <pod> enhance`), the header and final metrics line print to stderr (no live panel). Piped/non-TTY invocations degrade gracefully.
+The enhance call streams tokens from Ollama. In a TTY (whether via the launcher or direct CLI), tokens render live in a `rich.live` panel with a footer showing token count and tok/s. When piped or non-TTY, the header and final metrics line print to stderr as plain text.
 
+**TTY output (launcher or `podscribe <pod> enhance`):**
+```
+╭─ enhance sam-chen/22-JUN-2026/2026-06-22-101500-sam-chen  model=qwen3.6:27b  ctx=32768 ─╮
+│ Sam will review the auth middleware design by Friday. The key concern is               │
+│ backward compatibility with the existing API consumers...                              │
+│                                                                                        │
+│ done prompt 1250 + response 423 @ 17.3 tok/s                                           │
+╰────────────────────────────────────────────────────────────────────────────────────────╯
+Enhanced transcript saved to pods/sam-chen/summaries/22-JUN-2026/2026-06-22-101500-sam-chen.md
+```
+
+**Non-TTY output (pipes, CI, scripting):**
 ```
 Enhancing transcript for sam-chen/22-JUN-2026/2026-06-22-101500-sam-chen...
 Enhanced summary will be saved to sam-chen/22-JUN-2026/2026-06-22-101500-sam-chen...
