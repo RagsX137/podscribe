@@ -712,6 +712,33 @@ def test_run_enhance_returns_error_on_failure():
     assert "ollama serve" in err
 
 
+def test_run_enhance_prints_header_and_metrics(capfd, monkeypatch):
+    """The CLI wrapper prints the Calling/Context header and the metrics line."""
+    from podscribe.cli import _run_enhance
+    from podscribe.llm import ollama_model_info
+    from tests.test_llm import make_streaming_response
+
+    resp = make_streaming_response(
+        ["Hi"],
+        final_stats={"prompt_eval_count": 7, "eval_count": 1,
+                     "total_duration": 1_000_000_000, "eval_duration": 100_000_000},
+    )
+    monkeypatch.setattr(
+        "podscribe.cli.ollama_model_info",
+        lambda model: {"model_info": {"llama.context_length": 32768}},
+    )
+    with patch("podscribe.llm.requests.post", return_value=resp):
+        text, err = _run_enhance("the prompt", "qwen3.6:27b")
+    captured = capfd.readouterr()
+    assert err is None
+    assert text == "Hi"
+    assert "Calling Model:qwen3.6:27b" in captured.err
+    assert "Context window size : 32768 tokens" in captured.err
+    assert "prompt 7" in captured.err
+    assert "response 1 tokens" in captured.err
+    assert "tok/s" in captured.err
+
+
 def test_cmd_enhance_uses_run_enhance_helper(tmp_path, monkeypatch):
     """After refactor, cmd_enhance delegates to _run_enhance."""
     from unittest.mock import patch

@@ -14,7 +14,7 @@ import numpy as np
 
 from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_project_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
-from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields
+from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields, ollama_model_info
 from .models import Segment, fmt_date
 from .storage import (
     _read_pod_log_rows,
@@ -71,10 +71,29 @@ def _run_enhance(
 ) -> tuple[Optional[str], Optional[str]]:
     """Run LLM enhance. Returns (text, None) on success, (None, error) on failure.
 
-    The error string is what gets printed to stderr; it owns the Ollama-
-    availability message so both call sites stay in sync.
+    The wrapper owns the 'Calling Model:…/Context window size:…' header and the
+    final '✓ done in Ns | prompt X + response Y tokens @ Z tok/s' metrics line
+    (both to stderr). The core just streams and fires on_token/on_stats.
     """
-    result = enhance_transcript(model, prompt)
+    info = ollama_model_info(model)
+    num_ctx = (info.get("model_info") or {}).get("llama.context_length", "?")
+    sys.stderr.write(f"Calling Model:{model}...\n")
+    sys.stderr.write(f"Context window size : {num_ctx} tokens\n")
+    sys.stderr.flush()
+
+    def _on_stats(stats: dict) -> None:
+        pe = stats.get("prompt_eval_count", 0)
+        ec = stats.get("eval_count", 0)
+        ed = (stats.get("eval_duration_ns", 0) or 1) / 1e9
+        tps = ec / ed if ed > 0 else 0
+        total_s = (stats.get("total_duration_ns", 0) or 1) / 1e9
+        sys.stderr.write(
+            f"  \u2713 done in {total_s:.1f}s | "
+            f"prompt {pe} + response {ec} tokens @ {tps:.1f} tok/s\n"
+        )
+        sys.stderr.flush()
+
+    result = enhance_transcript(model, prompt, on_stats=_on_stats)
     if result is None:
         return None, "Failed to reach Ollama. Is it running? Start with: ollama serve"
     return result, None
