@@ -8,10 +8,12 @@ import yaml
 from podscribe.config import (
     get_effective_glossary,
     load_consolidate_prompt,
+    load_last_pod,
     load_leadership_glossary,
     load_pod_config,
     load_project_config,
     save_consolidate_prompt,
+    save_last_pod,
     save_pod_config,
     save_project_config,
 )
@@ -345,3 +347,24 @@ def test_cache_handles_missing_leadership_file(tmp_path, monkeypatch):
     assert get_effective_glossary(pod) == []
     # Subsequent call still returns empty (no crash)
     assert get_effective_glossary(pod) == []
+
+
+def test_load_last_pod_missing_returns_none(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert load_last_pod() is None
+
+
+def test_save_then_load_last_pod(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    save_last_pod("sam-chen")
+    assert load_last_pod() == "sam-chen"
+
+
+def test_last_pod_coexists_with_existing_keys(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import save_project_config, load_project_config
+    save_project_config({"llm": {"model": "qwen3.6:27b", "prompt_template": "x"}})
+    save_last_pod("sam-chen")
+    cfg = load_project_config()
+    assert cfg["llm"]["model"] == "qwen3.6:27b"
+    assert cfg["last_pod"] == "sam-chen"
