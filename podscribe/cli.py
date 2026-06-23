@@ -569,26 +569,19 @@ def cmd_search(args) -> int:
     return 0
 
 
-def cmd_consolidate(args) -> int:
-    """Extract structured fields from enhanced summary and update CSV log."""
-    if not pod_exists(args.pod):
-        print(f"No pod '{args.pod}'.", file=sys.stderr)
-        return 1
+def run_consolidate(
+    pod: "Pod",
+    meeting: "Meeting",
+    *,
+    prompt_rewrite,
+    no_log: bool = False,
+) -> int:
+    """Consolidate flow: extract structured fields from enhanced summary, update CSV.
 
-    pod = load_pod(args.pod)
-    meetings = list_meetings(pod)
-    if not meetings:
-        print(f"No meetings for pod '{args.pod}'.", file=sys.stderr)
-        return 1
-
-    meeting, err = _resolve_meeting(meetings, args.meeting, args.pod)
-    if err is not None:
-        print(err, file=sys.stderr)
-        return 1
-
-    date_str = fmt_date(datetime.fromisoformat(meeting.started_at))
-    enhanced_path = pod.summaries_dir_for(date_str) / f"{meeting.id}.md"
-
+    prompt_rewrite: callable returning bool — True to overwrite an existing log row.
+    no_log: if True, skip CSV entirely.
+    """
+    enhanced_path = pod.summaries_dir_for(fmt_date(datetime.fromisoformat(meeting.started_at))) / f"{meeting.id}.md"
     if not enhanced_path.exists():
         print(
             f"No enhanced summary for {meeting.id}. "
@@ -598,7 +591,6 @@ def cmd_consolidate(args) -> int:
         return 1
 
     enhanced_text = enhanced_path.read_text()
-
     prompt_template = load_consolidate_prompt()
     prompt = build_consolidate_prompt(prompt_template, enhanced_text)
 
@@ -618,10 +610,14 @@ def cmd_consolidate(args) -> int:
         return 1
 
     quick_summary = fields.get("quick_summary", "")
-    key_topics = "|".join(fields.get("key_topics", [])) if isinstance(fields.get("key_topics"), list) else str(fields.get("key_topics", ""))
-    action_items = "|".join(fields.get("action_items", [])) if isinstance(fields.get("action_items"), list) else str(fields.get("action_items", ""))
-    blockers = "|".join(fields.get("blockers", [])) if isinstance(fields.get("blockers"), list) else str(fields.get("blockers", ""))
-    next_steps = "|".join(fields.get("next_steps", [])) if isinstance(fields.get("next_steps"), list) else str(fields.get("next_steps", ""))
+    def _join(v):
+        if isinstance(v, list):
+            return "|".join(v)
+        return str(v or "")
+    key_topics = _join(fields.get("key_topics"))
+    action_items = _join(fields.get("action_items"))
+    blockers = _join(fields.get("blockers"))
+    next_steps = _join(fields.get("next_steps"))
 
     print(f"Extracted: {quick_summary}")
     print(f"  Topics: {key_topics}")
@@ -629,39 +625,67 @@ def cmd_consolidate(args) -> int:
     print(f"  Blockers: {blockers}")
     print(f"  Next: {next_steps}")
 
-    if not args.no_log:
-        log_fields = {
-            "date": date_str,
-            "person": pod.display_name,
-            "meeting_id": meeting.id,
-            "type": meeting.type or "",
-            "quick_summary": quick_summary,
-            "key_topics": key_topics,
-            "action_items": action_items,
-            "blockers": blockers,
-            "next_steps": next_steps,
-            "summary_file": str(enhanced_path.relative_to(pod.base_path)) if enhanced_path else "",
-            "transcript_file": str(meeting.transcript_path.relative_to(pod.base_path)) if meeting.transcript_path else "",
-            "duration_sec": meeting.duration_sec or "",
-        }
-        if log_entry_exists(pod, meeting.id):
-            print(f"Log entry exists for {meeting.id}. Rewrite? [y/N] ", end="")
-            try:
-                answer = input().strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                answer = "n"
-            if answer in ("y", "yes"):
-                rewrite_log_row(pod, meeting.id, log_fields)
-                print(f"Log entry rewritten for {meeting.id}")
-            else:
-                print("Skipping log update.")
-        else:
-            append_log_row(pod, log_fields)
-            print(f"Log entry appended to {log_path(pod)}")
-    else:
+    if no_log:
         print("Skipping CSV log (--no-log)")
+        return 0
 
+    date_str = fmt_date(datetime.fromisoformat(meeting.started_at))
+    log_fields = {
+        "date": date_str,
+        "person": pod.display_name,
+        "meeting_id": meeting.id,
+        "type": meeting.type or "",
+        "quick_summary": quick_summary,
+        "key_topics": key_topics,
+        "action_items": action_items,
+        "blockers": blockers,
+        "next_steps": next_steps,
+        "summary_file": str(enhanced_path.relative_to(pod.base_path)) if enhanced_path else "",
+        "transcript_file": str(meeting.transcript_path.relative_to(pod.base_path)) if meeting.transcript_path else "",
+        "duration_sec": meeting.duration_sec or "",
+    }
+    if log_entry_exists(pod, meeting.id):
+        if prompt_rewrite():
+            rewrite_log_row(pod, meeting.id, log_fields)
+            print(f"Log entry rewritten for {meeting.id}")
+        else:
+            print("Skipping log update.")
+    else:
+        append_log_row(pod, log_fields)
+        print(f"Log entry appended to {log_path(pod)}")
     return 0
+
+
+def cmd_consolidate(args) -> int:
+    """Extract structured fields from enhanced summary and update CSV log."""
+    if not pod_exists(args.pod):
+        print(f"No pod '{args.pod}'.", file=sys.stderr)
+        return 1
+
+    pod = load_pod(args.pod)
+    meetings = list_meetings(pod)
+    if not meetings:
+        print(f"No meetings for pod '{args.pod}'.", file=sys.stderr)
+        return 1
+
+    meeting, err = _resolve_meeting(meetings, args.meeting, args.pod)
+    if err is not None:
+        print(err, file=sys.stderr)
+        return 1
+
+    def _prompt_plain() -> bool:
+        print(f"Log entry exists for {meeting.id}. Rewrite? [y/N] ", end="")
+        try:
+            answer = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+        return answer in ("y", "yes")
+
+    return run_consolidate(
+        pod, meeting,
+        prompt_rewrite=_prompt_plain,
+        no_log=args.no_log,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

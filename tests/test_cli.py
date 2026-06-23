@@ -4,7 +4,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from podscribe.cli import build_parser, rewrite_argv, run_record_session
+from podscribe.cli import build_parser, rewrite_argv, run_consolidate, run_record_session
 from podscribe.models import Meeting, Pod
 from podscribe.storage import start_meeting
 
@@ -801,6 +801,51 @@ def test_cmd_consolidate_uses_run_enhance_helper(tmp_path, monkeypatch):
                 rc = cmd_consolidate(args)
     assert rc == 0
     assert mock_helper.called
+
+
+def test_run_consolidate_calls_prompt_rewrite_and_appends(tmp_path, monkeypatch):
+    """run_consolidate with prompt_rewrite=True appends a log row."""
+    from podscribe.config import save_project_config
+    from podscribe.models import Pod
+    from podscribe.storage import start_meeting, read_transcript, log_path
+    monkeypatch.chdir(tmp_path)
+    pod = Pod(
+        name="sam-chen", display_name="Sam Chen", role="", cadence="weekly",
+        notes="", created_at="2026-06-23", glossary=None,
+        llm={"model": "qwen3.6:27b", "prompt_template": "x"},
+        base_path=tmp_path / "pods" / "sam-chen",
+    )
+    (pod.base_path / "transcripts").mkdir(parents=True)
+    meeting = start_meeting(pod)
+    # Minimal transcript and enhanced summary
+    meeting.transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    meeting.transcript_path.write_text("# Meeting: x\n[00:00:00] hi\n")
+    summary_dir = pod.summaries_dir_for("23-JUN-2026")
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    (summary_dir / f"{meeting.id}.md").write_text("Summary: stuff happened.")
+    # Seed a prior log row so the prompt_rewrite branch is exercised.
+    log_path(pod).parent.mkdir(parents=True, exist_ok=True)
+    log_path(pod).write_text(
+        "date,person,meeting_id,type,quick_summary,key_topics,action_items,blockers,next_steps,summary_file,transcript_file,duration_sec\n"
+        f"23-JUN-2026,Sam Chen,{meeting.id},,prior,, ,,,,,\n"
+    )
+
+    yaml_text = (
+        "quick_summary: stuff\n"
+        "key_topics: [a, b]\n"
+        "action_items: [do thing]\n"
+        "blockers: []\n"
+        "next_steps: [follow up]\n"
+    )
+    monkeypatch.setattr("podscribe.cli._run_enhance", lambda p, m: (yaml_text, None))
+    prompts = []
+    def fake_prompt():
+        prompts.append(1)
+        return True
+    rc = run_consolidate(pod, meeting, prompt_rewrite=fake_prompt)
+    assert rc == 0
+    assert prompts == [1]
+    assert log_path(pod).exists()
 
 
 def test_cmd_record_rejects_invalid_type():
