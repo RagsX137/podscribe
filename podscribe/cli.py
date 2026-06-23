@@ -97,6 +97,14 @@ def cmd_init(args) -> int:
 
 def cmd_record(args) -> int:
     """Live record + transcribe a meeting."""
+    from .models import parse_meeting_type
+    try:
+        meeting_type = parse_meeting_type(args.type)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    del meeting_type  # unused until T5 threads it into start_meeting
+
     # Lazy imports: audio + transcriber libs are heavy
     from .audio import AudioCapture
     from .transcriber import Transcriber
@@ -500,6 +508,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_rec.add_argument("--vad-aggressiveness", type=int, default=2, choices=[0, 1, 2, 3], help="VAD strictness (0=loose, 3=strict; default 2)")
     p_rec.add_argument("--device", type=int, default=None, help="Input device index (default: system default)")
     p_rec.add_argument("--keep-audio", action="store_true", help="Keep raw audio file (for debugging)")
+    p_rec.add_argument(
+        "--type",
+        help="Meeting type (e.g. 1on1, retro, skip-level, design-review, standup, interview, other)",
+    )
     p_rec.set_defaults(func=cmd_record)
 
     # list

@@ -772,3 +772,21 @@ def test_cmd_consolidate_uses_run_enhance_helper(tmp_path, monkeypatch):
     assert rc == 0
     assert mock_helper.called
 
+
+def test_cmd_record_rejects_invalid_type():
+    """`--type weekly-sync` is rejected with a clear error listing valid types."""
+    from podscribe.models import parse_meeting_type
+    import pytest
+
+    with pytest.raises(ValueError, match="Unknown meeting type"):
+        parse_meeting_type("weekly-sync")
+
+
+def test_record_parser_accepts_type_flag():
+    """`--type` is a recognized argument on the record subparser."""
+    from podscribe.cli import build_parser
+    args = build_parser().parse_args(["record", "sam-chen", "--type", "1on1"])
+    assert args.type == "1on1"
+    args2 = build_parser().parse_args(["record", "sam-chen"])
+    assert args2.type is None
+
