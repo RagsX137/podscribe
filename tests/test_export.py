@@ -182,3 +182,48 @@ def test_export_import_roundtrip(tmp_path, monkeypatch):
     assert pod_exists("sam-chen")
     reloaded = load_pod("sam-chen")
     assert reloaded.name == "sam-chen"
+
+
+def test_import_skips_root_level_podscribe_yaml(tmp_path, monkeypatch, capsys):
+    """Root-level podscribe.yaml in a tarball is skipped on import."""
+    import tarfile
+    import io
+    from podscribe.export import import_archive
+
+    monkeypatch.chdir(tmp_path)
+    tar = tmp_path / "out.tar.gz"
+    with tarfile.open(tar, "w:gz") as t:
+        info = tarfile.TarInfo(name="pods/sam-chen/config.yaml")
+        data = b"name: sam-chen\n"
+        info.size = len(data)
+        t.addfile(info, io.BytesIO(data))
+        info2 = tarfile.TarInfo(name="podscribe.yaml")
+        data2 = b"llm:\n  model: gemma4\n"
+        info2.size = len(data2)
+        t.addfile(info2, io.BytesIO(data2))
+
+    (tmp_path / "podscribe.yaml").write_text("llm:\n  model: qwen3.6:27b\n")
+
+    rc = import_archive(tar)
+    assert rc == 0
+    assert (tmp_path / "podscribe.yaml").read_text() == "llm:\n  model: qwen3.6:27b\n"
+    captured = capsys.readouterr()
+    assert "podscribe.yaml" in captured.err
+    assert (tmp_path / "pods" / "sam-chen" / "config.yaml").exists()
+
+
+def test_import_rejects_symlink_member(tmp_path, monkeypatch):
+    """Symlink members are rejected."""
+    import tarfile
+    from podscribe.export import import_archive
+
+    monkeypatch.chdir(tmp_path)
+    bad = tmp_path / "evil.tar.gz"
+    with tarfile.open(bad, "w:gz") as tar:
+        info = tarfile.TarInfo(name="pods/sam-chen/escape")
+        info.type = tarfile.SYMTYPE
+        info.linkname = "../.."
+        tar.addfile(info)
+
+    with pytest.raises(ValueError, match="Unsafe"):
+        import_archive(bad)

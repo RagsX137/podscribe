@@ -963,3 +963,34 @@ def test_section4_end_to_end(tmp_path, monkeypatch):
     # export + import — it's not a pod, so import_archive doesn't touch it.
     assert (tmp_path / "pods" / "meetings.csv").exists()
 
+
+def test_cmd_list_type_filter_works(tmp_path, monkeypatch, capsys):
+    """`--type 1on1` filters the global CSV by the type column."""
+    from podscribe.storage import append_log_row, init_pod
+    from podscribe.cli import cmd_list, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    for mid, mtype in [
+        ("2026-06-22-143000-sam-chen", "1on1"),
+        ("2026-06-22-150000-sam-chen", "retro"),
+    ]:
+        append_log_row(pod, {
+            "date": "22-JUN-2026",
+            "person": "Sam Chen",
+            "meeting_id": mid,
+            "type": mtype,
+            "quick_summary": "x",
+            "key_topics": "",
+            "action_items": "",
+            "blockers": "",
+            "next_steps": "",
+        })
+
+    args = build_parser().parse_args(["list", "--all", "--type", "1on1"])
+    rc = cmd_list(args)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "1on1" in captured.out
+    assert "150000" not in captured.out
+

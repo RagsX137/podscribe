@@ -231,7 +231,7 @@ Any other `--model` value is passed through to `mlx-whisper` unchanged, so full 
 pytest tests/ -v
 ```
 
-193 offline unit tests + 1 smoke test requiring network. Run with `pytest tests/ -v`. Skip the smoke test with `-k "not transcriber"` (recommended for CI without network). The offline tests cover data models, validation, storage, config, glossary, CLI parsing, search, export/import, and the LLM client. The smoke test (`tests/test_transcriber.py::test_transcriber_accepts_initial_prompt`) downloads a real Whisper model and requires a working `mlx-whisper` install.
+198 offline unit tests + 1 smoke test requiring network. Run with `pytest tests/ -v`. Skip the smoke test with `-k "not transcriber"` (recommended for CI without network). The offline tests cover data models, validation, storage, config, glossary, CLI parsing, search, export/import, and the LLM client. The smoke test (`tests/test_transcriber.py::test_transcriber_accepts_initial_prompt`) downloads a real Whisper model and requires a working `mlx-whisper` install.
 
 ## Manual smoke test (on your Mac)
 

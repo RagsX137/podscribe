@@ -67,6 +67,12 @@ pods/<name>/
 
 Transcript format: `# Meeting: <id>` header, then `[HH:MM:SS] text` lines, appended incrementally (crash-safe).
 
+**Section-4 layout additions:**
+- Per-pod CSV at `pods/<name>/meetings.csv` (unchanged)
+- Global rollup at `pods/meetings.csv` (auto-mirrored on every `append_log_row`)
+- Optional typed subdirs: `pods/<name>/transcripts/<date>/<type>/<id>.md` when `record --type TYPE` is used
+- 2-level (no type) and 3-level (with type) layouts coexist; `list_meetings` matches both
+
 ## Config
 
 Three config layers:

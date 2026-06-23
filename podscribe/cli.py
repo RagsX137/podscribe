@@ -257,7 +257,7 @@ def cmd_list(args) -> int:
     headers = ["pod", "type", "date", "meeting_id", "duration"]
     lines = [" | ".join(headers), " | ".join("---" for _ in headers)]
     for r in rows:
-        pod_name = r.get("pod_name") or r.get("person") or "?"
+        pod_name = _row_pod_name(r)
         lines.append(" | ".join([
             pod_name,
             r.get("type") or "-",
@@ -273,6 +273,19 @@ def _row_date(row: dict):
     """Parse a date string from a row's 'date' field (DD-MMM-YYYY)."""
     from datetime import datetime
     return datetime.strptime(row["date"], "%d-%b-%Y").date()
+
+
+def _row_pod_name(row: dict) -> str:
+    """Derive the kebab-case pod name from a CSV row's meeting_id.
+
+    The meeting_id format is YYYY-MM-DD-HHMMSS-<pod-name>, so the pod name
+    is everything after the 5th hyphen.
+    """
+    mid = row.get("meeting_id", "")
+    parts = mid.split("-", 5)
+    if len(parts) == 6:
+        return parts[5]
+    return row.get("person") or "?"
 
 
 def cmd_show(args) -> int:
@@ -538,6 +551,7 @@ def cmd_consolidate(args) -> int:
             "date": date_str,
             "person": pod.display_name,
             "meeting_id": meeting.id,
+            "type": meeting.type or "",
             "quick_summary": quick_summary,
             "key_topics": key_topics,
             "action_items": action_items,

@@ -64,18 +64,37 @@ def import_archive(
 
     Default: refuse to overwrite existing pods. --force: overwrite.
     --dry-run: print what would happen, do not write.
+
+    Skips root-level podscribe.yaml: project LLM config is intentionally
+    not migrated on import (use `podscribe config llm set` instead).
     """
     pods_in_tar = set()
     other_members = []
+    project_yaml_in_tar = False
+
     with tarfile.open(archive_path, "r:gz") as tar:
         for member in tar.getmembers():
+            # Reject path-traversal up front
             target = (Path.cwd() / member.name).resolve()
-            if not str(target).startswith(str(Path.cwd().resolve()) + os.sep) and target != Path.cwd().resolve():
+            if (
+                target != Path.cwd().resolve()
+                and not str(target).startswith(str(Path.cwd().resolve()) + os.sep)
+            ):
                 raise ValueError(f"Unsafe path in tarball: {member.name}")
+            # Reject non-regular entries
+            if not member.isreg() and not member.isdir():
+                raise ValueError(
+                    f"Unsafe entry type in tarball: {member.name!r} (type={member.type})"
+                )
+
             parts = Path(member.name).parts
             if parts and parts[0] == "pods":
                 if len(parts) >= 3:
+                    # Real pod: pods/<name>/<something>
                     pods_in_tar.add(parts[1])
+                # else: top-level file in pods/ (e.g. global meetings.csv) — not a pod
+            elif member.name == "podscribe.yaml":
+                project_yaml_in_tar = True
             else:
                 other_members.append(member)
 
@@ -94,24 +113,51 @@ def import_archive(
         print(f"Would import: {sorted(pods_in_tar)}")
         if other_members:
             print(f"Would also import: {[m.name for m in other_members]}")
+        if project_yaml_in_tar:
+            print("Would skip root-level podscribe.yaml (project config not migrated)")
         return 0
 
     with tarfile.open(archive_path, "r:gz") as tar:
-        _safe_extract(tar, path=Path.cwd())
+        _safe_extract(tar, path=Path.cwd(), skip_names={"podscribe.yaml"})
     print(f"Imported: {sorted(pods_in_tar)}")
+    if project_yaml_in_tar:
+        print(
+            "Note: skipped root-level podscribe.yaml "
+            "(use `podscribe config llm set` to update).",
+            file=sys.stderr,
+        )
     return 0
 
 
-def _safe_extract(tar: tarfile.TarFile, path: Path = Path(".")) -> None:
-    """Extract every member with a path-traversal check.
+def _safe_extract(
+    tar: tarfile.TarFile,
+    path: Path = Path("."),
+    skip_names: set | None = None,
+) -> None:
+    """Extract every member with safety checks.
+
+    Rejects:
+    - path traversal (resolved path outside extract root)
+    - symlinks, hardlinks, devices, fifos (defense in depth)
+
+    Optionally skips named members (e.g. root-level `podscribe.yaml` is
+    not migrated on import — project LLM config is host-specific).
 
     Python 3.12 added `tar.extractall(filter='data')` for this purpose,
     but the project supports Python 3.10+. This function is the manual
-    equivalent and works on all supported versions.
+    equivalent.
     """
     cwd_resolved = path.resolve()
+    safe_members = []
     for member in tar.getmembers():
+        if skip_names and member.name in skip_names:
+            continue
+        if not member.isreg() and not member.isdir():
+            raise ValueError(
+                f"Unsafe entry type in tarball: {member.name!r} (type={member.type})"
+            )
         target = (path / member.name).resolve()
         if target != cwd_resolved and not str(target).startswith(str(cwd_resolved) + os.sep):
             raise ValueError(f"Unsafe path in tarball: {member.name}")
-    tar.extractall(path=path)
+        safe_members.append(member)
+    tar.extractall(members=safe_members, path=path)

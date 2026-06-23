@@ -440,3 +440,29 @@ def test_read_global_log_empty_when_no_file(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     assert read_global_log() == []
+
+
+def test_csv_columns_include_type(tmp_path, monkeypatch):
+    """CSV_COLUMNS includes 'type' and append_log_row populates it."""
+    from podscribe.models import Pod
+    from podscribe.storage import (
+        append_log_row, init_pod, read_global_log, CSV_COLUMNS
+    )
+
+    assert "type" in CSV_COLUMNS
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    append_log_row(pod, {
+        "date": "22-JUN-2026",
+        "person": "Sam Chen",
+        "meeting_id": "2026-06-22-143000-sam-chen",
+        "type": "1on1",
+        "quick_summary": "Helios",
+        "key_topics": "",
+        "action_items": "",
+        "blockers": "",
+        "next_steps": "",
+    })
+    rows = read_global_log()
+    assert len(rows) == 1
+    assert rows[0]["type"] == "1on1"
