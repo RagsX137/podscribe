@@ -1162,6 +1162,7 @@ def test_run_record_session_drives_callbacks_and_writes_transcript(tmp_path, mon
     pod = Pod(
         name="sam-chen", display_name="Sam", role="", cadence="weekly",
         notes="", created_at="2026-06-23", glossary=None, llm=None,
+        # base_path explicit so tmp_path + chdir isolates from the real pods/ dir
         base_path=tmp_path / "pods" / "sam-chen",
     )
     (pod.base_path / "transcripts").mkdir(parents=True)
@@ -1189,6 +1190,7 @@ def test_run_record_session_drives_callbacks_and_writes_transcript(tmp_path, mon
     assert "# Meeting:" in md
     assert len(statuses) >= 1
     assert statuses[-1]["segment_count"] == 2
+    assert statuses[-1]["overflow"] is False
     assert not meeting.audio_path.exists()
     assert meeting.metadata_path.exists()
 
@@ -1199,6 +1201,7 @@ def test_run_record_session_keeps_audio_when_wav_writer_provided(tmp_path, monke
     pod = Pod(
         name="sam-chen", display_name="Sam", role="", cadence="weekly",
         notes="", created_at="2026-06-23", glossary=None, llm=None,
+        # base_path explicit so tmp_path + chdir isolates from the real pods/ dir
         base_path=tmp_path / "pods" / "sam-chen",
     )
     (pod.base_path / "transcripts").mkdir(parents=True)

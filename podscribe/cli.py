@@ -133,9 +133,6 @@ def run_record_session(
     Headless: callers (plain wrapper or rich view) decide what to render.
     Owns SIGINT (stop capture), the .raw cleanup, and finalize_meeting.
     """
-    from .audio import AudioCapture  # noqa: F401  (type-check only)
-    from .transcriber import Transcriber  # noqa: F401
-
     with meeting.transcript_path.open("w") as f:
         f.write(f"# Meeting: {meeting.id}\n\n")
         f.write(f"- pod: {pod.name} ({pod.display_name})\n")
@@ -148,6 +145,7 @@ def run_record_session(
     meeting.vad_enabled = True
     start_monotonic = time.monotonic()
     segment_count = 0
+    write_error: Optional[str] = None
 
     def handle_sigint(sig, frame):
         capture.stop()
@@ -160,8 +158,9 @@ def run_record_session(
                 try:
                     pcm = np.clip(audio_segment * 32767, -32768, 32767).astype(np.int16)
                     wav_writer.writeframes(pcm.tobytes())
-                except OSError:
-                    pass
+                    write_error = None
+                except OSError as e:
+                    write_error = f"audio write failed: {e}"
             kwargs = {}
             if glossary_prompt:
                 kwargs["initial_prompt"] = glossary_prompt
@@ -184,6 +183,7 @@ def run_record_session(
                 "vad_aggr": capture.vad_aggressiveness,
                 "level": 0.0,
                 "overflow": getattr(capture, "had_overflow", False),
+                "write_error": write_error,
             })
     finally:
         capture.stop()
@@ -247,6 +247,10 @@ def cmd_record(args) -> int:
     def _on_segment(seg: Segment) -> None:
         print(f"[{_hms(seg.start_sec)}] {seg.text}")
 
+    def _on_status(d: dict) -> None:
+        if d.get("write_error"):
+            print(f"  ⚠ {d['write_error']}", file=sys.stderr)
+
     def _on_done(n: int) -> None:
         print()
         print(f"Done. Saved {n} segments ({_hms(meeting.duration_sec or 0)})")
@@ -257,7 +261,7 @@ def cmd_record(args) -> int:
     run_record_session(
         pod, meeting, capture, transcriber,
         glossary_prompt=glossary_prompt, wav_writer=wav_writer,
-        on_segment=_on_segment, on_status=lambda d: None, on_done=_on_done,
+        on_segment=_on_segment, on_status=_on_status, on_done=_on_done,
     )
     return 0
 
