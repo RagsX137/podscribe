@@ -956,8 +956,10 @@ def test_section4_end_to_end(tmp_path, monkeypatch):
 
     import shutil
     shutil.rmtree(tmp_path / "pods" / "sam-chen")
-    (tmp_path / "pods" / "meetings.csv").unlink(missing_ok=True)
     rc = import_archive(tar)
     assert rc == 0
     assert (tmp_path / "pods" / "sam-chen").exists()
+    # The global meetings.csv (T6's global log) should be preserved across
+    # export + import — it's not a pod, so import_archive doesn't touch it.
+    assert (tmp_path / "pods" / "meetings.csv").exists()
 

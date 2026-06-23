@@ -73,8 +73,9 @@ def import_archive(
             if not str(target).startswith(str(Path.cwd().resolve()) + os.sep) and target != Path.cwd().resolve():
                 raise ValueError(f"Unsafe path in tarball: {member.name}")
             parts = Path(member.name).parts
-            if parts and parts[0] == "pods" and len(parts) >= 2:
-                pods_in_tar.add(parts[1])
+            if parts and parts[0] == "pods":
+                if len(parts) >= 3:
+                    pods_in_tar.add(parts[1])
             else:
                 other_members.append(member)
 
