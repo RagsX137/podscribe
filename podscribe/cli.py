@@ -15,7 +15,7 @@ import numpy as np
 from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_project_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields
-from .models import Meeting, Pod, Segment, fmt_date
+from .models import Segment, fmt_date
 from .storage import (
     append_log_row,
     append_segment,
