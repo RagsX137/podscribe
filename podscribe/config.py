@@ -103,14 +103,42 @@ def save_consolidate_prompt(prompt: str) -> None:
     save_project_config(cfg)
 
 
-def get_effective_glossary(pod: Pod) -> list:
-    """Merge leadership-team glossary with pod-specific glossary.
+_glossary_cache: dict = {
+    "key": None,
+    "value": None,
+}
 
-    Leadership terms come first, then pod-specific terms.
+
+def _leadership_yaml_path() -> Path:
+    return LEADERSHIP_CONFIG_PATH
+
+
+def _read_effective_glossary(pod: Pod) -> list:
+    """Read leadership_team.yaml + pod.glossary. The actual disk read."""
+    leadership = load_leadership_glossary() or []
+    return leadership + list(pod.glossary or [])
+
+
+def get_effective_glossary(pod: Pod) -> list:
+    """Return leadership + pod glossary, cached by mtime + pod.glossary id.
+
+    The cache key includes:
+    - mtime of leadership_team.yaml (so manual edits invalidate)
+    - id(pod.glossary) (so list replacement invalidates)
+    - len(pod.glossary) (so in-place mutation that grows/shrinks invalidates)
+
+    The first call after process start reads from disk. Subsequent calls
+    with the same key return the cached list. The cache is per-process.
     """
-    leadership = load_leadership_glossary()
-    pod_terms = pod.glossary or []
-    return leadership + pod_terms
+    try:
+        mtime = _leadership_yaml_path().stat().st_mtime
+    except FileNotFoundError:
+        mtime = 0
+    key = (mtime, id(pod.glossary), len(pod.glossary))
+    if _glossary_cache["key"] != key:
+        _glossary_cache["key"] = key
+        _glossary_cache["value"] = _read_effective_glossary(pod)
+    return _glossary_cache["value"]
 
 
 def load_preserve_speakers(pod: "Pod") -> bool:

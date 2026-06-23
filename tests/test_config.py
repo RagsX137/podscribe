@@ -1,5 +1,6 @@
 """Tests for pod config round-trip."""
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -279,3 +280,68 @@ def test_load_preserve_speakers_rejects_non_bool_at_project_level(tmp_path, monk
     from podscribe.config import load_preserve_speakers
     with pytest.raises(ValueError, match="must be a boolean"):
         load_preserve_speakers(_pod)
+
+
+def test_get_effective_glossary_caches(tmp_path, monkeypatch):
+    """Second call within same mtime does not re-read leadership_team.yaml."""
+    from podscribe.config import get_effective_glossary, _glossary_cache
+    from podscribe.models import Pod
+    import yaml
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "leadership_team.yaml").write_text(yaml.safe_dump({
+        "glossary": [{"term": "Project Helios", "category": "project"}]
+    }))
+    pod = Pod(name="sam-chen", base_path=tmp_path / "pods" / "sam-chen")
+
+    # Clear any pre-existing cache
+    _glossary_cache["key"] = None
+
+    with patch("podscribe.config.load_leadership_glossary") as mock_load:
+        mock_load.return_value = [{"term": "Project Helios", "category": "project"}]
+        first = get_effective_glossary(pod)
+        second = get_effective_glossary(pod)
+    assert first == second
+    assert mock_load.call_count == 1
+
+
+def test_cache_invalidates_on_mtime_change(tmp_path, monkeypatch):
+    """Touching leadership_team.yaml with newer mtime invalidates the cache."""
+    from podscribe.config import get_effective_glossary, _glossary_cache
+    from podscribe.models import Pod
+    import time
+
+    monkeypatch.chdir(tmp_path)
+    leadership = tmp_path / "leadership_team.yaml"
+    leadership.write_text("glossary: []\n")
+    pod = Pod(name="sam-chen", base_path=tmp_path / "pods" / "sam-chen")
+
+    # Clear any pre-existing cache
+    _glossary_cache["key"] = None
+
+    # First call: empty glossary
+    assert get_effective_glossary(pod) == []
+
+    # Modify file with a clearly newer mtime
+    time.sleep(0.05)
+    leadership.write_text("glossary:\n  - term: NewTerm\n    category: project\n")
+
+    # Cache should have invalidated; second call sees new content
+    result = get_effective_glossary(pod)
+    assert any(e["term"] == "NewTerm" for e in result)
+
+
+def test_cache_handles_missing_leadership_file(tmp_path, monkeypatch):
+    """Missing leadership_team.yaml → cache holds empty leadership."""
+    from podscribe.config import get_effective_glossary, _glossary_cache
+    from podscribe.models import Pod
+
+    monkeypatch.chdir(tmp_path)
+    pod = Pod(name="sam-chen", base_path=tmp_path / "pods" / "sam-chen")
+    _glossary_cache["key"] = None
+
+    # File does not exist
+    assert not (tmp_path / "leadership_team.yaml").exists()
+    assert get_effective_glossary(pod) == []
+    # Subsequent call still returns empty (no crash)
+    assert get_effective_glossary(pod) == []
