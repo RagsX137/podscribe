@@ -1,4 +1,5 @@
 """Tests for podscribe.export."""
+import io
 import tarfile
 from pathlib import Path
 
@@ -61,3 +62,123 @@ def test_export_excludes_pycache_and_venv(tmp_path, monkeypatch):
         names = tar.getnames()
     assert not any("__pycache__" in n for n in names)
     assert not any(".venv" in n for n in names)
+
+
+# ── Import (Task 10) ─────────────────────────────────────────────
+
+
+def test_import_refuses_overwrite_without_force(tmp_path, monkeypatch, capsys):
+    """Existing pod → import errors out without --force."""
+    from podscribe.storage import init_pod
+    from podscribe.export import create_export, import_archive
+
+    # Build a tarball in /tmp
+    src = tmp_path / "src"
+    src.mkdir()
+    monkeypatch.chdir(src)
+    _make_pod_with_content(src, "sam-chen")
+    tar = tmp_path / "out.tar.gz"
+    create_export(tar)
+
+    # Set up a destination with an existing pod
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    monkeypatch.chdir(dst)
+    init_pod("sam-chen")
+    rc = import_archive(tar)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "Refusing" in captured.err
+    assert "sam-chen" in captured.err
+
+
+def test_import_force_overwrites(tmp_path, monkeypatch):
+    """--force replaces the existing pod."""
+    from podscribe.storage import init_pod, pod_exists
+    from podscribe.export import create_export, import_archive
+
+    src = tmp_path / "src"
+    src.mkdir()
+    monkeypatch.chdir(src)
+    _make_pod_with_content(src, "sam-chen")
+    tar = tmp_path / "out.tar.gz"
+    create_export(tar)
+
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    monkeypatch.chdir(dst)
+    init_pod("sam-chen")  # Pre-existing
+
+    rc = import_archive(tar, force=True)
+    assert rc == 0
+    assert pod_exists("sam-chen")
+
+
+def test_import_dry_run_no_writes(tmp_path, monkeypatch, capsys):
+    """--dry-run prints what would happen, no files change."""
+    from podscribe.export import create_export, import_archive
+
+    src = tmp_path / "src"
+    src.mkdir()
+    monkeypatch.chdir(src)
+    _make_pod_with_content(src, "sam-chen")
+    tar = tmp_path / "out.tar.gz"
+    create_export(tar)
+
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    monkeypatch.chdir(dst)
+    pods_before = sorted((dst / "pods").glob("*")) if (dst / "pods").exists() else []
+    rc = import_archive(tar, dry_run=True)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "Would import" in captured.out
+    pods_after = sorted((dst / "pods").glob("*")) if (dst / "pods").exists() else []
+    assert pods_before == pods_after
+
+
+def test_import_rejects_path_traversal(tmp_path, monkeypatch):
+    """Tarball with a path-traversal member is rejected outright."""
+    import tarfile
+    from podscribe.export import import_archive
+
+    monkeypatch.chdir(tmp_path)
+    bad = tmp_path / "evil.tar.gz"
+    with tarfile.open(bad, "w:gz") as tar:
+        info = tarfile.TarInfo(name="pods/../../etc/passwd")
+        data = b"evil"
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+
+    with pytest.raises(ValueError, match="Unsafe path"):
+        import_archive(bad)
+
+
+def test_export_import_roundtrip(tmp_path, monkeypatch):
+    """Create a tarball, delete the pod, import it back, verify content."""
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting, pod_exists, load_pod
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.export import create_export, import_archive
+
+    src = tmp_path / "src"
+    src.mkdir()
+    monkeypatch.chdir(src)
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    append_segment(meeting, Segment(1.0, 5.0, "Project Helios is on track"))
+    finalize_meeting(meeting)
+    tar = tmp_path / "out.tar.gz"
+    create_export(tar)
+
+    # Wipe the pod
+    import shutil
+    shutil.rmtree(src / "pods" / "sam-chen")
+    assert not pod_exists("sam-chen")
+
+    # Re-import
+    rc = import_archive(tar)
+    assert rc == 0
+    assert pod_exists("sam-chen")
+    reloaded = load_pod("sam-chen")
+    assert reloaded.name == "sam-chen"

@@ -445,6 +445,16 @@ def cmd_export(args) -> int:
     return 0
 
 
+def cmd_import(args) -> int:
+    """Import a podscribe export tarball."""
+    from .export import import_archive
+    return import_archive(
+        Path(args.archive),
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+
+
 def cmd_search(args) -> int:
     """Search across all transcripts for a keyword."""
     from .search import search
@@ -658,6 +668,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output path (default: stdout). Example: pods-2026-06-22.tar.gz",
     )
     p_export.set_defaults(func=cmd_export)
+
+    # import
+    p_import = sub.add_parser("import", help="Import a podscribe export tarball.")
+    p_import.add_argument("archive", help="Path to the tarball to import")
+    p_import.add_argument(
+        "--force", action="store_true",
+        help="Overwrite existing pods with the same name",
+    )
+    p_import.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would happen without writing",
+    )
+    p_import.set_defaults(func=cmd_import)
 
     # config
     p_cfg = sub.add_parser("config", help="Manage project-level config.")

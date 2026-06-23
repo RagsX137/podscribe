@@ -895,3 +895,11 @@ def test_export_subparser_parses_args():
     args = build_parser().parse_args(["export", "--out", "pods.tar.gz"])
     assert args.out == "pods.tar.gz"
 
+
+def test_import_subparser_parses_args():
+    from podscribe.cli import build_parser
+    args = build_parser().parse_args(["import", "pods.tar.gz", "--force", "--dry-run"])
+    assert args.archive == "pods.tar.gz"
+    assert args.force is True
+    assert args.dry_run is True
+
