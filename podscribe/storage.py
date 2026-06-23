@@ -18,7 +18,7 @@ from .models import Meeting, Pod, Segment, fmt_date, make_meeting_id
 CSV_COLUMNS = [
     "date", "person", "meeting_id", "type", "quick_summary",
     "key_topics", "action_items", "blockers", "next_steps",
-    "summary_file", "transcript_file",
+    "summary_file", "transcript_file", "duration_sec",
 ]
 
 

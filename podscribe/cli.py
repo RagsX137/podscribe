@@ -263,7 +263,7 @@ def cmd_list(args) -> int:
             r.get("type") or "-",
             r.get("date") or "-",
             r.get("meeting_id") or "-",
-            r.get("duration") or "-",
+            _row_duration(r),
         ]))
     print("\n".join(lines))
     return 0
@@ -279,13 +279,25 @@ def _row_pod_name(row: dict) -> str:
     """Derive the kebab-case pod name from a CSV row's meeting_id.
 
     The meeting_id format is YYYY-MM-DD-HHMMSS-<pod-name>, so the pod name
-    is everything after the 5th hyphen.
+    is everything after the 4th hyphen (the date takes 3, time takes 1).
     """
     mid = row.get("meeting_id", "")
-    parts = mid.split("-", 5)
-    if len(parts) == 6:
-        return parts[5]
+    parts = mid.split("-", 4)
+    if len(parts) == 5:
+        return parts[4]
     return row.get("person") or "?"
+
+
+def _row_duration(row: dict) -> str:
+    """Format a CSV row's duration_sec field as HH:MM:SS."""
+    raw = row.get("duration_sec") or ""
+    if not raw:
+        return "-"
+    try:
+        sec = int(raw)
+    except (ValueError, TypeError):
+        return "-"
+    return _hms(sec)
 
 
 def cmd_show(args) -> int:
@@ -460,12 +472,20 @@ def cmd_export(args) -> int:
 
 def cmd_import(args) -> int:
     """Import a podscribe export tarball."""
+    import tarfile
     from .export import import_archive
-    return import_archive(
-        Path(args.archive),
-        force=args.force,
-        dry_run=args.dry_run,
-    )
+    try:
+        return import_archive(
+            Path(args.archive),
+            force=args.force,
+            dry_run=args.dry_run,
+        )
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    except tarfile.ReadError as e:
+        print(f"Cannot read tarball: {e}", file=sys.stderr)
+        return 1
 
 
 def cmd_search(args) -> int:
@@ -559,6 +579,7 @@ def cmd_consolidate(args) -> int:
             "next_steps": next_steps,
             "summary_file": str(enhanced_path.relative_to(pod.base_path)) if enhanced_path else "",
             "transcript_file": str(meeting.transcript_path.relative_to(pod.base_path)) if meeting.transcript_path else "",
+            "duration_sec": meeting.duration_sec or "",
         }
         if log_entry_exists(pod, meeting.id):
             print(f"Log entry exists for {meeting.id}. Rewrite? [y/N] ", end="")

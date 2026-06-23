@@ -879,6 +879,116 @@ def test_cmd_list_limits_by_recent(tmp_path, monkeypatch):
     assert args2.recent is None
 
 
+def test_cmd_list_shows_full_pod_name(tmp_path, monkeypatch, capsys):
+    """`list --all` shows the full kebab-case pod name, not a truncated fragment."""
+    from podscribe.storage import append_log_row, init_pod
+    from podscribe.cli import cmd_list, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen", display_name="Sam Chen")
+    append_log_row(pod, {
+        "date": "22-JUN-2026",
+        "person": "Sam Chen",
+        "meeting_id": "2026-06-22-143000-sam-chen",
+        "type": "1on1",
+        "quick_summary": "x",
+        "key_topics": "",
+        "action_items": "",
+        "blockers": "",
+        "next_steps": "",
+    })
+    args = build_parser().parse_args(["list", "--all"])
+    rc = cmd_list(args)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "sam-chen" in out
+    # Must NOT show the truncated fragment "chen" as a standalone pod column.
+    # The meeting_id contains "sam-chen" so "chen" appears as a substring,
+    # but the pod column (first column) must be "sam-chen".
+    for line in out.strip().splitlines()[2:]:  # skip header + separator
+        first_col = line.split(" | ")[0]
+        assert first_col == "sam-chen", f"pod column was '{first_col}', expected 'sam-chen'"
+
+
+def test_cmd_list_shows_duration(tmp_path, monkeypatch, capsys):
+    """`list --all` shows formatted duration from the duration_sec CSV column."""
+    from podscribe.storage import append_log_row, init_pod
+    from podscribe.cli import cmd_list, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    append_log_row(pod, {
+        "date": "22-JUN-2026",
+        "person": "Sam Chen",
+        "meeting_id": "2026-06-22-143000-sam-chen",
+        "type": "1on1",
+        "quick_summary": "x",
+        "key_topics": "",
+        "action_items": "",
+        "blockers": "",
+        "next_steps": "",
+        "duration_sec": "1934",  # 32m14s
+    })
+    args = build_parser().parse_args(["list", "--all"])
+    rc = cmd_list(args)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "00:32:14" in out
+
+
+def test_cmd_list_since_actually_filters(tmp_path, monkeypatch, capsys):
+    """`--since 30d` excludes meetings older than 30 days."""
+    from datetime import datetime, timedelta
+    from podscribe.storage import append_log_row, init_pod
+    from podscribe.cli import cmd_list, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    recent_date = datetime.now().strftime("%d-%b-%Y").upper()
+    old_date = (datetime.now() - timedelta(days=100)).strftime("%d-%b-%Y").upper()
+    append_log_row(pod, {
+        "date": recent_date, "person": "Sam Chen",
+        "meeting_id": "2026-06-22-143000-sam-chen", "type": "1on1",
+        "quick_summary": "recent", "key_topics": "", "action_items": "",
+        "blockers": "", "next_steps": "",
+    })
+    append_log_row(pod, {
+        "date": old_date, "person": "Sam Chen",
+        "meeting_id": "2025-01-01-100000-sam-chen", "type": "retro",
+        "quick_summary": "old", "key_topics": "", "action_items": "",
+        "blockers": "", "next_steps": "",
+    })
+    args = build_parser().parse_args(["list", "--all", "--since", "30d"])
+    rc = cmd_list(args)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "2026-06-22-143000-sam-chen" in out
+    assert "2025-01-01" not in out
+
+
+def test_cmd_list_recent_actually_limits(tmp_path, monkeypatch, capsys):
+    """`--recent 1` shows at most 1 meeting."""
+    from podscribe.storage import append_log_row, init_pod
+    from podscribe.cli import cmd_list, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    for mid in ["2026-06-22-143000-sam-chen", "2026-06-21-090000-sam-chen"]:
+        append_log_row(pod, {
+            "date": "22-JUN-2026", "person": "Sam Chen",
+            "meeting_id": mid, "type": "1on1",
+            "quick_summary": "x", "key_topics": "", "action_items": "",
+            "blockers": "", "next_steps": "",
+        })
+    args = build_parser().parse_args(["list", "--all", "--recent", "1"])
+    rc = cmd_list(args)
+    assert rc == 0
+    out = capsys.readouterr().out
+    # 2 header lines + at most 1 data line
+    data_lines = [l for l in out.strip().splitlines()[2:] if l.strip()]
+    assert len(data_lines) == 1
+
+
 def test_search_subparser_parses_args():
     from podscribe.cli import build_parser
     args = build_parser().parse_args([

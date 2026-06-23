@@ -227,3 +227,41 @@ def test_import_rejects_symlink_member(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="Unsafe"):
         import_archive(bad)
+
+
+def test_cmd_import_path_traversal_clean_error(tmp_path, monkeypatch, capsys):
+    """cmd_import catches ValueError from path traversal and prints clean error."""
+    import tarfile
+    from podscribe.cli import cmd_import, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    bad = tmp_path / "evil.tar.gz"
+    with tarfile.open(bad, "w:gz") as tar:
+        info = tarfile.TarInfo(name="pods/../../etc/passwd")
+        data = b"evil"
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+
+    args = build_parser().parse_args(["import", str(bad)])
+    rc = cmd_import(args)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "Unsafe path" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cmd_import_malformed_tarball_clean_error(tmp_path, monkeypatch, capsys):
+    """cmd_import catches tarfile.ReadError and prints clean error."""
+    from podscribe.cli import cmd_import, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    bad = tmp_path / "not-a-tarball.tar.gz"
+    bad.write_bytes(b"this is not a gzip file")
+
+    args = build_parser().parse_args(["import", str(bad)])
+    rc = cmd_import(args)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "Cannot read tarball" in captured.err
+    assert "Traceback" not in captured.err
+
