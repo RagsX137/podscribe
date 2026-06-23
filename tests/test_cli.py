@@ -692,19 +692,10 @@ def test_cmd_enhance_short_transcript_message_shows_stripped_length(
 def test_run_enhance_returns_text_on_success():
     """Helper returns (text, None) on LLM success."""
     from unittest.mock import patch
-    from pathlib import Path as _Path
     from podscribe.cli import _run_enhance
-    from podscribe.models import Pod, Meeting
-    from datetime import datetime
 
-    pod = Pod(name="sam-chen", base_path=_Path("pods/sam-chen"))
-    meeting = Meeting(
-        id="2026-06-22-143000-sam-chen",
-        pod_name="sam-chen",
-        started_at=datetime(2026, 6, 22, 14, 30, 0).isoformat(),
-    )
     with patch("podscribe.cli.enhance_transcript", return_value="Enhanced output."):
-        text, err = _run_enhance(pod, meeting, "prompt", "qwen3.6:27b")
+        text, err = _run_enhance("prompt", "qwen3.6:27b")
     assert text == "Enhanced output."
     assert err is None
 
@@ -712,19 +703,10 @@ def test_run_enhance_returns_text_on_success():
 def test_run_enhance_returns_error_on_failure():
     """Helper returns (None, error_msg) on LLM failure."""
     from unittest.mock import patch
-    from pathlib import Path as _Path
     from podscribe.cli import _run_enhance
-    from podscribe.models import Pod, Meeting
-    from datetime import datetime
 
-    pod = Pod(name="sam-chen", base_path=_Path("pods/sam-chen"))
-    meeting = Meeting(
-        id="2026-06-22-143000-sam-chen",
-        pod_name="sam-chen",
-        started_at=datetime(2026, 6, 22, 14, 30, 0).isoformat(),
-    )
     with patch("podscribe.cli.enhance_transcript", return_value=None):
-        text, err = _run_enhance(pod, meeting, "prompt", "qwen3.6:27b")
+        text, err = _run_enhance("prompt", "qwen3.6:27b")
     assert text is None
     assert err is not None
     assert "ollama serve" in err

@@ -65,7 +65,7 @@ def _resolve_meeting(meetings, prefix, pod_name):
 
 
 def _run_enhance(
-    pod: Pod, meeting: Meeting, prompt: str, model: str,
+    prompt: str, model: str,
 ) -> tuple[Optional[str], Optional[str]]:
     """Run LLM enhance. Returns (text, None) on success, (None, error) on failure.
 
@@ -342,7 +342,7 @@ def cmd_enhance(args) -> int:
     print(f"  Ollama URL: http://localhost:11434")
     print()
 
-    text, err = _run_enhance(pod, meeting, prompt, llm_config["model"])
+    text, err = _run_enhance(prompt, llm_config["model"])
     if err is not None:
         print(err, file=sys.stderr)
         return 1
@@ -422,7 +422,7 @@ def cmd_consolidate(args) -> int:
         print("LLM not configured for this pod. Set up LLM config first.", file=sys.stderr)
         return 1
     model_name = llm_config["model"]
-    text, err = _run_enhance(pod, meeting, prompt, model_name)
+    text, err = _run_enhance(prompt, model_name)
     if err is not None:
         print(err, file=sys.stderr)
         return 1
