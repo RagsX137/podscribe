@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 import requests
 import yaml
@@ -113,6 +113,7 @@ def enhance_transcript(
                     except json.JSONDecodeError:
                         continue
                     if chunk.get("done"):
+                        # Ollama's done chunk has response=""; check done first to avoid emitting a spurious on_token("").
                         stats = {
                             "prompt_eval_count": chunk.get("prompt_eval_count", 0),
                             "eval_count": chunk.get("eval_count", 0),
@@ -134,9 +135,16 @@ def enhance_transcript(
             return "".join(text_parts)
 
         except requests.HTTPError as e:
+            # HTTPError may lack .response (e.g. test mocks); fall back to the response mock's status_code.
             status = e.response.status_code if e.response is not None else getattr(resp, "status_code", None)
             if status is not None and 400 <= status < 500:
                 return None  # 4xx: don't retry
+            # 5xx (or unknown status): mirror the RequestException arm
+            if attempt < max_retries - 1:
+                on_retry(attempt + 1, str(e))
+                time.sleep(delays[min(attempt, len(delays) - 1)])
+                continue
+            return None
         except requests.RequestException as e:
             if attempt < max_retries - 1:
                 on_retry(attempt + 1, str(e))

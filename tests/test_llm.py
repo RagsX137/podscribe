@@ -198,17 +198,24 @@ def test_enhance_streams_and_returns_full_text():
 
 
 def test_enhance_retries_on_5xx(capfd):
-    """5xx response: retried 3×, succeeds on 3rd attempt."""
+    """5xx response: retried 3×, succeeds on 3rd attempt; on_retry fires before each sleep."""
     bad = MagicMock()
     bad.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 503")
     bad.status_code = 503
     bad.iter_lines = MagicMock(return_value=iter([]))
     good = make_streaming_response(["ok"], final_stats={"prompt_eval_count": 1, "eval_count": 1})
+    retries: list = []
+
+    def track_retry(attempt, err):
+        retries.append(attempt)
+
     with patch("podscribe.llm.requests.post", side_effect=[bad, bad, good]) as mock_post:
         with patch("podscribe.llm.time.sleep"):  # don't actually wait
-            result = enhance_transcript("qwen3.6:27b", "go")
+            result = enhance_transcript("qwen3.6:27b", "go", on_retry=track_retry)
             assert result == "ok"
             assert mock_post.call_count == 3
+            # Two retries (after attempts 1 and 2) before the 3rd attempt succeeds.
+            assert retries == [1, 2]
 
 
 def test_enhance_no_retry_on_4xx():
