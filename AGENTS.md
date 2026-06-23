@@ -11,6 +11,7 @@ Python CLI (>=3.10) for local-first live transcription using mlx-whisper + WebRT
 ```
 podscribe/
 ├── cli.py          — argparse + rewrite_argv + all cmd handlers
+├── tui.py          — interactive TUI: launcher + rich live views (lazy-imported)
 ├── audio.py        — sounddevice InputStream + webrtcvad, 16kHz mono float32
 ├── transcriber.py  — mlx_whisper.transcribe wrapper (Apple MLX)
 ├── storage.py      — pods/<name>/ per pod, transcripts .md/.json, raw .raw (deleted by default)
@@ -38,6 +39,7 @@ podscribe/
 | `show <pod> <id-prefix\|latest>` | Reads from `.md` transcript file |
 | `context` | Subcommands: `add`, `remove`, `list`; glossary merged from `leadership_team.yaml` + per-pod `config.yaml` |
 | `enhance` | Requires Ollama at localhost:11434 + `llm` section in pod or project config |
+| `podscribe` (no args) | TTY-only; opens the remembered-pod launcher menu with Record/Enhance/Consolidate/Others. Falls back to a help message in non-TTY contexts. |
 | `config llm {show\|set}` | Project-level LLM config in `podscribe.yaml` (repo root) |
 
 ## Models
@@ -102,7 +104,7 @@ xcode-select --install        # required for webrtcvad C extension
 pip install -e .              # installs all deps
 ```
 
-Declared in `pyproject.toml`: `mlx-whisper`, `webrtcvad`, `sounddevice`, `numpy`, `pyyaml`, `requests`.
+Declared in `pyproject.toml`: `mlx-whisper`, `webrtcvad`, `sounddevice`, `rich`, `readchar`, `numpy`, `pyyaml`, `requests`.
 `mlx-whisper` uses Apple MLX (no separate install). Model downloads cached automatically.
 
 ## Gotchas

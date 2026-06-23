@@ -159,7 +159,7 @@ podscribe sam-chen summarize 2026-06  # specific meeting prefix
 
 #### Streaming output
 
-The enhance call streams tokens from Ollama and shows a live progress bar on stderr:
+The enhance call streams tokens from Ollama and renders them live in a `rich.live` panel. When invoked directly (`podscribe <pod> enhance`) you see the same live view; piped/non-TTY invocations degrade to plain lines.
 
 ```
 Enhancing transcript for sam-chen/22-JUN-2026/2026-06-22-101500-sam-chen...
@@ -169,11 +169,13 @@ Enhanced summary will be saved to sam-chen/22-JUN-2026/2026-06-22-101500-sam-che
 
 Calling Model:qwen3.6:27b...
 Context window size : 32768 tokens
-qwen3.6:27b:  68%|██████████████████▋       | 412/600 [00:27<00:12, 18.0tok/s]
+[live token panel fills as Ollama generates]
   ✓ done in 47.2s | prompt 1250 + response 423 tokens @ 17.3 tok/s
 
 Enhanced transcript saved to pods/sam-chen/summaries/22-JUN-2026/2026-06-22-101500-sam-chen.md
 ```
+
+There is no fake percentage bar — Ollama's streaming API does not report a total token count until completion, so the view shows an honest token stream + final metrics instead.
 
 Connection drops and 5xx responses are retried up to 3× (1s, 2s, 4s backoff). 4xx errors (bad model, bad prompt) fail immediately — no retry.
 
@@ -319,5 +321,5 @@ leadership_team.yaml                   # global glossary terms (optional)
 | `sounddevice` | Recording | Default mic used unless `--device` specified |
 | `numpy` | Recording | PCM conversion for Whisper input |
 | `requests` | Summarize | HTTP client for the Ollama streaming API |
-| `tqdm` | Summarize | Progress bar for the streaming enhance call |
+| `rich` | TUI / enhance | Live token streaming, progress, and terminal UI |
 | Ollama | Summarize | Must be running at `localhost:11434` |
