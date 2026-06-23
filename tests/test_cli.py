@@ -688,3 +688,105 @@ def test_cmd_enhance_short_transcript_message_shows_stripped_length(
     assert "2 chars" in captured.err
     assert "16 chars" not in captured.err
 
+
+def test_run_enhance_returns_text_on_success():
+    """Helper returns (text, None) on LLM success."""
+    from unittest.mock import patch
+    from pathlib import Path as _Path
+    from podscribe.cli import _run_enhance
+    from podscribe.models import Pod, Meeting
+    from datetime import datetime
+
+    pod = Pod(name="sam-chen", base_path=_Path("pods/sam-chen"))
+    meeting = Meeting(
+        id="2026-06-22-143000-sam-chen",
+        pod_name="sam-chen",
+        started_at=datetime(2026, 6, 22, 14, 30, 0).isoformat(),
+    )
+    with patch("podscribe.cli.enhance_transcript", return_value="Enhanced output."):
+        text, err = _run_enhance(pod, meeting, "prompt", "qwen3.6:27b")
+    assert text == "Enhanced output."
+    assert err is None
+
+
+def test_run_enhance_returns_error_on_failure():
+    """Helper returns (None, error_msg) on LLM failure."""
+    from unittest.mock import patch
+    from pathlib import Path as _Path
+    from podscribe.cli import _run_enhance
+    from podscribe.models import Pod, Meeting
+    from datetime import datetime
+
+    pod = Pod(name="sam-chen", base_path=_Path("pods/sam-chen"))
+    meeting = Meeting(
+        id="2026-06-22-143000-sam-chen",
+        pod_name="sam-chen",
+        started_at=datetime(2026, 6, 22, 14, 30, 0).isoformat(),
+    )
+    with patch("podscribe.cli.enhance_transcript", return_value=None):
+        text, err = _run_enhance(pod, meeting, "prompt", "qwen3.6:27b")
+    assert text is None
+    assert err is not None
+    assert "ollama serve" in err
+
+
+def test_cmd_enhance_uses_run_enhance_helper(tmp_path, monkeypatch):
+    """After refactor, cmd_enhance delegates to _run_enhance."""
+    from unittest.mock import patch
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_enhance, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    append_segment(
+        meeting,
+        Segment(1.0, 5.0, "hello world this is a sufficiently long transcript"),
+    )
+    finalize_meeting(meeting)
+
+    with patch("podscribe.cli._run_enhance", return_value=("ok text", None)) as mock_helper:
+        with patch("podscribe.cli.load_project_config", return_value={
+            "llm": {"model": "qwen3.6", "prompt_template": "x"},
+        }):
+            args = build_parser().parse_args(["enhance", "sam-chen"])
+            rc = cmd_enhance(args)
+    assert rc == 0
+    assert mock_helper.called
+
+
+def test_cmd_consolidate_uses_run_enhance_helper(tmp_path, monkeypatch):
+    """After refactor, cmd_consolidate delegates to _run_enhance."""
+    from unittest.mock import patch
+    from podscribe.storage import init_pod, start_meeting, append_segment, finalize_meeting
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_consolidate, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    append_segment(meeting, Segment(1.0, 5.0, "hello world"))
+    finalize_meeting(meeting)
+    summary_dir = pod.summaries_dir_for("22-JUN-2026")
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    (summary_dir / f"{meeting.id}.md").write_text("Sample enhanced summary for testing.")
+
+    with patch("podscribe.cli._run_enhance", return_value=("yaml output", None)) as mock_helper:
+        with patch("podscribe.cli.load_project_config", return_value={
+            "llm": {"model": "qwen3.6", "prompt_template": "x"},
+        }):
+            with patch("podscribe.cli.extract_structured_fields", return_value={
+                "quick_summary": "x",
+                "key_topics": [],
+                "action_items": [],
+                "blockers": [],
+                "next_steps": [],
+            }):
+                args = build_parser().parse_args(["consolidate", "sam-chen", "--no-log"])
+                rc = cmd_consolidate(args)
+    assert rc == 0
+    assert mock_helper.called
+

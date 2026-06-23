@@ -15,7 +15,7 @@ import numpy as np
 from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_project_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields
-from .models import Segment, fmt_date
+from .models import Meeting, Pod, Segment, fmt_date
 from .storage import (
     append_log_row,
     append_segment,
@@ -62,6 +62,20 @@ def _resolve_meeting(meetings, prefix, pod_name):
             f"Use a longer prefix to disambiguate."
         )
     return matches[0], None
+
+
+def _run_enhance(
+    pod: Pod, meeting: Meeting, prompt: str, model: str,
+) -> tuple[Optional[str], Optional[str]]:
+    """Run LLM enhance. Returns (text, None) on success, (None, error) on failure.
+
+    The error string is what gets printed to stderr; it owns the Ollama-
+    availability message so both call sites stay in sync.
+    """
+    result = enhance_transcript(model, prompt)
+    if result is None:
+        return None, "Failed to reach Ollama. Is it running? Start with: ollama serve"
+    return result, None
 
 
 def cmd_init(args) -> int:
@@ -328,17 +342,13 @@ def cmd_enhance(args) -> int:
     print(f"  Ollama URL: http://localhost:11434")
     print()
 
-    result = enhance_transcript(llm_config["model"], prompt)
-    if result is None:
-        print(
-            "Failed to reach Ollama. Is it running? "
-            "Start with: ollama serve",
-            file=sys.stderr,
-        )
+    text, err = _run_enhance(pod, meeting, prompt, llm_config["model"])
+    if err is not None:
+        print(err, file=sys.stderr)
         return 1
 
     summary_dir.mkdir(parents=True, exist_ok=True)
-    enhanced_path.write_text(result)
+    enhanced_path.write_text(text)
     print(f"Enhanced transcript saved to {enhanced_path}")
     return 0
 
@@ -412,12 +422,12 @@ def cmd_consolidate(args) -> int:
         print("LLM not configured for this pod. Set up LLM config first.", file=sys.stderr)
         return 1
     model_name = llm_config["model"]
-    response = enhance_transcript(model_name, prompt)
-    if response is None:
-        print("Failed to reach Ollama for extraction.", file=sys.stderr)
+    text, err = _run_enhance(pod, meeting, prompt, model_name)
+    if err is not None:
+        print(err, file=sys.stderr)
         return 1
 
-    fields = extract_structured_fields(response)
+    fields = extract_structured_fields(text)
     if fields is None:
         print("Failed to parse structured fields from LLM response.", file=sys.stderr)
         return 1
