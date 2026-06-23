@@ -903,3 +903,61 @@ def test_import_subparser_parses_args():
     assert args.force is True
     assert args.dry_run is True
 
+
+def test_section4_end_to_end(tmp_path, monkeypatch):
+    """Smoke: init → record (typed) → enhance → consolidate → search → export → import.
+
+    Mocks LLM calls. Exercises the full surface added in section 4.
+    """
+    from unittest.mock import patch
+    from podscribe.storage import (
+        init_pod, start_meeting, append_segment, finalize_meeting,
+    )
+    from podscribe.models import Segment
+    from datetime import datetime
+    from podscribe.cli import cmd_enhance, cmd_consolidate, build_parser
+    from podscribe.export import create_export, import_archive
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen", display_name="Sam Chen")
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0), meeting_type="1on1")
+    append_segment(meeting, Segment(1.0, 5.0, "Discussed Project Helios timeline and auth design"))
+    finalize_meeting(meeting)
+
+    # Mock the LLM. enhance + consolidate both call _run_enhance.
+    with patch("podscribe.cli._run_enhance", return_value=("Project Helios update: on track", None)):
+        with patch("podscribe.cli.load_project_config", return_value={
+            "llm": {"model": "qwen3.6", "prompt_template": "x"},
+        }):
+            with patch("podscribe.cli.extract_structured_fields", return_value={
+                "quick_summary": "Helios update",
+                "key_topics": ["Helios"],
+                "action_items": ["Sam reviews design"],
+                "blockers": [],
+                "next_steps": ["Sync weekly"],
+            }):
+                # enhance
+                rc = cmd_enhance(build_parser().parse_args(["enhance", "sam-chen"]))
+                assert rc == 0
+
+                # consolidate (this populates meetings.csv, both pod and global)
+                rc = cmd_consolidate(build_parser().parse_args(["consolidate", "sam-chen"]))
+                assert rc == 0
+
+    # search finds the meeting
+    args = build_parser().parse_args(["search", "Helios"])
+    rc = args.func(args)
+    assert rc == 0
+
+    # export then re-import round-trip
+    tar = tmp_path / "backup.tar.gz"
+    create_export(tar)
+    assert tar.exists()
+
+    import shutil
+    shutil.rmtree(tmp_path / "pods" / "sam-chen")
+    (tmp_path / "pods" / "meetings.csv").unlink(missing_ok=True)
+    rc = import_archive(tar)
+    assert rc == 0
+    assert (tmp_path / "pods" / "sam-chen").exists()
+
