@@ -150,3 +150,24 @@ class TestSegment:
         assert s.text == "hello"
         assert s.confidence is None
         assert s.speaker is None
+
+
+def test_parse_meeting_type_normalizes_case():
+    from podscribe.models import parse_meeting_type
+    assert parse_meeting_type("1ON1") == "1on1"
+    assert parse_meeting_type("Retro") == "retro"
+    assert parse_meeting_type("design-review") == "design-review"
+
+
+def test_parse_meeting_type_rejects_unknown():
+    import pytest
+    from podscribe.models import parse_meeting_type
+    with pytest.raises(ValueError, match="Unknown meeting type"):
+        parse_meeting_type("weekly-sync")
+    with pytest.raises(ValueError, match="Unknown meeting type"):
+        parse_meeting_type("")
+
+
+def test_parse_meeting_type_none_returns_none():
+    from podscribe.models import parse_meeting_type
+    assert parse_meeting_type(None) is None

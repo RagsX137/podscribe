@@ -28,6 +28,34 @@ def make_meeting_id(pod_name: str, when: Optional[datetime] = None) -> str:
     return when.strftime("%Y-%m-%d-%H%M%S-") + pod_name
 
 
+MEETING_TYPES = (
+    "1on1",
+    "retro",
+    "skip-level",
+    "design-review",
+    "standup",
+    "interview",
+    "other",
+)
+
+
+def parse_meeting_type(raw):
+    """Normalize and validate a --type argument.
+
+    Returns the canonical lowercase form, or None if `raw` is None.
+    Raises ValueError if `raw` is not a known type.
+    """
+    if raw is None:
+        return None
+    normalized = raw.strip().lower()
+    if normalized not in MEETING_TYPES:
+        valid = ", ".join(MEETING_TYPES)
+        raise ValueError(
+            f"Unknown meeting type '{raw}'. Valid types: {valid}"
+        )
+    return normalized
+
+
 def fmt_date(when: datetime) -> str:
     """Format a datetime as DD-MMM-YYYY (e.g. 22-JUN-2026)."""
     return when.strftime("%d-%b-%Y").upper()
