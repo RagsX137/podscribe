@@ -103,7 +103,6 @@ def cmd_record(args) -> int:
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
-    del meeting_type  # unused until T5 threads it into start_meeting
 
     # Lazy imports: audio + transcriber libs are heavy
     from .audio import AudioCapture
@@ -116,7 +115,7 @@ def cmd_record(args) -> int:
     pod = load_pod(args.pod)
     effective_glossary = get_effective_glossary(pod)
     glossary_prompt = format_glossary_prompt(effective_glossary) if effective_glossary else None
-    meeting = start_meeting(pod)
+    meeting = start_meeting(pod, meeting_type=meeting_type)
     transcriber = Transcriber(model=args.model)
     capture = AudioCapture(
         vad_aggressiveness=args.vad_aggressiveness,

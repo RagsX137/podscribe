@@ -119,3 +119,4 @@ class Meeting:
     audio_path: Optional[Path] = None
     model: str = "large-v3-turbo"
     vad_enabled: bool = True
+    type: Optional[str] = None

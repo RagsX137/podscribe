@@ -319,3 +319,58 @@ def test_append_multiple_rows(tmp_path, monkeypatch):
     with path.open() as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 2
+
+
+def test_start_meeting_with_type_uses_subdir(tmp_path):
+    """--type creates a third-level subdir under transcripts/<date>/<type>/."""
+    from datetime import datetime
+    from podscribe.models import Pod
+    from podscribe.storage import start_meeting
+
+    pod = Pod(name="sam-chen", base_path=tmp_path / "pods" / "sam-chen")
+    pod.base_path.mkdir(parents=True)
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0), meeting_type="1on1")
+    assert meeting.type == "1on1"
+    expected_dir = pod.base_path / "transcripts" / "22-JUN-2026" / "1on1"
+    assert expected_dir.exists()
+    assert meeting.transcript_path.parent == expected_dir
+
+
+def test_start_meeting_without_type_uses_flat(tmp_path):
+    """No --type → existing 2-level layout, no type subdir."""
+    from datetime import datetime
+    from podscribe.models import Pod
+    from podscribe.storage import start_meeting
+
+    pod = Pod(name="sam-chen", base_path=tmp_path / "pods" / "sam-chen")
+    pod.base_path.mkdir(parents=True)
+    meeting = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    assert meeting.type is None
+    assert meeting.transcript_path.parent == pod.base_path / "transcripts" / "22-JUN-2026"
+
+
+def test_list_meetings_finds_typed_and_untyped(tmp_path):
+    """Mix of typed (3-level) and untyped (2-level) paths: both found."""
+    from datetime import datetime
+    from podscribe.models import Pod, Segment
+    from podscribe.storage import (
+        start_meeting, append_segment, finalize_meeting, list_meetings
+    )
+
+    pod = Pod(name="sam-chen", base_path=tmp_path / "pods" / "sam-chen")
+    pod.base_path.mkdir(parents=True)
+
+    # 2-level (untyped) meeting
+    m1 = start_meeting(pod, datetime(2026, 6, 22, 14, 30, 0))
+    append_segment(m1, Segment(1.0, 5.0, "hello"))
+    finalize_meeting(m1)
+
+    # 3-level (typed) meeting
+    m2 = start_meeting(pod, datetime(2026, 6, 22, 15, 0, 0), meeting_type="retro")
+    append_segment(m2, Segment(1.0, 5.0, "world"))
+    finalize_meeting(m2)
+
+    meetings = list_meetings(pod)
+    assert len(meetings) == 2
+    types = {m.type for m in meetings}
+    assert types == {None, "retro"}

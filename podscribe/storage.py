@@ -99,12 +99,16 @@ def load_pod(name: str, base_dir: Path = Path("pods")) -> Pod:
     return load_pod_config(base_dir / name)
 
 
-def start_meeting(pod: Pod, when: Optional[datetime] = None) -> Meeting:
+def start_meeting(
+    pod: Pod, when: Optional[datetime] = None,
+    meeting_type: Optional[str] = None,
+) -> Meeting:
     """Create a Meeting record and its file paths. Touches audio file for cleanup."""
     when = when or datetime.now()
     meeting_id = make_meeting_id(pod.name, when)
     date_str = fmt_date(when)
-    transcript_dir = pod.transcripts_dir_for(date_str)
+    base_dir = pod.transcripts_dir_for(date_str)
+    transcript_dir = base_dir / meeting_type if meeting_type else base_dir
     transcript_dir.mkdir(parents=True, exist_ok=True)
     transcript_path = transcript_dir / f"{meeting_id}.md"
     metadata_path = transcript_dir / f"{meeting_id}.json"
@@ -117,6 +121,7 @@ def start_meeting(pod: Pod, when: Optional[datetime] = None) -> Meeting:
         transcript_path=transcript_path,
         metadata_path=metadata_path,
         audio_path=audio_path,
+        type=meeting_type,
     )
 
 
@@ -146,6 +151,7 @@ def finalize_meeting(meeting: Meeting, *, keep_audio: bool = False) -> None:
         "duration_sec": meeting.duration_sec,
         "model": meeting.model,
         "vad_enabled": meeting.vad_enabled,
+        "type": meeting.type,
     }
     with meeting.metadata_path.open("w") as f:
         json.dump(metadata, f, indent=2)
@@ -157,14 +163,18 @@ def finalize_meeting(meeting: Meeting, *, keep_audio: bool = False) -> None:
 def list_meetings(pod: Pod) -> List[Meeting]:
     """List all meetings in a pod, newest first.
 
-    Sorted by started_at (parsed from the JSON sidecar) rather than by
-    date-dir path string, so single-digit days and cross-month orderings
-    are chronological. Meetings missing a sidecar are skipped.
+    Matches both 2-level (transcripts/<date>/<id>.json) and 3-level
+    (transcripts/<date>/<type>/<id>.json) layouts. Sorted by started_at
+    (parsed from the JSON sidecar) rather than by date-dir path string.
+    Meetings missing a sidecar or with malformed JSON are skipped.
     """
     meetings = []
     if not pod.base_path.exists():
         return meetings
-    for json_path in pod.base_path.glob("transcripts/*/*.json"):
+    json_paths = set()
+    json_paths.update(pod.base_path.glob("transcripts/*/*.json"))
+    json_paths.update(pod.base_path.glob("transcripts/*/*/*.json"))
+    for json_path in sorted(json_paths):
         try:
             with json_path.open() as f:
                 data = json.load(f)
@@ -181,6 +191,7 @@ def list_meetings(pod: Pod) -> List[Meeting]:
                 audio_path=raw_path if raw_path.exists() else None,
                 model=data.get("model", ""),
                 vad_enabled=data.get("vad_enabled", True),
+                type=data.get("type"),
             ))
         except (json.JSONDecodeError, KeyError, ValueError):
             continue
