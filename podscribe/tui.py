@@ -112,12 +112,12 @@ def _action_menu(console: Console) -> str:
     )
     while True:
         k = read_key()
-        if k in ("1", "2", "3", "4", "q"):
-            return k
+        if k in ("1", "2", "3", "4", "q", "\x03"):
+            return "q" if k == "\x03" else k
 
 
-def _others_menu(console: Console) -> Optional[list[str]]:
-    """Submenu for one-shot commands. Returns a CLI argv list to execute, or None."""
+def _others_menu(console: Console) -> str:
+    """Render the Others submenu and return the chosen key."""
     items = [
         ("1", "list"),
         ("2", "show"),
@@ -131,18 +131,11 @@ def _others_menu(console: Console) -> Optional[list[str]]:
     console.print(
         "  " + "    ".join(f"[{C_LILAC}][{k}][/{C_LILAC}] {name}" for k, name in items)
     )
+    valid = {"1", "2", "3", "4", "5", "6", "7", "q", "\x03"}
     while True:
         k = read_key()
-        if k == "q":
-            return None
-        if k == "7":
-            return ["__SWITCH_POD__"]
-        mapping = {
-            "1": "list", "2": "show", "3": "search",
-            "4": "context", "5": "export", "6": "config",
-        }
-        if k in mapping:
-            return [mapping[k]]
+        if k in valid:
+            return "q" if k == "\x03" else k
 
 
 def _dispatch_cli(argv: list[str]) -> int:
@@ -162,6 +155,8 @@ def record_view(pod: Pod, args) -> int:
     from .transcriber import Transcriber
     from .models import parse_meeting_type
     from .storage import start_meeting
+    from .config import get_effective_glossary
+    from .glossary import format_glossary_prompt
 
     try:
         meeting_type = parse_meeting_type(getattr(args, "type", None))
@@ -175,9 +170,12 @@ def record_view(pod: Pod, args) -> int:
         Console().print(f"[red]Failed to start meeting: {e}[/red]")
         return 1
 
+    effective_glossary = get_effective_glossary(pod)
+    glossary_prompt = format_glossary_prompt(effective_glossary) if effective_glossary else None
+
     transcriber = Transcriber(model=getattr(args, "model", "large-v3-turbo"))
     capture = AudioCapture(
-        vad_aggressiveness=getattr(args, "vad_aggressiveness", 1),
+        vad_aggressiveness=getattr(args, "vad_aggressiveness", 2),
         device=getattr(args, "device", None),
     )
     keep_audio = bool(getattr(args, "keep_audio", False))
@@ -201,7 +199,7 @@ def record_view(pod: Pod, args) -> int:
     console = Console()
 
     # Latest status dict populated by on_status; consumed by _render.
-    status: dict = {"elapsed": 0, "segment_count": 0, "vad_aggr": 1, "overflow": False}
+    status: dict = {"elapsed": 0, "segment_count": 0, "vad_aggr": capture.vad_aggressiveness, "overflow": False}
     status_line = {"text": ""}
 
     def _on_segment(seg) -> None:
@@ -242,7 +240,7 @@ def record_view(pod: Pod, args) -> int:
         try:
             run_record_session(
                 pod, meeting, capture, transcriber,
-                wav_writer=wav_writer,
+                glossary_prompt=glossary_prompt, wav_writer=wav_writer,
                 on_segment=_on_segment,
                 on_status=_on_status_live,
                 on_done=_on_done,
@@ -361,14 +359,19 @@ def consolidate_screen(pod: Pod, meeting) -> int:
     from .cli import run_consolidate
 
     console = Console()
+    status = console.status("[bold cyan]Consolidating...")
 
     def _prompt() -> bool:
+        status.stop()
         return Confirm.ask(
             f"Log entry exists for {meeting.id}. Rewrite?", default=False
         )
 
-    with console.status("[bold cyan]Consolidating..."):
+    status.start()
+    try:
         rc = run_consolidate(pod, meeting, prompt_rewrite=_prompt)
+    finally:
+        status.stop()
     return rc
 
 
@@ -434,12 +437,39 @@ def launch() -> int:
                     consolidate_screen(pod, meeting)
         elif key == "4":
             sub = _others_menu(console)
-            if sub is None:
+            if sub == "q":
                 continue
-            if sub == ["__SWITCH_POD__"]:
+            if sub == "7":
                 new_pod = _pick_pod(console)
                 if new_pod is not None:
                     pod = new_pod
                     save_last_pod(pod.name)
                 continue
-            _dispatch_cli(sub)
+            if sub == "1":
+                _dispatch_cli(["list", "--all"])
+            elif sub == "2":
+                _dispatch_cli(["show", pod.name, "latest"])
+            elif sub == "3":
+                console.print("[dim]Search query:[/dim] ", end="")
+                try:
+                    query = input().strip()
+                except (EOFError, KeyboardInterrupt):
+                    query = ""
+                if query:
+                    _dispatch_cli(["search", query])
+            elif sub == "4":
+                _dispatch_cli(["context", pod.name, "list"])
+            elif sub == "5":
+                from datetime import datetime
+
+                default_path = f"podscribe-export-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
+                console.print(f"[dim]Export path [{default_path}]:[/dim] ", end="")
+                try:
+                    path = input().strip() or default_path
+                except (EOFError, KeyboardInterrupt):
+                    path = default_path
+                _dispatch_cli(["export", "--out", path])
+            elif sub == "6":
+                _dispatch_cli(["config", "llm", "show"])
+            console.print(f"\n[{C_DIM}]Press any key to continue...[/{C_DIM}]")
+            read_key()

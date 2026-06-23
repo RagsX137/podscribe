@@ -150,6 +150,7 @@ def run_record_session(
     def handle_sigint(sig, frame):
         capture.stop()
 
+    old_handler = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, handle_sigint)
 
     try:
@@ -186,6 +187,7 @@ def run_record_session(
                 "write_error": write_error,
             })
     finally:
+        signal.signal(signal.SIGINT, old_handler)
         capture.stop()
         if wav_writer is not None:
             try:
@@ -856,7 +858,11 @@ def main(argv: Optional[list] = None) -> int:
     if not argv:
         if sys.stdin.isatty() and sys.stderr.isatty():
             from .tui import launch
-            return launch()
+            try:
+                return launch()
+            except KeyboardInterrupt:
+                print("\nInterrupted.", file=sys.stderr)
+                return 130
         sys.stderr.write(
             "podscribe: a TTY is required for the interactive menu.\n"
             "Run 'podscribe --help' for subcommands.\n"
