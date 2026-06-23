@@ -434,6 +434,24 @@ def cmd_config_consolidate_set(args) -> int:
     return 0
 
 
+def cmd_search(args) -> int:
+    """Search across all transcripts for a keyword."""
+    from .search import search
+    matches = list(search(
+        args.query,
+        pod=args.pod,
+        since=args.since,
+        meeting_type=args.type,
+        color=args.color,
+    ))
+    if not matches:
+        print("No matches.")
+        return 0
+    for m in matches:
+        print(f"{m.pod_name}:{m.date_str}:{m.meeting_id}:{m.timestamp} {m.text}")
+    return 0
+
+
 def cmd_consolidate(args) -> int:
     """Extract structured fields from enhanced summary and update CSV log."""
     if not pod_exists(args.pod):
@@ -610,6 +628,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_cons.add_argument("--no-log", "-n", action="store_true", help="Skip CSV log update")
     p_cons.set_defaults(func=cmd_consolidate)
 
+    # search
+    p_search = sub.add_parser("search", help="Search across all transcripts.")
+    p_search.add_argument("query", help="Search query (fixed-string match)")
+    p_search.add_argument("--pod", help="Limit search to one pod")
+    p_search.add_argument("--since", metavar="DURATION|DATE", help="Filter by date")
+    p_search.add_argument("--type", metavar="TYPE", help="Filter by meeting type")
+    p_search.add_argument(
+        "--color", action="store_true",
+        help="Highlight matches in ANSI colors",
+    )
+    p_search.set_defaults(func=cmd_search)
+
     # config
     p_cfg = sub.add_parser("config", help="Manage project-level config.")
     cfg_sub = p_cfg.add_subparsers(dest="action", required=True)
@@ -639,7 +669,7 @@ def rewrite_argv(argv: list[str]) -> list[str]:
     `podscribe <pod> <command> [args]` → `<command> <pod> [args]`
     `start` → `record`, `summarize` → `enhance`
     """
-    known_commands = {"init", "record", "list", "show", "context", "enhance", "config", "consolidate"}
+    known_commands = {"init", "record", "list", "show", "context", "enhance", "config", "consolidate", "search"}
     aliases = {"start": "record", "summarize": "enhance", "cons": "consolidate"}
 
     if not argv:

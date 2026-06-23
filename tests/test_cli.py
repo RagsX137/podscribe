@@ -878,3 +878,14 @@ def test_cmd_list_limits_by_recent(tmp_path, monkeypatch):
     args2 = build_parser().parse_args(["list", "--all"])
     assert args2.recent is None
 
+
+def test_search_subparser_parses_args():
+    from podscribe.cli import build_parser
+    args = build_parser().parse_args([
+        "search", "Project Helios", "--pod", "sam-chen", "--since", "7d", "--type", "1on1",
+    ])
+    assert args.query == "Project Helios"
+    assert args.pod == "sam-chen"
+    assert args.since == "7d"
+    assert args.type == "1on1"
+
