@@ -116,8 +116,90 @@ def cmd_init(args) -> int:
     return 0
 
 
+def run_record_session(
+    pod: "Pod",
+    meeting: "Meeting",
+    capture,
+    transcriber,
+    *,
+    glossary_prompt: Optional[str] = None,
+    wav_writer=None,
+    on_segment=lambda s: None,
+    on_status=lambda d: None,
+    on_done=lambda n: None,
+) -> None:
+    """Drive capture.segments(), append to transcript, finalize. Fire callbacks.
+
+    Headless: callers (plain wrapper or rich view) decide what to render.
+    Owns SIGINT (stop capture), the .raw cleanup, and finalize_meeting.
+    """
+    from .audio import AudioCapture  # noqa: F401  (type-check only)
+    from .transcriber import Transcriber  # noqa: F401
+
+    with meeting.transcript_path.open("w") as f:
+        f.write(f"# Meeting: {meeting.id}\n\n")
+        f.write(f"- pod: {pod.name} ({pod.display_name})\n")
+        f.write(f"- started: {meeting.started_at}\n")
+        f.write(f"- model: {transcriber.model_name}\n")
+        f.write(f"- vad: webrtcvad (aggressiveness={capture.vad_aggressiveness})\n\n")
+        f.write("## Transcript\n\n")
+
+    meeting.model = transcriber.model_name
+    meeting.vad_enabled = True
+    start_monotonic = time.monotonic()
+    segment_count = 0
+
+    def handle_sigint(sig, frame):
+        capture.stop()
+
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    try:
+        for audio_segment in capture.segments():
+            if wav_writer is not None:
+                try:
+                    pcm = np.clip(audio_segment * 32767, -32768, 32767).astype(np.int16)
+                    wav_writer.writeframes(pcm.tobytes())
+                except OSError:
+                    pass
+            kwargs = {}
+            if glossary_prompt:
+                kwargs["initial_prompt"] = glossary_prompt
+            results = transcriber.transcribe(audio_segment, **kwargs)
+            for r in results:
+                elapsed = time.monotonic() - start_monotonic
+                seg_duration = max(0.0, r["end"] - r["start"])
+                seg_start = max(0.0, elapsed - seg_duration)
+                seg = Segment(
+                    start_sec=seg_start,
+                    end_sec=elapsed,
+                    text=r["text"],
+                )
+                append_segment(meeting, seg)
+                on_segment(seg)
+                segment_count += 1
+            on_status({
+                "elapsed": time.monotonic() - start_monotonic,
+                "segment_count": segment_count,
+                "vad_aggr": capture.vad_aggressiveness,
+                "level": 0.0,
+                "overflow": getattr(capture, "had_overflow", False),
+            })
+    finally:
+        capture.stop()
+        if wav_writer is not None:
+            try:
+                wav_writer.close()
+            except Exception:
+                pass
+        meeting.duration_sec = int(time.monotonic() - start_monotonic)
+        meeting.ended_at = datetime.now().isoformat(timespec="seconds")
+        finalize_meeting(meeting, keep_audio=(wav_writer is not None))
+        on_done(segment_count)
+
+
 def cmd_record(args) -> int:
-    """Live record + transcribe a meeting."""
+    """Live record + transcribe a meeting (thin wrapper around run_record_session)."""
     from .models import parse_meeting_type
     try:
         meeting_type = parse_meeting_type(args.type)
@@ -125,7 +207,6 @@ def cmd_record(args) -> int:
         print(str(e), file=sys.stderr)
         return 1
 
-    # Lazy imports: audio + transcriber libs are heavy
     from .audio import AudioCapture
     from .transcriber import Transcriber
 
@@ -152,20 +233,6 @@ def cmd_record(args) -> int:
     print("  Press Ctrl+C to stop and finalize.")
     print()
 
-    # Write transcript header
-    with meeting.transcript_path.open("w") as f:
-        f.write(f"# Meeting: {meeting.id}\n\n")
-        f.write(f"- pod: {pod.name} ({pod.display_name})\n")
-        f.write(f"- started: {meeting.started_at}\n")
-        f.write(f"- model: {transcriber.model_name}\n")
-        f.write(f"- vad: webrtcvad (aggressiveness={capture.vad_aggressiveness})\n\n")
-        f.write("## Transcript\n\n")
-
-    meeting.model = transcriber.model_name
-    meeting.vad_enabled = True
-    start_monotonic = time.monotonic()
-    segment_count = 0
-
     wav_writer = None
     if args.keep_audio:
         try:
@@ -177,48 +244,21 @@ def cmd_record(args) -> int:
             print(f"  ⚠ audio write failed: {e}", file=sys.stderr)
             wav_writer = None
 
-    def handle_sigint(sig, frame):
-        capture.stop()
+    def _on_segment(seg: Segment) -> None:
+        print(f"[{_hms(seg.start_sec)}] {seg.text}")
 
-    signal.signal(signal.SIGINT, handle_sigint)
+    def _on_done(n: int) -> None:
+        print()
+        print(f"Done. Saved {n} segments ({_hms(meeting.duration_sec or 0)})")
+        print(f"  → {meeting.transcript_path}")
+        if capture.had_overflow:
+            print("  ⚠ audio buffer overflowed — some audio may have been dropped.", file=sys.stderr)
 
-    try:
-        for audio_segment in capture.segments():
-            if wav_writer is not None:
-                try:
-                    pcm = np.clip(audio_segment * 32767, -32768, 32767).astype(np.int16)
-                    wav_writer.writeframes(pcm.tobytes())
-                except OSError as e:
-                    print(f"  ⚠ audio write failed: {e}", file=sys.stderr)
-            kwargs = {}
-            if glossary_prompt:
-                kwargs["initial_prompt"] = glossary_prompt
-            results = transcriber.transcribe(audio_segment, **kwargs)
-            for r in results:
-                elapsed = time.monotonic() - start_monotonic
-                seg_duration = max(0.0, r["end"] - r["start"])
-                seg_start = max(0.0, elapsed - seg_duration)
-                seg = Segment(
-                    start_sec=seg_start,
-                    end_sec=elapsed,
-                    text=r["text"],
-                )
-                append_segment(meeting, seg)
-                print(f"[{_hms(seg.start_sec)}] {seg.text}")
-                segment_count += 1
-    finally:
-        capture.stop()
-        if wav_writer is not None:
-            wav_writer.close()
-        meeting.duration_sec = int(time.monotonic() - start_monotonic)
-        meeting.ended_at = datetime.now().isoformat(timespec="seconds")
-        finalize_meeting(meeting, keep_audio=args.keep_audio)
-
-    print()
-    print(f"Done. Saved {segment_count} segments ({_hms(meeting.duration_sec or 0)})")
-    print(f"  → {meeting.transcript_path}")
-    if capture.had_overflow:
-        print("  ⚠ audio buffer overflowed — some audio may have been dropped.", file=sys.stderr)
+    run_record_session(
+        pod, meeting, capture, transcriber,
+        glossary_prompt=glossary_prompt, wav_writer=wav_writer,
+        on_segment=_on_segment, on_status=lambda d: None, on_done=_on_done,
+    )
     return 0
 
 

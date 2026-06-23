@@ -1,9 +1,12 @@
 """Tests for CLI command structure (no audio, no model)."""
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
-from podscribe.cli import build_parser, rewrite_argv
+from podscribe.cli import build_parser, rewrite_argv, run_record_session
+from podscribe.models import Meeting, Pod
+from podscribe.storage import start_meeting
 
 
 def test_parser_has_required_commands():
@@ -569,7 +572,7 @@ def test_cmd_record_writes_wav_with_keep_audio(tmp_path, monkeypatch):
     with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
         with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
             with patch("podscribe.cli.signal.signal"):
-                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5]):
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5]):
                     args = build_parser().parse_args(["record", "sam-chen", "--keep-audio", "--model", "base"])
                     rc = cmd_record(args)
                     assert rc == 0
@@ -609,7 +612,7 @@ def test_cmd_record_omits_audio_by_default(tmp_path, monkeypatch):
     with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
         with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
             with patch("podscribe.cli.signal.signal"):
-                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5]):
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5]):
                     args = build_parser().parse_args(["record", "sam-chen", "--model", "base"])
                     rc = cmd_record(args)
                     assert rc == 0
@@ -641,7 +644,7 @@ def test_cmd_record_survives_wav_open_failure(tmp_path, monkeypatch, capsys):
     with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
         with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
             with patch("podscribe.cli.signal.signal"):
-                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5]):
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5]):
                     with patch("podscribe.cli.wave.open", side_effect=OSError("disk full")):
                         args = build_parser().parse_args(
                             ["record", "sam-chen", "--keep-audio", "--model", "base"]
@@ -1130,4 +1133,87 @@ def test_cmd_list_type_filter_works(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "1on1" in captured.out
     assert "150000" not in captured.out
+
+
+class FakeCapture:
+    def __init__(self, segments):
+        self._segments = iter(segments)
+        self.stopped = False
+        self.vad_aggressiveness = 2
+        self.had_overflow = False
+
+    def segments(self):
+        return self._segments
+
+    def stop(self):
+        self.stopped = True
+
+
+class FakeTranscriber:
+    def __init__(self):
+        self.model_name = "large-v3-turbo"
+
+    def transcribe(self, audio, **kwargs):
+        return [{"start": 0.0, "end": 1.0, "text": f"seg-{id(audio)}"}]
+
+
+def test_run_record_session_drives_callbacks_and_writes_transcript(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = Pod(
+        name="sam-chen", display_name="Sam", role="", cadence="weekly",
+        notes="", created_at="2026-06-23", glossary=None, llm=None,
+        base_path=tmp_path / "pods" / "sam-chen",
+    )
+    (pod.base_path / "transcripts").mkdir(parents=True)
+    meeting = start_meeting(pod)
+
+    segs = [np.zeros(16000, dtype=np.float32), np.zeros(8000, dtype=np.float32)]
+    capture = FakeCapture(segs)
+    transcriber = FakeTranscriber()
+
+    segments_seen: list = []
+    statuses: list = []
+    done_counts: list = []
+
+    run_record_session(
+        pod, meeting, capture, transcriber,
+        on_segment=segments_seen.append,
+        on_status=statuses.append,
+        on_done=done_counts.append,
+    )
+
+    assert len(segments_seen) == 2
+    assert capture.stopped is True
+    assert done_counts == [2]
+    md = meeting.transcript_path.read_text()
+    assert "# Meeting:" in md
+    assert len(statuses) >= 1
+    assert statuses[-1]["segment_count"] == 2
+    assert not meeting.audio_path.exists()
+    assert meeting.metadata_path.exists()
+
+
+def test_run_record_session_keeps_audio_when_wav_writer_provided(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    import wave
+    pod = Pod(
+        name="sam-chen", display_name="Sam", role="", cadence="weekly",
+        notes="", created_at="2026-06-23", glossary=None, llm=None,
+        base_path=tmp_path / "pods" / "sam-chen",
+    )
+    (pod.base_path / "transcripts").mkdir(parents=True)
+    meeting = start_meeting(pod)
+
+    capture = FakeCapture([np.zeros(16000, dtype=np.float32)])
+    transcriber = FakeTranscriber()
+    wav = wave.open(str(meeting.audio_path), "wb")
+    wav.setnchannels(1)
+    wav.setsampwidth(2)
+    wav.setframerate(16000)
+
+    run_record_session(
+        pod, meeting, capture, transcriber, wav_writer=wav,
+        on_segment=lambda s: None, on_status=lambda d: None, on_done=lambda n: None,
+    )
+    assert meeting.audio_path.exists()
 
