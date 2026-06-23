@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +45,44 @@ def append_log_row(pod: Pod, fields: dict) -> None:
         if not file_exists:
             writer.writeheader()
         writer.writerow(new_row)
+    # Mirror to global CSV. Failures are logged but not raised.
+    append_global_log_row(fields)
+
+
+def global_log_path() -> Path:
+    """Path to the project-root global meetings.csv."""
+    return Path("pods") / "meetings.csv"
+
+
+def append_global_log_row(fields: dict) -> bool:
+    """Append a row to the global CSV. Returns True on success, False on error.
+
+    Errors are NOT raised — the per-pod CSV is the authoritative record.
+    A global-write failure is logged to stderr but does not block the caller.
+    """
+    try:
+        path = global_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        new_row = {col: fields.get(col, "") for col in CSV_COLUMNS}
+        file_exists = path.exists()
+        with path.open("a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(new_row)
+        return True
+    except OSError as e:
+        print(f"Warning: failed to write global log: {e}", file=sys.stderr)
+        return False
+
+
+def read_global_log() -> list:
+    """Read all rows from the global meetings.csv. Returns [] if file missing."""
+    path = global_log_path()
+    if not path.exists():
+        return []
+    with path.open() as f:
+        return list(csv.DictReader(f))
 
 
 def update_log_row(pod: Pod, meeting_id: str, fields: dict) -> None:

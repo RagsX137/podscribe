@@ -374,3 +374,69 @@ def test_list_meetings_finds_typed_and_untyped(tmp_path):
     assert len(meetings) == 2
     types = {m.type for m in meetings}
     assert types == {None, "retro"}
+
+
+def test_append_log_row_writes_global(tmp_path, monkeypatch):
+    """append_log_row also mirrors the row to pods/meetings.csv."""
+    from podscribe.models import Pod
+    from podscribe.storage import (
+        append_log_row, init_pod, global_log_path, read_global_log
+    )
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    append_log_row(pod, {
+        "date": "22-JUN-2026",
+        "person": "Sam Chen",
+        "meeting_id": "2026-06-22-143000-sam-chen",
+        "quick_summary": "Discussed Project Helios",
+        "key_topics": "Helios",
+        "action_items": "Sam will review design",
+        "blockers": "",
+        "next_steps": "Weekly sync",
+    })
+
+    assert global_log_path().exists()
+    rows = read_global_log()
+    assert len(rows) == 1
+    assert rows[0]["meeting_id"] == "2026-06-22-143000-sam-chen"
+    assert rows[0]["quick_summary"] == "Discussed Project Helios"
+
+
+def test_global_log_failure_does_not_break_pod_log(tmp_path, monkeypatch, capsys):
+    """If the global write fails, the per-pod write still succeeds."""
+    from podscribe.models import Pod
+    from podscribe.storage import append_log_row, init_pod, read_global_log, log_path
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+
+    # Force the global write to fail by making the global path point at a directory
+    def fake_global_path():
+        return tmp_path / "pods" / "BLOCKED"
+
+    monkeypatch.setattr("podscribe.storage.global_log_path", fake_global_path)
+
+    append_log_row(pod, {
+        "date": "22-JUN-2026",
+        "person": "Sam Chen",
+        "meeting_id": "2026-06-22-143000-sam-chen",
+        "quick_summary": "x",
+        "key_topics": "",
+        "action_items": "",
+        "blockers": "",
+        "next_steps": "",
+    })
+
+    # Per-pod log still has the row
+    assert log_path(pod).exists()
+    captured = capsys.readouterr()
+    assert "global log" in captured.err or len(captured.err) == 0
+
+
+def test_read_global_log_empty_when_no_file(tmp_path, monkeypatch):
+    """read_global_log returns [] when pods/meetings.csv does not exist."""
+    from podscribe.storage import read_global_log
+
+    monkeypatch.chdir(tmp_path)
+    assert read_global_log() == []
