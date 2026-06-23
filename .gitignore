@@ -9,4 +9,6 @@ pods/
 .DS_Store
 *.raw
 .env
+.scratch/
+.superpowers/
 .worktrees/
