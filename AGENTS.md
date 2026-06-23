@@ -21,6 +21,8 @@ podscribe/
 ├── llm.py          — requests-based Ollama client (enhance + consolidate); streaming + retries
 ├── search.py       — cross-pod keyword search (rg backend, Python fallback)
 └── export.py       — tar.gz export/import of pods/ + root YAMLs (path-traversal safe)
+
+benchmarks/bench_enhance.py — Ollama model benchmarking harness (separate script, not installed)
 ```
 
 ## CLI quirks
@@ -37,7 +39,7 @@ podscribe/
 |---------|-------|
 | `init <name>` | Name must be kebab-case `^[a-z0-9]+(-[a-z0-9]+)*$`; flags: `--display-name`, `--role`, `--cadence`, `--notes` |
 | `record` | `--model` (default `large-v3-turbo`), `--vad-aggressiveness` 0-3, `--device`, `--keep-audio`, `--type`; Ctrl+C to stop; audio lazy-imported |
-| `list` | Flags: `--all` (global CSV), `--since` (e.g. `7d`/`24h`/`2026-06-15`), `--recent N`, `--type`; renders a markdown table |
+| `list` | `list <pod>` filters to one pod. Flags: `--all` (global CSV), `--since` (e.g. `7d`/`24h`/`2026-06-15`), `--recent N`, `--type`; renders a markdown table |
 | `show <pod> <id-prefix\|latest>` | Reads from `.md` transcript file |
 | `context` | Subcommands: `add`, `remove`, `list`; glossary merged from `leadership_team.yaml` + per-pod `config.yaml` |
 | `enhance` | Requires Ollama at localhost:11434 + `llm` section in pod or project config |
@@ -96,6 +98,8 @@ Glossary `initial_prompt` format: `"Please transcribe the following names and pr
 
 `preserve_speakers` (bool, default `true`): resolution order pod-level `llm` > project-level `llm` > default. When true, `llm.build_enhance_prompt` prepends an anti-hallucination + speaker-preservation preamble to the template.
 
+`podscribe.yaml` currently sets `llm.model: qwen3.6:27b` (Ollama tag). This must be `ollama pull`-ed before `enhance`/`consolidate` will work. `consolidate` uses the same model by default but a separate `consolidate.prompt` (supports `{{summary}}` placeholder).
+
 ## Tests
 
 ```
@@ -132,7 +136,8 @@ Declared in `pyproject.toml`: `mlx-whisper`, `webrtcvad`, `sounddevice`, `rich`,
 
 - **All work files must live inside this project folder.** Do not use `/tmp`, `~/Desktop`,
   or any other path outside the project. Use `.scratch/` for throwaway scripts and outputs.
-- **`.scratch/` is NOT in `.gitignore`** — do not rely on it being ignored. Either avoid
-  `git add`-ing from it, or add `.scratch/` to `.gitignore` yourself before creating files there.
+- **`.scratch/` IS in `.gitignore`** (along with `.superpowers/`, `.worktrees/`, `pods/`,
+  `.venv/`, `*.raw`, `.env`) — it's safe to drop files there, but verify with
+  `git check-ignore` before assuming anything is ignored.
 - **Never commit generated data into the repo root.** Test outputs, dumps, and reviews
   go in `.scratch/` or a feature branch.

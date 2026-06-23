@@ -1,0 +1,251 @@
+{
+  "meta": {
+    "timestamp": "2026-06-23T18:54:27.910575",
+    "pod": "fso",
+    "meeting": "2026-06-22-1438-fso",
+    "transcript_chars": 16154,
+    "prompt_chars": 18423,
+    "runs": 3,
+    "warmup": 1
+  },
+  "models": [
+    {
+      "model": "qwen3.6:27b",
+      "warmup": [
+        {
+          "label": "warmup 1",
+          "wall_s": 328.0695734580222,
+          "out_tokens": 3256,
+          "in_tokens": 7357,
+          "total_s": 328.043038791,
+          "load_s": 10.521593583,
+          "prompt_eval_s": 58.506775,
+          "eval_s": 258.983773,
+          "warm_total_s": 317.521445208,
+          "prompt_tok_s": 125.7461208552343,
+          "gen_tok_s": 12.572216252328674,
+          "response_preview": "# 1:1 Summary\n\n> Samba and Nellie reviewed the fuel supply planning application demo, covering ML demand forecasts, optimization workflows, and current steady-state status with potential future featur",
+          "response_len": 2321
+        }
+      ],
+      "measured": [
+        {
+          "label": "run 1",
+          "wall_s": 225.2995637920103,
+          "out_tokens": 2821,
+          "in_tokens": 7357,
+          "total_s": 225.2612745,
+          "load_s": 0.288481958,
+          "prompt_eval_s": 0.219416,
+          "eval_s": 224.737841,
+          "warm_total_s": 224.972792542,
+          "prompt_tok_s": 33529.91577642469,
+          "gen_tok_s": 12.552403224341735,
+          "response_preview": "# 1:1 Summary\n\n> The meeting demonstrated Jetwell's fuel supply planning application, clarified that ML demand forecasts remain read-only while the OR optimizer adjusts user inputs, and confirmed the ",
+          "response_len": 2843
+        },
+        {
+          "label": "run 2",
+          "wall_s": 318.5320178749971,
+          "out_tokens": 3990,
+          "in_tokens": 7357,
+          "total_s": 318.487612958,
+          "load_s": 0.284100417,
+          "prompt_eval_s": 0.217725,
+          "eval_s": 317.969137,
+          "warm_total_s": 318.203512541,
+          "prompt_tok_s": 33790.33184062464,
+          "gen_tok_s": 12.548387675751059,
+          "response_preview": "# 1:1 Summary\n\n> Yassine demonstrated the fuel planning application, explaining how automated ML demand forecasts and separate optimization models work together, and confirmed the system is currently ",
+          "response_len": 2269
+        },
+        {
+          "label": "run 3",
+          "wall_s": 308.300046999997,
+          "out_tokens": 3863,
+          "in_tokens": 7357,
+          "total_s": 308.254151375,
+          "load_s": 0.305548458,
+          "prompt_eval_s": 0.223076,
+          "eval_s": 307.661596,
+          "warm_total_s": 307.948602917,
+          "prompt_tok_s": 32979.791640517135,
+          "gen_tok_s": 12.556003252352628,
+          "response_preview": "# 1:1 Summary\n\n> The meeting provided a demo of the fuel supply planning application, outlining its AI-driven demand forecasting, optimization workflows, and weekly pricing alerts, while confirming th",
+          "response_len": 2232
+        }
+      ],
+      "aggregate": {
+        "total_s": {
+          "mean": 284.00101294433335,
+          "min": 225.2612745,
+          "max": 318.487612958
+        },
+        "warm_total_s": {
+          "mean": 283.70830266666667,
+          "min": 224.972792542,
+          "max": 318.203512541
+        },
+        "load_s": {
+          "mean": 0.2927102776666667,
+          "min": 0.284100417,
+          "max": 0.305548458
+        },
+        "prompt_eval_s": {
+          "mean": 0.22007233333333334,
+          "min": 0.217725,
+          "max": 0.223076
+        },
+        "prompt_tok_s": {
+          "mean": 33433.34641918882,
+          "min": 32979.791640517135,
+          "max": 33790.33184062464
+        },
+        "eval_s": {
+          "mean": 283.4561913333333,
+          "min": 224.737841,
+          "max": 317.969137
+        },
+        "gen_tok_s": {
+          "mean": 12.552264717481806,
+          "min": 12.548387675751059,
+          "max": 12.556003252352628
+        },
+        "out_tokens": {
+          "mean": 3558,
+          "min": 2821,
+          "max": 3990
+        },
+        "in_tokens": {
+          "mean": 7357,
+          "min": 7357,
+          "max": 7357
+        },
+        "wall_s": {
+          "mean": 284.0438762223348,
+          "min": 225.2995637920103,
+          "max": 318.5320178749971
+        }
+      }
+    },
+    {
+      "model": "qwen3.6:27b-mlx",
+      "warmup": [
+        {
+          "label": "warmup 1",
+          "wall_s": 331.5341076249897,
+          "out_tokens": 3703,
+          "in_tokens": 7357,
+          "total_s": 331.515173625,
+          "load_s": 5.294091375,
+          "prompt_eval_s": 84.014969125,
+          "eval_s": 242.194402,
+          "warm_total_s": 326.22108225,
+          "prompt_tok_s": 87.56772842532423,
+          "gen_tok_s": 15.289370726248247,
+          "response_preview": "# 1:1 Summary\n\n> The meeting provided a walkthrough of the fuel supply planning application, detailing its AI demand forecasting and optimization workflows, while confirming the project is currently i",
+          "response_len": 2399
+        }
+      ],
+      "measured": [
+        {
+          "label": "run 1",
+          "wall_s": 232.25235137497657,
+          "out_tokens": 3510,
+          "in_tokens": 7357,
+          "total_s": 232.164039459,
+          "load_s": 0.043252084,
+          "prompt_eval_s": 0.681626042,
+          "eval_s": 231.434393375,
+          "warm_total_s": 232.120787375,
+          "prompt_tok_s": 10793.308275624833,
+          "gen_tok_s": 15.166285135125284,
+          "response_preview": "# 1:1 Summary\n\n> The team reviewed a fuel supply planning application that combines ML demand forecasting with operations research optimization, confirming the system is currently in steady state with",
+          "response_len": 1975
+        },
+        {
+          "label": "run 2",
+          "wall_s": 200.9576774580055,
+          "out_tokens": 3051,
+          "in_tokens": 7357,
+          "total_s": 200.911774833,
+          "load_s": 0.069768458,
+          "prompt_eval_s": 0.320374875,
+          "eval_s": 200.51233625,
+          "warm_total_s": 200.842006375,
+          "prompt_tok_s": 22963.723356895574,
+          "gen_tok_s": 15.21602140327164,
+          "response_preview": "# 1:1 Summary\n\n> Yassine demoed the fuel supply planning application, clarified how AI demand forecasts and optimization models operate independently, and confirmed the project is in steady state with",
+          "response_len": 2265
+        },
+        {
+          "label": "run 3",
+          "wall_s": 341.389348666009,
+          "out_tokens": 5172,
+          "in_tokens": 7357,
+          "total_s": 341.34169675,
+          "load_s": 0.046311791,
+          "prompt_eval_s": 0.281113709,
+          "eval_s": 341.008249792,
+          "warm_total_s": 341.295384959,
+          "prompt_tok_s": 26170.90438659468,
+          "gen_tok_s": 15.166788496039882,
+          "response_preview": "# 1:1 Summary\n\n> The meeting reviewed a demo of the FSO fuel supply planning application for Jetwell, covering ML-driven demand forecasting, optimization workflows, pricing alerts, and the current ste",
+          "response_len": 2255
+        }
+      ],
+      "aggregate": {
+        "total_s": {
+          "mean": 258.13917034733333,
+          "min": 200.911774833,
+          "max": 341.34169675
+        },
+        "warm_total_s": {
+          "mean": 258.08605956966665,
+          "min": 200.842006375,
+          "max": 341.295384959
+        },
+        "load_s": {
+          "mean": 0.05311077766666667,
+          "min": 0.043252084,
+          "max": 0.069768458
+        },
+        "prompt_eval_s": {
+          "mean": 0.42770487533333335,
+          "min": 0.281113709,
+          "max": 0.681626042
+        },
+        "prompt_tok_s": {
+          "mean": 19975.978673038364,
+          "min": 10793.308275624833,
+          "max": 26170.90438659468
+        },
+        "eval_s": {
+          "mean": 257.65165980566667,
+          "min": 200.51233625,
+          "max": 341.008249792
+        },
+        "gen_tok_s": {
+          "mean": 15.183031678145602,
+          "min": 15.166285135125284,
+          "max": 15.21602140327164
+        },
+        "out_tokens": {
+          "mean": 3911,
+          "min": 3051,
+          "max": 5172
+        },
+        "in_tokens": {
+          "mean": 7357,
+          "min": 7357,
+          "max": 7357
+        },
+        "wall_s": {
+          "mean": 258.1997924996637,
+          "min": 200.9576774580055,
+          "max": 341.389348666009
+        }
+      }
+    }
+  ]
+}
