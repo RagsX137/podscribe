@@ -33,14 +33,73 @@ podscribe show sam-chen latest
 | Command | What it does |
 |---|---|
 | `podscribe init <name>` | Create a pod (one per person). Flags: `--display-name`, `--role`, `--cadence`, `--notes` |
-| `podscribe record <pod>` (alias `start`) | Live mic → transcript → pod storage. Flags: `--model`, `--vad-aggressiveness`, `--device`, `--keep-audio` |
-| `podscribe list` | List all pods and their meetings |
+| `podscribe record <pod>` (alias `start`) | Live mic → transcript → pod storage. Flags: `--model`, `--vad-aggressiveness`, `--device`, `--keep-audio`, `--type` |
+| `podscribe list` | List all pods and their meetings. Flags: `--all`, `--since`, `--recent`, `--type` |
 | `podscribe show <pod> [meeting-id-prefix \| latest]` | View transcript |
 | `podscribe context {add\|remove\|list}` | Manage the glossary (initial_prompt context) for a pod |
+| `podscribe search <query>` | Search transcripts across pods. Flags: `--pod`, `--since`, `--type`, `--color` |
 | `podscribe enhance <pod> [meeting]` (alias `summarize`) | LLM cleanup pass via local Ollama |
 | `podscribe consolidate <pod> [meeting] [--no-log]` (alias `cons`) | Extract structured fields from enhanced summary; append to `meetings.csv` |
+| `podscribe export --out <path>` | Bundle `pods/`, `leadership_team.yaml`, and `podscribe.yaml` into a tarball. `--out -` writes to stdout |
+| `podscribe import <archive>` | Restore a podscribe export tarball. Flags: `--force`, `--dry-run` |
 | `podscribe config llm {show\|set}` | Project-level LLM config (model, prompt template) in `podscribe.yaml` |
 | `podscribe config consolidate {show\|set}` | Project-level consolidate prompt |
+
+### Listing & filtering
+
+```
+podscribe list                          # all pods, all meetings (existing)
+podscribe list <pod>                    # one pod, all meetings
+podscribe list --all                    # all pods (uses global meetings.csv)
+podscribe list --since 7d               # last 7 days
+podscribe list --since 2026-06-15       # since a specific date
+podscribe list --recent 5               # limit to N most recent
+podscribe list --type 1on1              # filter by meeting type
+```
+
+`--since` accepts durations (`Nd`, `Nh`, `Nm`) or ISO dates (`YYYY-MM-DD`).
+
+### Searching
+
+```
+podscribe search "Project Helios"               # all pods
+podscribe search "auth" --pod sam-chen          # one pod
+podscribe search "blocker" --since 7d           # last week
+podscribe search "design" --type 1on1           # typed meetings only
+podscribe search "x" --color                    # ANSI-highlighted output
+```
+
+Output format: `pod-name:DD-MMM-YYYY:<meeting-id>:[HH:MM:SS] <line-text>`.
+Matches are fixed-string (no regex). Uses `rg` if installed, falls back to
+a Python recursive search otherwise.
+
+### Backup & restore
+
+```
+podscribe export --out pods-2026-06-22.tar.gz
+podscribe import pods-2026-06-22.tar.gz
+podscribe import --dry-run pods-2026-06-22.tar.gz   # show, don't write
+podscribe import --force pods-2026-06-22.tar.gz     # overwrite existing pods
+podscribe export --out -                             # stdout (for piping)
+```
+
+`export` includes `pods/` (transcripts, summaries, per-pod config, per-pod
+`meetings.csv`), `leadership_team.yaml`, and `podscribe.yaml`. Excludes
+`.raw` audio, `.env`, `__pycache__/`, `.pytest_cache/`, `.venv/`.
+
+`import` refuses to overwrite existing pods by default; pass `--force` to
+replace them. The tarball is checked for path-traversal attacks before
+extraction.
+
+### Glossary
+
+The glossary is the union of `leadership_team.yaml` (repo root, global) and
+`pods/<name>/config.yaml` (pod-specific). It is injected into Whisper as an
+`initial_prompt` during `record`, and embedded into the LLM prompt during
+`enhance`/`consolidate`.
+
+The effective glossary (leadership + pod-specific) is cached per session
+and invalidated automatically when `leadership_team.yaml` changes on disk.
 
 ## Architecture
 
@@ -92,20 +151,26 @@ podscribe/
 Pods are stored under `pods/<name>/`:
 
 ```
+leadership_team.yaml                       — global glossary (repo root)
+podscribe.yaml                             — project LLM config (repo root)
+pods/meetings.csv                          — global rollup (all pods)
 pods/<name>/
 ├── config.yaml
 ├── transcripts/
-│   └── DD-MMM-YYYY/           # e.g. 22-JUN-2026
-│       ├── <meeting-id>.md    # e.g. 2026-06-22-143012-sam-chen.md (incremental, one [HH:MM:SS] line per segment)
-│       ├── <meeting-id>.json  # meeting metadata sidecar (model, duration, etc.)
-│       └── <meeting-id>.raw   # raw audio (deleted by default after finalize)
+│   └── DD-MMM-YYYY/                       # e.g. 22-JUN-2026
+│       └── [<type>/]                      # optional subdir, e.g. 1on1/, retro/
+│           ├── <meeting-id>.md            # e.g. 2026-06-22-143012-sam-chen.md (incremental, one [HH:MM:SS] line per segment)
+│           ├── <meeting-id>.json          # meeting metadata sidecar (model, duration, type, etc.)
+│           └── <meeting-id>.raw           # raw audio (deleted by default after finalize)
 ├── summaries/
 │   └── DD-MMM-YYYY/
-│       └── <meeting-id>.md    # enhanced transcript (output of `podscribe enhance`)
-└── meetings.csv               # consolidated log (output of `podscribe consolidate`)
+│       └── <meeting-id>.md                # enhanced transcript (output of `podscribe enhance`)
+└── meetings.csv                           # per-pod rollup (output of `podscribe consolidate`)
 ```
 
-Each pod has its own directory. Cross-pod rollups come in a later phase.
+The optional `<type>/` subdir appears when `--type` is passed to `record`.
+A 2-level layout (no type subdir) and a 3-level layout (with type) coexist
+on disk and are both discovered by `list` and `search`.
 
 ## macOS first-run setup
 
@@ -166,7 +231,7 @@ Any other `--model` value is passed through to `mlx-whisper` unchanged, so full 
 pytest tests/ -v
 ```
 
-154 offline unit tests + 1 smoke test requiring network. Run with `pytest tests/ -v`. Skip the smoke test with `-k "not transcriber"` (recommended for CI without network). The offline tests cover data models, validation, storage, config, glossary, CLI parsing, and the LLM client. The smoke test (`tests/test_transcriber.py::test_transcriber_accepts_initial_prompt`) downloads a real Whisper model and requires a working `mlx-whisper` install.
+193 offline unit tests + 1 smoke test requiring network. Run with `pytest tests/ -v`. Skip the smoke test with `-k "not transcriber"` (recommended for CI without network). The offline tests cover data models, validation, storage, config, glossary, CLI parsing, search, export/import, and the LLM client. The smoke test (`tests/test_transcriber.py::test_transcriber_accepts_initial_prompt`) downloads a real Whisper model and requires a working `mlx-whisper` install.
 
 ## Manual smoke test (on your Mac)
 
