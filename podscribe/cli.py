@@ -434,6 +434,17 @@ def cmd_config_consolidate_set(args) -> int:
     return 0
 
 
+def cmd_export(args) -> int:
+    """Export all pod data to a tarball."""
+    from .export import create_export
+    out = Path(args.out) if args.out else None
+    result = create_export(out)
+    if str(result) == "-":
+        return 0
+    print(f"Exported to {result}")
+    return 0
+
+
 def cmd_search(args) -> int:
     """Search across all transcripts for a keyword."""
     from .search import search
@@ -639,6 +650,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Highlight matches in ANSI colors",
     )
     p_search.set_defaults(func=cmd_search)
+
+    # export
+    p_export = sub.add_parser("export", help="Export pod data to a tarball.")
+    p_export.add_argument(
+        "--out", metavar="PATH",
+        help="Output path (default: stdout). Example: pods-2026-06-22.tar.gz",
+    )
+    p_export.set_defaults(func=cmd_export)
 
     # config
     p_cfg = sub.add_parser("config", help="Manage project-level config.")

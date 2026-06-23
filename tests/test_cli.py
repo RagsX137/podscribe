@@ -889,3 +889,9 @@ def test_search_subparser_parses_args():
     assert args.since == "7d"
     assert args.type == "1on1"
 
+
+def test_export_subparser_parses_args():
+    from podscribe.cli import build_parser
+    args = build_parser().parse_args(["export", "--out", "pods.tar.gz"])
+    assert args.out == "pods.tar.gz"
+
