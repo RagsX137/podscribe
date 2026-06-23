@@ -851,10 +851,26 @@ def rewrite_argv(argv: list[str]) -> list[str]:
 def main(argv: Optional[list] = None) -> int:
     if argv is None:
         argv = sys.argv[1:] if len(sys.argv) > 1 else []
-    argv = rewrite_argv(argv)
 
+    # Bare invocation (no args) → TUI launcher if a TTY is attached, else help.
+    if not argv:
+        if sys.stdin.isatty() and sys.stderr.isatty():
+            from .tui import launch
+            return launch()
+        sys.stderr.write(
+            "podscribe: a TTY is required for the interactive menu.\n"
+            "Run 'podscribe --help' for subcommands.\n"
+        )
+        return 2
+
+    argv = rewrite_argv(argv)
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as e:
+        # argparse calls sys.exit() for --help/--version/usage errors.
+        # Translate to a normal return so callers see a clean exit code.
+        return int(e.code) if e.code is not None else 0
     try:
         return args.func(args) or 0
     except KeyboardInterrupt:

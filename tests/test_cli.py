@@ -1,10 +1,11 @@
 """Tests for CLI command structure (no audio, no model)."""
+import io
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-from podscribe.cli import build_parser, rewrite_argv, run_consolidate, run_record_session
+from podscribe.cli import build_parser, main, rewrite_argv, run_consolidate, run_record_session
 from podscribe.models import Meeting, Pod
 from podscribe.storage import start_meeting
 
@@ -1264,4 +1265,22 @@ def test_run_record_session_keeps_audio_when_wav_writer_provided(tmp_path, monke
         on_segment=lambda s: None, on_status=lambda d: None, on_done=lambda n: None,
     )
     assert meeting.audio_path.exists()
+
+
+def test_main_no_args_non_tty_prints_help_and_exits_2(monkeypatch):
+    class NotATty(io.StringIO):
+        def isatty(self): return False
+    fake_stderr = NotATty()
+    monkeypatch.setattr("sys.stdin", NotATty())
+    monkeypatch.setattr("sys.stderr", fake_stderr)
+    rc = main([])
+    assert rc == 2
+    err = fake_stderr.getvalue()
+    assert "TTY is required" in err
+
+
+def test_main_help_still_works(capsys):
+    rc = main(["--help"])
+    # argparse exits with code 0 after printing help
+    assert rc == 0
 
