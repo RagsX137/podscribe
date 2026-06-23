@@ -16,7 +16,6 @@ from .config import load_last_pod, load_project_config, save_last_pod
 from .llm import build_enhance_prompt, enhance_transcript, ollama_model_info
 from .models import Pod, fmt_date
 from .storage import (
-    init_pod,
     list_meetings,
     load_pod,
     pod_exists,
@@ -342,6 +341,8 @@ def enhance_view(pod: Pod, meeting) -> int:
         except KeyboardInterrupt:
             rc = 130
             result = None
+        if rc == 130:
+            return 130
         if result is None:
             console.print(Panel(
                 "Failed to reach Ollama. Is it running? Start with: ollama serve",
@@ -408,7 +409,7 @@ def launch() -> int:
         if key == "1":
             args = Namespace(
                 type=None, model="large-v3-turbo",
-                vad_aggressiveness=1, device=None, keep_audio=False,
+                vad_aggressiveness=2, device=None, keep_audio=False,
             )
             record_view(pod, args)
         elif key == "2":
