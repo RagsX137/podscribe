@@ -1,9 +1,13 @@
 """Tests for CLI command structure (no audio, no model)."""
+import io
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
-from podscribe.cli import build_parser, rewrite_argv
+from podscribe.cli import build_parser, main, rewrite_argv, run_consolidate, run_record_session
+from podscribe.models import Meeting, Pod
+from podscribe.storage import start_meeting
 
 
 def test_parser_has_required_commands():
@@ -569,7 +573,7 @@ def test_cmd_record_writes_wav_with_keep_audio(tmp_path, monkeypatch):
     with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
         with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
             with patch("podscribe.cli.signal.signal"):
-                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5]):
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5]):
                     args = build_parser().parse_args(["record", "sam-chen", "--keep-audio", "--model", "base"])
                     rc = cmd_record(args)
                     assert rc == 0
@@ -609,7 +613,7 @@ def test_cmd_record_omits_audio_by_default(tmp_path, monkeypatch):
     with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
         with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
             with patch("podscribe.cli.signal.signal"):
-                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5]):
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5]):
                     args = build_parser().parse_args(["record", "sam-chen", "--model", "base"])
                     rc = cmd_record(args)
                     assert rc == 0
@@ -641,7 +645,7 @@ def test_cmd_record_survives_wav_open_failure(tmp_path, monkeypatch, capsys):
     with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
         with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
             with patch("podscribe.cli.signal.signal"):
-                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5]):
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5]):
                     with patch("podscribe.cli.wave.open", side_effect=OSError("disk full")):
                         args = build_parser().parse_args(
                             ["record", "sam-chen", "--keep-audio", "--model", "base"]
@@ -712,6 +716,33 @@ def test_run_enhance_returns_error_on_failure():
     assert "ollama serve" in err
 
 
+def test_run_enhance_prints_header_and_metrics(capfd, monkeypatch):
+    """The CLI wrapper prints the Calling/Context header and the metrics line."""
+    from podscribe.cli import _run_enhance
+    from podscribe.llm import ollama_model_info
+    from tests.test_llm import make_streaming_response
+
+    resp = make_streaming_response(
+        ["Hi"],
+        final_stats={"prompt_eval_count": 7, "eval_count": 1,
+                     "total_duration": 1_000_000_000, "eval_duration": 100_000_000},
+    )
+    monkeypatch.setattr(
+        "podscribe.cli.ollama_model_info",
+        lambda model: {"model_info": {"llama.context_length": 32768}},
+    )
+    with patch("podscribe.llm.requests.post", return_value=resp):
+        text, err = _run_enhance("the prompt", "qwen3.6:27b")
+    captured = capfd.readouterr()
+    assert err is None
+    assert text == "Hi"
+    assert "Calling Model:qwen3.6:27b" in captured.err
+    assert "Context window size : 32768 tokens" in captured.err
+    assert "prompt 7" in captured.err
+    assert "response 1 tokens" in captured.err
+    assert "tok/s" in captured.err
+
+
 def test_cmd_enhance_uses_run_enhance_helper(tmp_path, monkeypatch):
     """After refactor, cmd_enhance delegates to _run_enhance."""
     from unittest.mock import patch
@@ -771,6 +802,51 @@ def test_cmd_consolidate_uses_run_enhance_helper(tmp_path, monkeypatch):
                 rc = cmd_consolidate(args)
     assert rc == 0
     assert mock_helper.called
+
+
+def test_run_consolidate_calls_prompt_rewrite_and_appends(tmp_path, monkeypatch):
+    """run_consolidate with prompt_rewrite=True appends a log row."""
+    from podscribe.config import save_project_config
+    from podscribe.models import Pod
+    from podscribe.storage import start_meeting, read_transcript, log_path
+    monkeypatch.chdir(tmp_path)
+    pod = Pod(
+        name="sam-chen", display_name="Sam Chen", role="", cadence="weekly",
+        notes="", created_at="2026-06-23", glossary=None,
+        llm={"model": "qwen3.6:27b", "prompt_template": "x"},
+        base_path=tmp_path / "pods" / "sam-chen",
+    )
+    (pod.base_path / "transcripts").mkdir(parents=True)
+    meeting = start_meeting(pod)
+    # Minimal transcript and enhanced summary
+    meeting.transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    meeting.transcript_path.write_text("# Meeting: x\n[00:00:00] hi\n")
+    summary_dir = pod.summaries_dir_for("23-JUN-2026")
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    (summary_dir / f"{meeting.id}.md").write_text("Summary: stuff happened.")
+    # Seed a prior log row so the prompt_rewrite branch is exercised.
+    log_path(pod).parent.mkdir(parents=True, exist_ok=True)
+    log_path(pod).write_text(
+        "date,person,meeting_id,type,quick_summary,key_topics,action_items,blockers,next_steps,summary_file,transcript_file,duration_sec\n"
+        f"23-JUN-2026,Sam Chen,{meeting.id},,prior,, ,,,,,\n"
+    )
+
+    yaml_text = (
+        "quick_summary: stuff\n"
+        "key_topics: [a, b]\n"
+        "action_items: [do thing]\n"
+        "blockers: []\n"
+        "next_steps: [follow up]\n"
+    )
+    monkeypatch.setattr("podscribe.cli._run_enhance", lambda p, m: (yaml_text, None))
+    prompts = []
+    def fake_prompt():
+        prompts.append(1)
+        return True
+    rc = run_consolidate(pod, meeting, prompt_rewrite=fake_prompt)
+    assert rc == 0
+    assert prompts == [1]
+    assert log_path(pod).exists()
 
 
 def test_cmd_record_rejects_invalid_type():
@@ -1103,4 +1179,108 @@ def test_cmd_list_type_filter_works(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "1on1" in captured.out
     assert "150000" not in captured.out
+
+
+class FakeCapture:
+    def __init__(self, segments):
+        self._segments = iter(segments)
+        self.stopped = False
+        self.vad_aggressiveness = 2
+        self.had_overflow = False
+
+    def segments(self):
+        return self._segments
+
+    def stop(self):
+        self.stopped = True
+
+
+class FakeTranscriber:
+    def __init__(self):
+        self.model_name = "large-v3-turbo"
+
+    def transcribe(self, audio, **kwargs):
+        return [{"start": 0.0, "end": 1.0, "text": f"seg-{id(audio)}"}]
+
+
+def test_run_record_session_drives_callbacks_and_writes_transcript(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pod = Pod(
+        name="sam-chen", display_name="Sam", role="", cadence="weekly",
+        notes="", created_at="2026-06-23", glossary=None, llm=None,
+        # base_path explicit so tmp_path + chdir isolates from the real pods/ dir
+        base_path=tmp_path / "pods" / "sam-chen",
+    )
+    (pod.base_path / "transcripts").mkdir(parents=True)
+    meeting = start_meeting(pod)
+
+    segs = [np.zeros(16000, dtype=np.float32), np.zeros(8000, dtype=np.float32)]
+    capture = FakeCapture(segs)
+    transcriber = FakeTranscriber()
+
+    segments_seen: list = []
+    statuses: list = []
+    done_counts: list = []
+
+    run_record_session(
+        pod, meeting, capture, transcriber,
+        on_segment=segments_seen.append,
+        on_status=statuses.append,
+        on_done=done_counts.append,
+    )
+
+    assert len(segments_seen) == 2
+    assert capture.stopped is True
+    assert done_counts == [2]
+    md = meeting.transcript_path.read_text()
+    assert "# Meeting:" in md
+    assert len(statuses) >= 1
+    assert statuses[-1]["segment_count"] == 2
+    assert statuses[-1]["overflow"] is False
+    assert not meeting.audio_path.exists()
+    assert meeting.metadata_path.exists()
+
+
+def test_run_record_session_keeps_audio_when_wav_writer_provided(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    import wave
+    pod = Pod(
+        name="sam-chen", display_name="Sam", role="", cadence="weekly",
+        notes="", created_at="2026-06-23", glossary=None, llm=None,
+        # base_path explicit so tmp_path + chdir isolates from the real pods/ dir
+        base_path=tmp_path / "pods" / "sam-chen",
+    )
+    (pod.base_path / "transcripts").mkdir(parents=True)
+    meeting = start_meeting(pod)
+
+    capture = FakeCapture([np.zeros(16000, dtype=np.float32)])
+    transcriber = FakeTranscriber()
+    wav = wave.open(str(meeting.audio_path), "wb")
+    wav.setnchannels(1)
+    wav.setsampwidth(2)
+    wav.setframerate(16000)
+
+    run_record_session(
+        pod, meeting, capture, transcriber, wav_writer=wav,
+        on_segment=lambda s: None, on_status=lambda d: None, on_done=lambda n: None,
+    )
+    assert meeting.audio_path.exists()
+
+
+def test_main_no_args_non_tty_prints_help_and_exits_2(monkeypatch):
+    class NotATty(io.StringIO):
+        def isatty(self): return False
+    fake_stderr = NotATty()
+    monkeypatch.setattr("sys.stdin", NotATty())
+    monkeypatch.setattr("sys.stderr", fake_stderr)
+    rc = main([])
+    assert rc == 2
+    err = fake_stderr.getvalue()
+    assert "TTY is required" in err
+
+
+def test_main_help_still_works(capsys):
+    rc = main(["--help"])
+    # argparse exits with code 0 after printing help
+    assert rc == 0
 

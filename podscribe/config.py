@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import yaml
 
@@ -61,6 +62,22 @@ def save_project_config(data: dict) -> None:
     """Save project-level config to podscribe.yaml."""
     with PROJECT_CONFIG_PATH.open("w") as f:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+
+
+def load_last_pod() -> Optional[str]:
+    """Return the last-used pod name from podscribe.yaml, or None."""
+    cfg = load_project_config()
+    value = cfg.get("last_pod")
+    return value if isinstance(value, str) and value else None
+
+
+def save_last_pod(name: str) -> None:
+    """Persist the last-used pod name in podscribe.yaml (preserves other keys)."""
+    if not name or not isinstance(name, str):
+        raise ValueError("last_pod must be a non-empty string")
+    cfg = load_project_config()
+    cfg["last_pod"] = name
+    save_project_config(cfg)
 
 
 def load_leadership_glossary() -> list:

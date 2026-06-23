@@ -14,7 +14,7 @@ import numpy as np
 
 from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_project_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
-from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields
+from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields, ollama_model_info
 from .models import Segment, fmt_date
 from .storage import (
     _read_pod_log_rows,
@@ -71,10 +71,29 @@ def _run_enhance(
 ) -> tuple[Optional[str], Optional[str]]:
     """Run LLM enhance. Returns (text, None) on success, (None, error) on failure.
 
-    The error string is what gets printed to stderr; it owns the Ollama-
-    availability message so both call sites stay in sync.
+    The wrapper owns the 'Calling Model:…/Context window size:…' header and the
+    final '✓ done in Ns | prompt X + response Y tokens @ Z tok/s' metrics line
+    (both to stderr). The core just streams and fires on_token/on_stats.
     """
-    result = enhance_transcript(model, prompt)
+    info = ollama_model_info(model)
+    num_ctx = (info.get("model_info") or {}).get("llama.context_length", "?")
+    sys.stderr.write(f"Calling Model:{model}...\n")
+    sys.stderr.write(f"Context window size : {num_ctx} tokens\n")
+    sys.stderr.flush()
+
+    def _on_stats(stats: dict) -> None:
+        pe = stats.get("prompt_eval_count", 0)
+        ec = stats.get("eval_count", 0)
+        ed = (stats.get("eval_duration_ns", 0) or 1) / 1e9
+        tps = ec / ed if ed > 0 else 0
+        total_s = (stats.get("total_duration_ns", 0) or 1) / 1e9
+        sys.stderr.write(
+            f"  \u2713 done in {total_s:.1f}s | "
+            f"prompt {pe} + response {ec} tokens @ {tps:.1f} tok/s\n"
+        )
+        sys.stderr.flush()
+
+    result = enhance_transcript(model, prompt, on_stats=_on_stats)
     if result is None:
         return None, "Failed to reach Ollama. Is it running? Start with: ollama serve"
     return result, None
@@ -97,8 +116,92 @@ def cmd_init(args) -> int:
     return 0
 
 
+def run_record_session(
+    pod: "Pod",
+    meeting: "Meeting",
+    capture,
+    transcriber,
+    *,
+    glossary_prompt: Optional[str] = None,
+    wav_writer=None,
+    on_segment=lambda s: None,
+    on_status=lambda d: None,
+    on_done=lambda n: None,
+) -> None:
+    """Drive capture.segments(), append to transcript, finalize. Fire callbacks.
+
+    Headless: callers (plain wrapper or rich view) decide what to render.
+    Owns SIGINT (stop capture), the .raw cleanup, and finalize_meeting.
+    """
+    with meeting.transcript_path.open("w") as f:
+        f.write(f"# Meeting: {meeting.id}\n\n")
+        f.write(f"- pod: {pod.name} ({pod.display_name})\n")
+        f.write(f"- started: {meeting.started_at}\n")
+        f.write(f"- model: {transcriber.model_name}\n")
+        f.write(f"- vad: webrtcvad (aggressiveness={capture.vad_aggressiveness})\n\n")
+        f.write("## Transcript\n\n")
+
+    meeting.model = transcriber.model_name
+    meeting.vad_enabled = True
+    start_monotonic = time.monotonic()
+    segment_count = 0
+    write_error: Optional[str] = None
+
+    def handle_sigint(sig, frame):
+        capture.stop()
+
+    old_handler = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    try:
+        for audio_segment in capture.segments():
+            if wav_writer is not None:
+                try:
+                    pcm = np.clip(audio_segment * 32767, -32768, 32767).astype(np.int16)
+                    wav_writer.writeframes(pcm.tobytes())
+                    write_error = None
+                except OSError as e:
+                    write_error = f"audio write failed: {e}"
+            kwargs = {}
+            if glossary_prompt:
+                kwargs["initial_prompt"] = glossary_prompt
+            results = transcriber.transcribe(audio_segment, **kwargs)
+            for r in results:
+                elapsed = time.monotonic() - start_monotonic
+                seg_duration = max(0.0, r["end"] - r["start"])
+                seg_start = max(0.0, elapsed - seg_duration)
+                seg = Segment(
+                    start_sec=seg_start,
+                    end_sec=elapsed,
+                    text=r["text"],
+                )
+                append_segment(meeting, seg)
+                on_segment(seg)
+                segment_count += 1
+            on_status({
+                "elapsed": time.monotonic() - start_monotonic,
+                "segment_count": segment_count,
+                "vad_aggr": capture.vad_aggressiveness,
+                "level": 0.0,
+                "overflow": getattr(capture, "had_overflow", False),
+                "write_error": write_error,
+            })
+    finally:
+        signal.signal(signal.SIGINT, old_handler)
+        capture.stop()
+        if wav_writer is not None:
+            try:
+                wav_writer.close()
+            except Exception:
+                pass
+        meeting.duration_sec = int(time.monotonic() - start_monotonic)
+        meeting.ended_at = datetime.now().isoformat(timespec="seconds")
+        finalize_meeting(meeting, keep_audio=(wav_writer is not None))
+        on_done(segment_count)
+
+
 def cmd_record(args) -> int:
-    """Live record + transcribe a meeting."""
+    """Live record + transcribe a meeting (thin wrapper around run_record_session)."""
     from .models import parse_meeting_type
     try:
         meeting_type = parse_meeting_type(args.type)
@@ -106,7 +209,6 @@ def cmd_record(args) -> int:
         print(str(e), file=sys.stderr)
         return 1
 
-    # Lazy imports: audio + transcriber libs are heavy
     from .audio import AudioCapture
     from .transcriber import Transcriber
 
@@ -133,20 +235,6 @@ def cmd_record(args) -> int:
     print("  Press Ctrl+C to stop and finalize.")
     print()
 
-    # Write transcript header
-    with meeting.transcript_path.open("w") as f:
-        f.write(f"# Meeting: {meeting.id}\n\n")
-        f.write(f"- pod: {pod.name} ({pod.display_name})\n")
-        f.write(f"- started: {meeting.started_at}\n")
-        f.write(f"- model: {transcriber.model_name}\n")
-        f.write(f"- vad: webrtcvad (aggressiveness={capture.vad_aggressiveness})\n\n")
-        f.write("## Transcript\n\n")
-
-    meeting.model = transcriber.model_name
-    meeting.vad_enabled = True
-    start_monotonic = time.monotonic()
-    segment_count = 0
-
     wav_writer = None
     if args.keep_audio:
         try:
@@ -158,48 +246,25 @@ def cmd_record(args) -> int:
             print(f"  ⚠ audio write failed: {e}", file=sys.stderr)
             wav_writer = None
 
-    def handle_sigint(sig, frame):
-        capture.stop()
+    def _on_segment(seg: Segment) -> None:
+        print(f"[{_hms(seg.start_sec)}] {seg.text}")
 
-    signal.signal(signal.SIGINT, handle_sigint)
+    def _on_status(d: dict) -> None:
+        if d.get("write_error"):
+            print(f"  ⚠ {d['write_error']}", file=sys.stderr)
 
-    try:
-        for audio_segment in capture.segments():
-            if wav_writer is not None:
-                try:
-                    pcm = np.clip(audio_segment * 32767, -32768, 32767).astype(np.int16)
-                    wav_writer.writeframes(pcm.tobytes())
-                except OSError as e:
-                    print(f"  ⚠ audio write failed: {e}", file=sys.stderr)
-            kwargs = {}
-            if glossary_prompt:
-                kwargs["initial_prompt"] = glossary_prompt
-            results = transcriber.transcribe(audio_segment, **kwargs)
-            for r in results:
-                elapsed = time.monotonic() - start_monotonic
-                seg_duration = max(0.0, r["end"] - r["start"])
-                seg_start = max(0.0, elapsed - seg_duration)
-                seg = Segment(
-                    start_sec=seg_start,
-                    end_sec=elapsed,
-                    text=r["text"],
-                )
-                append_segment(meeting, seg)
-                print(f"[{_hms(seg.start_sec)}] {seg.text}")
-                segment_count += 1
-    finally:
-        capture.stop()
-        if wav_writer is not None:
-            wav_writer.close()
-        meeting.duration_sec = int(time.monotonic() - start_monotonic)
-        meeting.ended_at = datetime.now().isoformat(timespec="seconds")
-        finalize_meeting(meeting, keep_audio=args.keep_audio)
+    def _on_done(n: int) -> None:
+        print()
+        print(f"Done. Saved {n} segments ({_hms(meeting.duration_sec or 0)})")
+        print(f"  → {meeting.transcript_path}")
+        if capture.had_overflow:
+            print("  ⚠ audio buffer overflowed — some audio may have been dropped.", file=sys.stderr)
 
-    print()
-    print(f"Done. Saved {segment_count} segments ({_hms(meeting.duration_sec or 0)})")
-    print(f"  → {meeting.transcript_path}")
-    if capture.had_overflow:
-        print("  ⚠ audio buffer overflowed — some audio may have been dropped.", file=sys.stderr)
+    run_record_session(
+        pod, meeting, capture, transcriber,
+        glossary_prompt=glossary_prompt, wav_writer=wav_writer,
+        on_segment=_on_segment, on_status=_on_status, on_done=_on_done,
+    )
     return 0
 
 
@@ -506,26 +571,19 @@ def cmd_search(args) -> int:
     return 0
 
 
-def cmd_consolidate(args) -> int:
-    """Extract structured fields from enhanced summary and update CSV log."""
-    if not pod_exists(args.pod):
-        print(f"No pod '{args.pod}'.", file=sys.stderr)
-        return 1
+def run_consolidate(
+    pod: "Pod",
+    meeting: "Meeting",
+    *,
+    prompt_rewrite,
+    no_log: bool = False,
+) -> int:
+    """Consolidate flow: extract structured fields from enhanced summary, update CSV.
 
-    pod = load_pod(args.pod)
-    meetings = list_meetings(pod)
-    if not meetings:
-        print(f"No meetings for pod '{args.pod}'.", file=sys.stderr)
-        return 1
-
-    meeting, err = _resolve_meeting(meetings, args.meeting, args.pod)
-    if err is not None:
-        print(err, file=sys.stderr)
-        return 1
-
-    date_str = fmt_date(datetime.fromisoformat(meeting.started_at))
-    enhanced_path = pod.summaries_dir_for(date_str) / f"{meeting.id}.md"
-
+    prompt_rewrite: callable returning bool — True to overwrite an existing log row.
+    no_log: if True, skip CSV entirely.
+    """
+    enhanced_path = pod.summaries_dir_for(fmt_date(datetime.fromisoformat(meeting.started_at))) / f"{meeting.id}.md"
     if not enhanced_path.exists():
         print(
             f"No enhanced summary for {meeting.id}. "
@@ -535,7 +593,6 @@ def cmd_consolidate(args) -> int:
         return 1
 
     enhanced_text = enhanced_path.read_text()
-
     prompt_template = load_consolidate_prompt()
     prompt = build_consolidate_prompt(prompt_template, enhanced_text)
 
@@ -555,10 +612,14 @@ def cmd_consolidate(args) -> int:
         return 1
 
     quick_summary = fields.get("quick_summary", "")
-    key_topics = "|".join(fields.get("key_topics", [])) if isinstance(fields.get("key_topics"), list) else str(fields.get("key_topics", ""))
-    action_items = "|".join(fields.get("action_items", [])) if isinstance(fields.get("action_items"), list) else str(fields.get("action_items", ""))
-    blockers = "|".join(fields.get("blockers", [])) if isinstance(fields.get("blockers"), list) else str(fields.get("blockers", ""))
-    next_steps = "|".join(fields.get("next_steps", [])) if isinstance(fields.get("next_steps"), list) else str(fields.get("next_steps", ""))
+    def _join(v):
+        if isinstance(v, list):
+            return "|".join(v)
+        return str(v or "")
+    key_topics = _join(fields.get("key_topics"))
+    action_items = _join(fields.get("action_items"))
+    blockers = _join(fields.get("blockers"))
+    next_steps = _join(fields.get("next_steps"))
 
     print(f"Extracted: {quick_summary}")
     print(f"  Topics: {key_topics}")
@@ -566,39 +627,67 @@ def cmd_consolidate(args) -> int:
     print(f"  Blockers: {blockers}")
     print(f"  Next: {next_steps}")
 
-    if not args.no_log:
-        log_fields = {
-            "date": date_str,
-            "person": pod.display_name,
-            "meeting_id": meeting.id,
-            "type": meeting.type or "",
-            "quick_summary": quick_summary,
-            "key_topics": key_topics,
-            "action_items": action_items,
-            "blockers": blockers,
-            "next_steps": next_steps,
-            "summary_file": str(enhanced_path.relative_to(pod.base_path)) if enhanced_path else "",
-            "transcript_file": str(meeting.transcript_path.relative_to(pod.base_path)) if meeting.transcript_path else "",
-            "duration_sec": meeting.duration_sec or "",
-        }
-        if log_entry_exists(pod, meeting.id):
-            print(f"Log entry exists for {meeting.id}. Rewrite? [y/N] ", end="")
-            try:
-                answer = input().strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                answer = "n"
-            if answer in ("y", "yes"):
-                rewrite_log_row(pod, meeting.id, log_fields)
-                print(f"Log entry rewritten for {meeting.id}")
-            else:
-                print("Skipping log update.")
-        else:
-            append_log_row(pod, log_fields)
-            print(f"Log entry appended to {log_path(pod)}")
-    else:
+    if no_log:
         print("Skipping CSV log (--no-log)")
+        return 0
 
+    date_str = fmt_date(datetime.fromisoformat(meeting.started_at))
+    log_fields = {
+        "date": date_str,
+        "person": pod.display_name,
+        "meeting_id": meeting.id,
+        "type": meeting.type or "",
+        "quick_summary": quick_summary,
+        "key_topics": key_topics,
+        "action_items": action_items,
+        "blockers": blockers,
+        "next_steps": next_steps,
+        "summary_file": str(enhanced_path.relative_to(pod.base_path)) if enhanced_path else "",
+        "transcript_file": str(meeting.transcript_path.relative_to(pod.base_path)) if meeting.transcript_path else "",
+        "duration_sec": meeting.duration_sec or "",
+    }
+    if log_entry_exists(pod, meeting.id):
+        if prompt_rewrite():
+            rewrite_log_row(pod, meeting.id, log_fields)
+            print(f"Log entry rewritten for {meeting.id}")
+        else:
+            print("Skipping log update.")
+    else:
+        append_log_row(pod, log_fields)
+        print(f"Log entry appended to {log_path(pod)}")
     return 0
+
+
+def cmd_consolidate(args) -> int:
+    """Extract structured fields from enhanced summary and update CSV log."""
+    if not pod_exists(args.pod):
+        print(f"No pod '{args.pod}'.", file=sys.stderr)
+        return 1
+
+    pod = load_pod(args.pod)
+    meetings = list_meetings(pod)
+    if not meetings:
+        print(f"No meetings for pod '{args.pod}'.", file=sys.stderr)
+        return 1
+
+    meeting, err = _resolve_meeting(meetings, args.meeting, args.pod)
+    if err is not None:
+        print(err, file=sys.stderr)
+        return 1
+
+    def _prompt_plain() -> bool:
+        print(f"Log entry exists for {meeting.id}. Rewrite? [y/N] ", end="")
+        try:
+            answer = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+        return answer in ("y", "yes")
+
+    return run_consolidate(
+        pod, meeting,
+        prompt_rewrite=_prompt_plain,
+        no_log=args.no_log,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -764,10 +853,30 @@ def rewrite_argv(argv: list[str]) -> list[str]:
 def main(argv: Optional[list] = None) -> int:
     if argv is None:
         argv = sys.argv[1:] if len(sys.argv) > 1 else []
-    argv = rewrite_argv(argv)
 
+    # Bare invocation (no args) → TUI launcher if a TTY is attached, else help.
+    if not argv:
+        if sys.stdin.isatty() and sys.stderr.isatty():
+            from .tui import launch
+            try:
+                return launch()
+            except KeyboardInterrupt:
+                print("\nInterrupted.", file=sys.stderr)
+                return 130
+        sys.stderr.write(
+            "podscribe: a TTY is required for the interactive menu.\n"
+            "Run 'podscribe --help' for subcommands.\n"
+        )
+        return 2
+
+    argv = rewrite_argv(argv)
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as e:
+        # argparse calls sys.exit() for --help/--version/usage errors.
+        # Translate to a normal return so callers see a clean exit code.
+        return int(e.code) if e.code is not None else 0
     try:
         return args.func(args) or 0
     except KeyboardInterrupt:

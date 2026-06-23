@@ -26,6 +26,55 @@ The three-step flow is **record → enhance → consolidate**. Enhance writes th
 
 ---
 
+## Interactive launcher (`podscribe` with no args)
+
+Running `podscribe` with no arguments opens an interactive menu (requires a TTY). It remembers the last pod you used, so you can quickly record / enhance / consolidate without typing the pod name each time.
+
+```
+$ podscribe
+╭─ podscribe ───────────────────────────────────────────────╮
+│ podscribe  ·  pod: sam-chen  ·  ollama: ◉ online          │
+╰───────────────────────────────────────────────────────────╯
+  [1] Record     [2] Enhance     [3] Consolidate     [4] Others     [q] Quit
+```
+
+**What works:**
+
+| Key | Action | Notes |
+|-----|--------|-------|
+| `1` | Record | Opens a `rich.live` panel showing the live transcript as it streams from Whisper. Ctrl+C to stop. Uses the pod's glossary. |
+| `2` | Enhance | Opens a `rich.live` panel showing tokens streaming from Ollama in real time. Uses the latest meeting. |
+| `3` | Consolidate | Runs the consolidate flow with a spinner, then a `Confirm` prompt if a log row already exists. Uses the latest meeting. |
+| `4` | Others | Submenu: list, show latest, search, context list, export, config show, switch pod. |
+| `q` | Quit | Exits to the shell. |
+| Ctrl+C | Quit | Treated as `q` at any menu. |
+
+**Others submenu:**
+
+| Key | Action |
+|-----|--------|
+| `1` | List all meetings across all pods |
+| `2` | Show latest transcript for the current pod |
+| `3` | Search — prompts for a query, then runs `podscribe search <query>` |
+| `4` | List glossary for the current pod |
+| `5` | Export — prompts for a path (default: `podscribe-export-<timestamp>.tar.gz`) |
+| `6` | Show project LLM config |
+| `7` | Switch pod — numbered pod picker |
+| `q` | Back to the main menu |
+
+**What doesn't work / limitations:**
+
+- The launcher is **single-key only** (no arrow keys, no mouse). Use number keys and `q`.
+- Record has **no pause/resume/marker** keys — Ctrl+C stops and finalizes, same as the CLI.
+- Enhance and Consolidate from the launcher always use the **latest meeting** — to target a specific meeting by prefix, use the CLI (`podscribe <pod> enhance <prefix>`).
+- The Others submenu covers **read-only operations** only. To add/remove glossary terms, set LLM config, or set the consolidate prompt, use the CLI equivalents.
+- Direct CLI commands (`podscribe <pod> enhance`, `podscribe <pod> record`) do **not** use the `rich.live` panels — they produce plain-text output for piping/ scripting. The live panels are only available through the launcher.
+- Non-TTY contexts (pipes, CI, `subprocess`) get a `TTY is required` message and exit code 2 instead of hanging on a key read.
+
+**Remembered pod:** the launcher saves the last-used pod to `podscribe.yaml` (`last_pod` key) on every switch. Delete that key or the whole file to reset.
+
+---
+
 ## Commands
 
 ### `podscribe init <name>`
@@ -159,7 +208,7 @@ podscribe sam-chen summarize 2026-06  # specific meeting prefix
 
 #### Streaming output
 
-The enhance call streams tokens from Ollama and shows a live progress bar on stderr:
+The enhance call streams tokens from Ollama. When invoked via the launcher (`podscribe` with no args), tokens render live in a `rich.live` panel. When invoked directly (`podscribe <pod> enhance`), the header and final metrics line print to stderr (no live panel). Piped/non-TTY invocations degrade gracefully.
 
 ```
 Enhancing transcript for sam-chen/22-JUN-2026/2026-06-22-101500-sam-chen...
@@ -169,11 +218,12 @@ Enhanced summary will be saved to sam-chen/22-JUN-2026/2026-06-22-101500-sam-che
 
 Calling Model:qwen3.6:27b...
 Context window size : 32768 tokens
-qwen3.6:27b:  68%|██████████████████▋       | 412/600 [00:27<00:12, 18.0tok/s]
   ✓ done in 47.2s | prompt 1250 + response 423 tokens @ 17.3 tok/s
 
 Enhanced transcript saved to pods/sam-chen/summaries/22-JUN-2026/2026-06-22-101500-sam-chen.md
 ```
+
+There is no fake percentage bar — Ollama's streaming API does not report a total token count until completion, so the view shows an honest token stream + final metrics instead.
 
 Connection drops and 5xx responses are retried up to 3× (1s, 2s, 4s backoff). 4xx errors (bad model, bad prompt) fail immediately — no retry.
 
@@ -284,6 +334,7 @@ leadership_team.yaml                   # global glossary terms (optional)
 
 | Goal | Command |
 |------|---------|
+| Interactive launcher | `podscribe` (no args; TTY only) |
 | Create a pod | `podscribe init <name> [--display-name "..." --role "..." --cadence ...]` |
 | Record a meeting | `podscribe <name> record` (or `record <name>`, or `<name> start`) |
 | Add glossary term | `podscribe <name> context add "Term" --category person` |
@@ -319,5 +370,6 @@ leadership_team.yaml                   # global glossary terms (optional)
 | `sounddevice` | Recording | Default mic used unless `--device` specified |
 | `numpy` | Recording | PCM conversion for Whisper input |
 | `requests` | Summarize | HTTP client for the Ollama streaming API |
-| `tqdm` | Summarize | Progress bar for the streaming enhance call |
+| `rich` | TUI launcher | Live panels for record/enhance, panels, spinner, prompts |
+| `readchar` | TUI launcher | Single-key input for the launcher menu |
 | Ollama | Summarize | Must be running at `localhost:11434` |

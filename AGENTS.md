@@ -11,6 +11,7 @@ Python CLI (>=3.10) for local-first live transcription using mlx-whisper + WebRT
 ```
 podscribe/
 ├── cli.py          — argparse + rewrite_argv + all cmd handlers
+├── tui.py          — interactive TUI: launcher + rich live views (lazy-imported)
 ├── audio.py        — sounddevice InputStream + webrtcvad, 16kHz mono float32
 ├── transcriber.py  — mlx_whisper.transcribe wrapper (Apple MLX)
 ├── storage.py      — pods/<name>/ per pod, transcripts .md/.json, raw .raw (deleted by default)
@@ -44,6 +45,7 @@ podscribe/
 | `search <query>` | Fixed-string match across transcripts. Flags: `--pod`, `--since`, `--type`, `--color`. Uses `rg` if on PATH, else Python fallback. |
 | `export` | Bundles `pods/`, `leadership_team.yaml`, `podscribe.yaml` into tar.gz. `--out -` → stdout. Excludes `.raw`, `.env`, `__pycache__/`, `.pytest_cache/`, `.venv/`. |
 | `import <archive>` | Restores an export tarball. `--force` overwrites existing pods; `--dry-run` prints only. Refuses path-traversal/symlink members. Skips root-level `podscribe.yaml`. |
+| `podscribe` (no args) | TTY-only; opens the remembered-pod launcher menu with Record/Enhance/Consolidate/Others. Falls back to a help message in non-TTY contexts. |
 | `config llm {show\|set}` | Project-level LLM config in `podscribe.yaml` (repo root) |
 | `config consolidate {show\|set}` | Project-level consolidate prompt (supports `{{summary}}` placeholder) |
 
@@ -113,7 +115,7 @@ xcode-select --install        # required for webrtcvad C extension
 pip install -e .              # installs all deps
 ```
 
-Declared in `pyproject.toml`: `mlx-whisper`, `webrtcvad`, `sounddevice`, `tqdm`, `numpy`, `pyyaml`, `requests`.
+Declared in `pyproject.toml`: `mlx-whisper`, `webrtcvad`, `sounddevice`, `rich`, `readchar`, `numpy`, `pyyaml`, `requests`.
 `mlx-whisper` uses Apple MLX (no separate install). Model downloads cached automatically under `~/.cache/huggingface/`.
 
 ## Gotchas
