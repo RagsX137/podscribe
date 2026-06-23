@@ -62,7 +62,7 @@ def test_enhance_transcript_success():
                      "total_duration": 1_000_000_000, "eval_duration": 500_000_000},
     )
     with patch("podscribe.llm.requests.post", return_value=resp) as mock_post:
-        result = enhance_transcript("llama3.2", "fix this", show_progress=False)
+        result = enhance_transcript("llama3.2", "fix this")
         assert result == "Hello world"
         # streamed + no retry
         assert mock_post.call_count == 1
@@ -73,7 +73,7 @@ def test_enhance_transcript_success():
 
 def test_enhance_transcript_connection_error():
     with patch("podscribe.llm.requests.post", side_effect=requests.ConnectionError):
-        result = enhance_transcript("llama3.2", "fix this", show_progress=False)
+        result = enhance_transcript("llama3.2", "fix this")
         assert result is None
 
 
@@ -83,7 +83,7 @@ def test_enhance_transcript_http_error():
     bad_resp.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 500")
     bad_resp.status_code = 500
     with patch("podscribe.llm.requests.post", return_value=bad_resp) as mock_post:
-        result = enhance_transcript("llama3.2", "fix this", show_progress=False)
+        result = enhance_transcript("llama3.2", "fix this")
         assert result is None
         # 3 attempts
         assert mock_post.call_count == 3
@@ -193,7 +193,7 @@ def test_enhance_streams_and_returns_full_text():
                      "total_duration": 2_000_000_000, "eval_duration": 1_000_000_000},
     )
     with patch("podscribe.llm.requests.post", return_value=resp):
-        result = enhance_transcript("qwen3.6:27b", "go", show_progress=False)
+        result = enhance_transcript("qwen3.6:27b", "go")
         assert result == "Sam will review the design"
 
 
@@ -206,7 +206,7 @@ def test_enhance_retries_on_5xx(capfd):
     good = make_streaming_response(["ok"], final_stats={"prompt_eval_count": 1, "eval_count": 1})
     with patch("podscribe.llm.requests.post", side_effect=[bad, bad, good]) as mock_post:
         with patch("podscribe.llm.time.sleep"):  # don't actually wait
-            result = enhance_transcript("qwen3.6:27b", "go", show_progress=False)
+            result = enhance_transcript("qwen3.6:27b", "go")
             assert result == "ok"
             assert mock_post.call_count == 3
 
@@ -217,54 +217,56 @@ def test_enhance_no_retry_on_4xx():
     bad.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 400")
     bad.status_code = 400
     with patch("podscribe.llm.requests.post", return_value=bad) as mock_post:
-        result = enhance_transcript("qwen3.6:27b", "go", show_progress=False)
+        result = enhance_transcript("qwen3.6:27b", "go")
         assert result is None
         assert mock_post.call_count == 1
 
 
-def test_enhance_prints_metrics_to_stderr(capfd):
-    """When show_progress=True, print prompt + response tokens + tok/s to stderr."""
+def test_enhance_core_prints_nothing_to_stderr(capfd):
+    """The headless core emits no header/metrics — callers handle rendering."""
     resp = make_streaming_response(
         ["Hi"],
         final_stats={"prompt_eval_count": 7, "eval_count": 1,
                      "total_duration": 1_000_000_000, "eval_duration": 100_000_000},
     )
     with patch("podscribe.llm.requests.post", return_value=resp):
-        with patch("podscribe.llm._ollama_model_info", return_value={
-            "model_info": {"llama.context_length": 32768}
-        }):
-            result = enhance_transcript("qwen3.6:27b", "go", show_progress=True)
-            assert result == "Hi"
+        enhance_transcript("qwen3.6:27b", "go")
     captured = capfd.readouterr()
-    assert "Calling Model:qwen3.6:27b" in captured.err
-    assert "Context window size : 32768 tokens" in captured.err
-    assert "prompt 7" in captured.err
-    assert "response 1 tokens" in captured.err
-    assert "tok/s" in captured.err
+    assert "Calling Model" not in captured.err
+    assert "Context window size" not in captured.err
 
 
 def test_enhance_uses_30_minute_timeout():
     resp = make_streaming_response(["x"], final_stats={"prompt_eval_count": 1, "eval_count": 1})
     with patch("podscribe.llm.requests.post", return_value=resp) as mock_post:
-        enhance_transcript("qwen3.6:27b", "go", show_progress=False)
+        enhance_transcript("qwen3.6:27b", "go")
     assert mock_post.call_args.kwargs["timeout"] == 1800
 
 
-def test_enhance_closes_progress_bar_on_stream_error():
-    """If iter_lines raises mid-stream, the tqdm bar must still be closed."""
+def test_enhance_transcript_cleans_up_on_stream_error():
+    """If iter_lines raises mid-stream, the core returns None and does not re-raise.
+
+    Preserves the intent of the old tqdm-cleanup test (no resource leak / clean
+    teardown on error) without the tqdm-specific assertion: assert the function
+    returns None, no exception escapes, and on_token/on_stats are not called
+    after the error.
+    """
     resp = MagicMock()
     resp.raise_for_status = MagicMock()
     resp.iter_lines = MagicMock(side_effect=requests.ConnectionError("stream dropped"))
-    bar_mock = MagicMock()
+
+    tokens: list = []
+    stats: list = []
+
     with patch("podscribe.llm.requests.post", return_value=resp):
-        with patch("podscribe.llm.tqdm", return_value=bar_mock):
-            with patch("podscribe.llm.time.sleep"):
-                with patch("podscribe.llm._ollama_model_info", return_value={}):
-                    result = enhance_transcript(
-                        "qwen3.6:27b", "go", show_progress=True, max_retries=1
-                    )
+        with patch("podscribe.llm.time.sleep"):
+            result = enhance_transcript(
+                "qwen3.6:27b", "go", max_retries=1,
+                on_token=tokens.append, on_stats=stats.append,
+            )
     assert result is None
-    bar_mock.close.assert_called()
+    assert tokens == []
+    assert stats == []
 
 
 def test_enhance_high_max_retries_doesnt_crash():
@@ -272,6 +274,33 @@ def test_enhance_high_max_retries_doesnt_crash():
     with patch("podscribe.llm.requests.post", side_effect=requests.ConnectionError):
         with patch("podscribe.llm.time.sleep"):
             result = enhance_transcript(
-                "qwen3.6:27b", "go", max_retries=6, show_progress=False
+                "qwen3.6:27b", "go", max_retries=6
             )
     assert result is None
+
+
+def test_enhance_transcript_fires_on_token_and_on_stats():
+    """Regression: tokens stream via on_token; stats via on_stats on done."""
+    resp = make_streaming_response(
+        ["Sam", " will", " review"],
+        final_stats={"prompt_eval_count": 10, "eval_count": 3,
+                     "total_duration": 2_000_000_000, "eval_duration": 1_000_000_000},
+    )
+    tokens: list = []
+    stats: list = []
+    with patch("podscribe.llm.requests.post", return_value=resp):
+        result = enhance_transcript(
+            "qwen3.6:27b", "go",
+            on_token=tokens.append, on_stats=stats.append,
+        )
+    assert result == "Sam will review"
+    assert tokens == ["Sam", " will", " review"]
+    assert len(stats) == 1
+    assert stats[0]["eval_count"] == 3
+    assert stats[0]["prompt_eval_count"] == 10
+
+
+def test_enhance_transcript_does_not_import_tqdm():
+    """The core must not depend on tqdm; the fictional progress bar is gone."""
+    import podscribe.llm as llm_mod
+    assert not hasattr(llm_mod, "tqdm"), "llm.py must not import tqdm"

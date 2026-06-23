@@ -3,15 +3,14 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 import time
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import requests
 import yaml
-from tqdm import tqdm
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_SHOW_URL = "http://localhost:11434/api/show"
 
 ANTI_HALLUCINATION_PREAMBLE = (
     "Strict grounding rules — read carefully:\n"
@@ -59,11 +58,11 @@ def build_enhance_prompt(
     return prompt
 
 
-OLLAMA_SHOW_URL = "http://localhost:11434/api/show"
+def ollama_model_info(model: str) -> dict:
+    """Fetch model details (num_ctx etc.) from /api/show. Best-effort.
 
-
-def _ollama_model_info(model: str) -> dict:
-    """Fetch model details (num_ctx etc.) from /api/show. Best-effort."""
+    Public (no underscore) so the TUI/CLI can call it for header rendering.
+    """
     try:
         r = requests.post(OLLAMA_SHOW_URL, json={"name": model}, timeout=5)
         r.raise_for_status()
@@ -77,43 +76,34 @@ def enhance_transcript(
     prompt: str,
     *,
     max_retries: int = 3,
-    show_progress: bool = True,
+    on_token: Callable[[str], None] = lambda t: None,
+    on_stats: Callable[[dict], None] = lambda d: None,
+    on_retry: Callable[[int, str], None] = lambda a, e: None,
 ) -> Optional[str]:
-    """Stream from Ollama, show progress + metrics, return full text.
+    """Stream from Ollama, fire callbacks, return full text (None on failure).
 
-    - Uses stream=True so tokens arrive incrementally (no 10-min wait with
-      no feedback).
-    - Retries up to max_retries on connection errors and 5xx. Does NOT retry
-      on 4xx (bad prompt, model not found).
-    - timeout=1800s (30 min) — long enough for heavy Qwen analysis.
-    - Returns the accumulated text on success, None on failure.
+    Headless core: no tqdm, no header preface, no show_progress flag. The
+    caller (plain wrapper or rich view) decides how to render tokens/stats.
+
+    Retries up to max_retries on connection errors and 5xx. Does NOT retry
+    on 4xx (bad prompt, model not found). timeout=1800s (30 min).
+
+    on_token(str): fires once per streamed chunk with a "response" key.
+    on_stats(dict): fires once on the done chunk with
+        {"prompt_eval_count","eval_count","total_duration_ns","eval_duration_ns"}.
+    on_retry(attempt:int, error:str): fires before each retry sleep
+        (so views can show "retrying…").
     """
-    info = _ollama_model_info(model) if show_progress else {}
-    model_details = info.get("model_info") or {}
-    num_ctx = model_details.get("llama.context_length", "?")
-
     payload = {"model": model, "prompt": prompt, "stream": True}
     delays = [1, 2, 4]
 
     for attempt in range(max_retries):
         try:
-            if show_progress:
-                sys.stderr.write(f"Calling Model:{model}...\n")
-                sys.stderr.write(f"Context window size : {num_ctx} tokens\n")
-                sys.stderr.flush()
-
             resp = requests.post(OLLAMA_URL, json=payload, stream=True, timeout=1800)
             resp.raise_for_status()
 
             text_parts: list = []
             stats: dict = {}
-            bar = None
-            if show_progress:
-                bar = tqdm(
-                    desc=model, unit="tok", file=sys.stderr,
-                    mininterval=0.5, dynamic_ncols=True,
-                )
-
             try:
                 for line in resp.iter_lines(decode_unicode=True):
                     if not line:
@@ -122,10 +112,6 @@ def enhance_transcript(
                         chunk = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    if "response" in chunk:
-                        text_parts.append(chunk["response"])
-                        if bar is not None:
-                            bar.update(1)
                     if chunk.get("done"):
                         stats = {
                             "prompt_eval_count": chunk.get("prompt_eval_count", 0),
@@ -134,32 +120,29 @@ def enhance_transcript(
                             "eval_duration_ns": chunk.get("eval_duration", 0),
                         }
                         break
-            finally:
-                if bar is not None:
-                    bar.close()
+                    if "response" in chunk:
+                        text_parts.append(chunk["response"])
+                        on_token(chunk["response"])
+            except requests.RequestException as e:
+                if attempt < max_retries - 1:
+                    on_retry(attempt + 1, str(e))
+                    time.sleep(delays[min(attempt, len(delays) - 1)])
+                    continue
+                return None
 
-            if show_progress:
-                pe = stats.get("prompt_eval_count", 0)
-                ec = stats.get("eval_count", 0)
-                ed = (stats.get("eval_duration_ns", 0) or 1) / 1e9
-                tps = ec / ed if ed > 0 else 0
-                total_s = (stats.get("total_duration_ns", 0) or 1) / 1e9
-                sys.stderr.write(
-                    f"  \u2713 done in {total_s:.1f}s | "
-                    f"prompt {pe} + response {ec} tokens @ {tps:.1f} tok/s\n"
-                )
-                sys.stderr.flush()
+            on_stats(stats)
             return "".join(text_parts)
 
         except requests.HTTPError as e:
             status = e.response.status_code if e.response is not None else getattr(resp, "status_code", None)
             if status is not None and 400 <= status < 500:
                 return None  # 4xx: don't retry
-        except requests.RequestException:
-            pass
-
-        if attempt < max_retries - 1:
-            time.sleep(delays[min(attempt, len(delays) - 1)])
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                on_retry(attempt + 1, str(e))
+                time.sleep(delays[min(attempt, len(delays) - 1)])
+                continue
+            return None
 
     return None
 
