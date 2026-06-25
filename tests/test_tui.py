@@ -631,3 +631,41 @@ def test_fuzzy_filter_matches_kind_prefix():
     candidates = build_palette_candidates(["sam-chen"])
     result = fuzzy_filter(candidates, "cmd")
     assert all(c.kind == "cmd" for c in result)
+
+
+def test_record_view_waveform_on_level_passed_to_capture(tmp_path, monkeypatch):
+    """record_view must pass an on_level callback to AudioCapture."""
+    monkeypatch.chdir(tmp_path)
+    from podscribe.storage import init_pod, load_pod
+    init_pod("sam-chen", display_name="Sam Chen")
+    pod = load_pod("sam-chen")
+
+    import unittest.mock as mock
+    captured_kwargs = {}
+
+    class FakeCapture:
+        vad_aggressiveness = 2
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+        def segments(self): return iter([])
+
+    mock_transcriber = mock.MagicMock()
+    mock_transcriber.model_name = "large-v3-turbo"
+    mock_meeting = mock.MagicMock()
+    mock_meeting.id = "2026-06-23-120000-sam-chen"
+    mock_meeting.audio_path = tmp_path / "audio.raw"
+    mock_meeting.transcript_path = tmp_path / "t.md"
+    mock_meeting.transcript_path.touch()
+
+    with mock.patch("podscribe.audio.AudioCapture", FakeCapture):
+        with mock.patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
+            with mock.patch("podscribe.storage.start_meeting", return_value=mock_meeting):
+                with mock.patch("podscribe.cli.run_record_session"):
+                    import podscribe.tui as tui
+                    from argparse import Namespace
+                    args = Namespace(type=None, model="large-v3-turbo",
+                                     vad_aggressiveness=2, device=None, keep_audio=False)
+                    tui.record_view(pod, args)
+
+    assert "on_level" in captured_kwargs, "on_level not passed to AudioCapture"
+    assert callable(captured_kwargs["on_level"])

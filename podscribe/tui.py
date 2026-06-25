@@ -41,6 +41,12 @@ KEY_ENTER = "\r"
 
 WAVEFORM_WIDTH = 40  # number of RMS buckets shown in the waveform bar
 
+_WAVE_CHARS = "▁▂▃▄▅▆▇█"
+
+def _rms_to_bar_char(rms: float) -> str:
+    idx = int(min(rms, 0.999) * len(_WAVE_CHARS))
+    return _WAVE_CHARS[idx]
+
 
 def mode_colour(mode: str) -> str:
     """Return the Rich colour string for the given mode badge."""
@@ -591,10 +597,25 @@ def record_view(pod: Pod, args) -> int:
     effective_glossary = get_effective_glossary(pod)
     glossary_prompt = format_glossary_prompt(effective_glossary) if effective_glossary else None
 
+    BUFFER_LINES = 200
+    lines: list[str] = [
+        f"[{C_PINK}]Recording meeting {meeting.id}[/{C_PINK}]",
+        "  Ctrl+C to stop.",
+    ]
+    console = Console()
+
+    waveform: list = [0.0] * WAVEFORM_WIDTH
+
+    def _on_level(rms: float) -> None:
+        waveform.append(rms)
+        if len(waveform) > WAVEFORM_WIDTH:
+            del waveform[: len(waveform) - WAVEFORM_WIDTH]
+
     transcriber = Transcriber(model=getattr(args, "model", "large-v3-turbo"))
     capture = AudioCapture(
         vad_aggressiveness=getattr(args, "vad_aggressiveness", 2),
         device=getattr(args, "device", None),
+        on_level=_on_level,
     )
     keep_audio = bool(getattr(args, "keep_audio", False))
     wav_writer = None
@@ -607,13 +628,6 @@ def record_view(pod: Pod, args) -> int:
             wav_writer.setframerate(16000)
         except OSError:
             wav_writer = None
-
-    BUFFER_LINES = 200
-    lines: list[str] = [
-        f"[{C_PINK}]Recording meeting {meeting.id}[/{C_PINK}]",
-        "  Ctrl+C to stop.",
-    ]
-    console = Console()
 
     status: dict = {"elapsed": 0, "segment_count": 0, "vad_aggr": capture.vad_aggressiveness, "overflow": False}
     status_line = {"text": ""}
@@ -633,18 +647,19 @@ def record_view(pod: Pod, args) -> int:
 
     def _render() -> Panel:
         m, s = divmod(int(status.get("elapsed", 0)), 60)
-        h, m = divmod(m, 60)
+        h, m_ = divmod(m, 60)
         footer = (
-            f"elapsed {h:02d}:{m:02d}:{s:02d}  "
+            f"elapsed {h:02d}:{m_:02d}:{s:02d}  "
             f"segs={status.get('segment_count', 0)}  "
             f"VAD={status.get('vad_aggr', '?')}  "
             f"overflow={'WARN' if status.get('overflow') else 'ok'}"
         )
+        wave_str = "".join(_rms_to_bar_char(v) for v in waveform[-WAVEFORM_WIDTH:])
         body = "\n".join(lines[-BUFFER_LINES:])
         return Panel(
-            body + "\n\n" + footer + "\n" + status_line["text"],
+            body + f"\n\n[{C_PINK}]{wave_str}[/{C_PINK}]\n" + footer + "\n" + status_line["text"],
             title=f"[{C_PEACH}]record[/{C_PEACH}]",
-            border_style=C_LILAC,
+            border_style=C_PINK,
         )
 
     rc = 0
