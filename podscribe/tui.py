@@ -748,7 +748,7 @@ def launch() -> int:
                 live.stop()
                 args = Namespace(
                     type=None, model="large-v3-turbo",
-                    vad_aggressiveness=2, device=None, keep_audio=True,
+                    vad_aggressiveness=2, device=None, keep_audio=False,
                 )
                 state.mode = "INSERT"
                 record_view(pod, args)
