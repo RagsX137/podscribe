@@ -477,3 +477,34 @@ def test_cmd_consolidate_delegates_to_consolidate_screen_when_tty(tmp_path, monk
     assert rc == 0
     assert len(called) == 1
 
+
+def test_mode_colour_active_modes_return_pink():
+    from podscribe import tui
+    assert tui.mode_colour("INSERT") == tui.C_PINK
+    assert tui.mode_colour("STREAM") == tui.C_PINK
+
+def test_mode_colour_command_returns_peach():
+    from podscribe import tui
+    assert tui.mode_colour("COMMAND") == tui.C_PEACH
+
+def test_mode_colour_normal_returns_lilac():
+    from podscribe import tui
+    assert tui.mode_colour("NORMAL") == tui.C_LILAC
+
+def test_app_state_defaults():
+    from podscribe.tui import AppState
+    s = AppState(pod_names=["sam-chen", "alex-wu"])
+    assert s.mode == "NORMAL"
+    assert s.focused_pane == "main"
+    assert s.sidebar_idx == 0
+    assert s.main_idx == 0
+    assert len(s.waveform) == 40
+    assert all(v == 0.0 for v in s.waveform)
+
+def test_app_state_waveform_push():
+    from podscribe.tui import AppState
+    s = AppState(pod_names=["sam-chen"])
+    s.waveform.append(0.7)
+    s.waveform = s.waveform[-40:]
+    assert s.waveform[-1] == 0.7
+    assert len(s.waveform) <= 40

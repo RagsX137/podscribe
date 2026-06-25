@@ -1,8 +1,9 @@
 """Interactive terminal UI: launcher + live views. Lazy-imported."""
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import readchar
 import requests
@@ -23,20 +24,42 @@ from .storage import (
 )
 
 # ---------------------------------------------------------------------------
-# Palette (256-color; matches .scratch/mockup-synthwave-pastel.txt)
+# Palette (256-color; synthwave pastel)
 # ---------------------------------------------------------------------------
 C_PEACH = "color(223)"
-C_PINK = "color(211)"
+C_PINK  = "color(211)"
 C_LILAC = "color(183)"
-C_MINT = "color(152)"
-C_DIM = "color(244)"
+C_MINT  = "color(152)"
+C_DIM   = "color(244)"
 
 OLLAMA_URL = "http://localhost:11434"
 
-# readchar key codes for arrow keys / enter
-KEY_UP = "\x1b[A"
-KEY_DOWN = "\x1b[B"
+# readchar key codes
+KEY_UP    = "\x1b[A"
+KEY_DOWN  = "\x1b[B"
 KEY_ENTER = "\r"
+
+WAVEFORM_WIDTH = 40  # number of RMS buckets shown in the waveform bar
+
+
+def mode_colour(mode: str) -> str:
+    """Return the Rich colour string for the given mode badge."""
+    if mode in ("INSERT", "STREAM"):
+        return C_PINK
+    if mode == "COMMAND":
+        return C_PEACH
+    return C_LILAC  # NORMAL
+
+
+@dataclass
+class AppState:
+    """Mutable state for the two-pane TUI."""
+    pod_names: list
+    mode: str = "NORMAL"
+    focused_pane: str = "main"   # "sidebar" | "main"
+    sidebar_idx: int = 0
+    main_idx: int = 0
+    waveform: list = field(default_factory=lambda: [0.0] * WAVEFORM_WIDTH)
 
 # ---------------------------------------------------------------------------
 # Key reading + Ollama probe
