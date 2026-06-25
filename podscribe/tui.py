@@ -11,6 +11,8 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
+from rich.table import Table
+from rich.text import Text
 
 from .cli import _resolve_meeting
 from .config import load_last_pod, load_project_config, save_last_pod
@@ -31,6 +33,7 @@ C_PINK  = "color(211)"
 C_LILAC = "color(183)"
 C_MINT  = "color(152)"
 C_DIM   = "color(244)"
+C_RED   = "color(203)"
 
 OLLAMA_URL = "http://localhost:11434"
 
@@ -71,21 +74,77 @@ class AppState:
 # Header and sidebar rendering
 # ---------------------------------------------------------------------------
 
-def render_header(pod: Pod, ollama_ok: bool) -> str:
-    """Single-line Rich markup header string."""
-    ollama = (
-        f"[{C_MINT}]◉ ollama online[/{C_MINT}]"
-        if ollama_ok
-        else f"[{C_DIM}]○ ollama offline[/{C_DIM}]"
-    )
-    role = f"[{C_DIM}]{pod.role}[/{C_DIM}]" if pod.role else ""
-    sep = f"[{C_DIM}] · [/{C_DIM}]"
-    parts = [f"[{C_PEACH}]podscribe[/{C_PEACH}]", sep,
-             f"[{C_PINK}]{pod.name}[/{C_PINK}]"]
-    if role:
-        parts += [sep, role]
-    parts += ["  ", ollama]
-    return "".join(parts)
+# ---------------------------------------------------------------------------
+# Type badge colours (matches the amber/teal/green palette in mockup)
+# ---------------------------------------------------------------------------
+_TYPE_COLOURS: dict[str, str] = {
+    "1on1":         "color(179)",   # amber
+    "skip-level":   "color(179)",
+    "interview":    "color(179)",
+    "standup":      "color(73)",    # teal
+    "retro":        "color(71)",    # green
+    "planning":     "color(73)",
+    "sprint-review":"color(73)",
+    "all-hands":    "color(140)",   # purple
+    "team-sync":    "color(73)",
+    "design-review":"color(140)",
+    "incident":     "color(203)",   # red
+    "post-mortem":  "color(203)",
+    "brainstorm":   "color(152)",   # mint
+    "customer":     "color(215)",   # orange
+    "vendor":       "color(215)",
+    "cross-team":   "color(215)",
+    "other":        "color(244)",
+}
+
+def _type_badge(mtype: Optional[str]) -> str:
+    """Return a coloured [type] pill string, or a dim dash if no type."""
+    if not mtype:
+        return f"[{C_DIM}]{'–':14s}[/{C_DIM}]"
+    col = _TYPE_COLOURS.get(mtype, C_PEACH)
+    return f"[bold {col}][{mtype}][/bold {col}]"
+
+
+def _key_pill(key: str, label: str) -> str:
+    """Return a visually-boxed key hint: [key] label."""
+    return f"[reverse {C_LILAC}] {key} [/reverse {C_LILAC}] [{C_DIM}]{label}[/{C_DIM}]"
+
+
+def _dur_fmt(sec: Optional[float]) -> str:
+    """Format duration as  42m  or  1h 12m — compact form for the dashboard."""
+    if not sec:
+        return ""
+    s = int(sec)
+    h, rem = divmod(s, 3600)
+    m = rem // 60
+    if h:
+        return f"{h}h {m}m"
+    return f"{m}m"
+
+
+def render_header(pod: Pod, ollama_ok: bool) -> Text:
+    """Full-width header: left = breadcrumb, right = ollama + key pills."""
+    t = Text(overflow="ellipsis", no_wrap=True)
+    # Left side
+    t.append("podscribe", style=f"bold {C_PEACH}")
+    t.append("  ·  ", style=C_DIM)
+    t.append(pod.name, style=f"bold {C_PINK}")
+    if pod.role:
+        t.append("  ·  ", style=C_DIM)
+        t.append(pod.role, style=C_DIM)
+    # Right side — pad to fill terminal, then append right-aligned block
+    right_parts = []
+    if ollama_ok:
+        right_parts.append(f"[{C_MINT}]● ollama online[/{C_MINT}]")
+    else:
+        right_parts.append(f"[{C_DIM}]○ ollama offline[/{C_DIM}]")
+    right_parts += [
+        f"  [reverse {C_DIM}] ? [/reverse {C_DIM}]",
+        f"  [reverse {C_LILAC}] : [/reverse {C_LILAC}]",
+        f"  [reverse {C_LILAC}] / [/reverse {C_LILAC}]",
+    ]
+    t.append("  " + "".join(right_parts))
+    return t
 
 
 def render_sidebar(state: AppState, pods: list) -> Panel:
@@ -94,15 +153,15 @@ def render_sidebar(state: AppState, pods: list) -> Panel:
     for i, pod in enumerate(pods):
         if i == state.sidebar_idx:
             cursor = f"[{C_PINK}]▶[/{C_PINK}]"
-            name   = f"[{C_PINK}]{pod.name}[/{C_PINK}]"
-            role   = f"[{C_DIM}]  {pod.role}[/{C_DIM}]" if pod.role else ""
+            name   = f"[bold {C_PINK}]{pod.name}[/bold {C_PINK}]"
+            role   = f"\n    [{C_DIM}]{pod.role}[/{C_DIM}]" if pod.role else ""
         else:
-            cursor = f"[{C_DIM}] [/{C_DIM}]"
+            cursor = "  "
             name   = f"[{C_DIM}]{pod.name}[/{C_DIM}]"
-            role   = ""
+            role   = f"\n    [{C_DIM}]{pod.role}[/{C_DIM}]" if pod.role else ""
         lines.append(f" {cursor} {name}{role}")
     border = C_LILAC if state.focused_pane == "sidebar" else C_DIM
-    return Panel("\n".join(lines) or " ", title="Pods", border_style=border)
+    return Panel("\n".join(lines) or " ", title=f"[{C_DIM}]PODS[/{C_DIM}]", border_style=border)
 
 
 # ---------------------------------------------------------------------------
@@ -122,63 +181,139 @@ def _meeting_enhanced(pod: Pod, meeting) -> bool:
 
 
 def render_dashboard(pod: Pod, meetings: list, state: "AppState") -> Panel:
-    """Main pane default view: pod stats + recent meetings list."""
+    """Main pane: stat cards + recent meetings table + key hint pills."""
     from datetime import datetime
 
-    # Stats
     total = len(meetings)
     enhanced = sum(1 for m in meetings if _meeting_enhanced(pod, m))
-    pct = f"{int(enhanced / total * 100)}%" if total else "–"
-    last_met = "–"
+    pct = f"{int(enhanced / total * 100)}% coverage" if total else "0% coverage"
+    last_met_abs = "–"
+    last_met_rel = ""
     if meetings:
         try:
             dt = datetime.fromisoformat(meetings[0].started_at)
-            last_met = fmt_date(dt)
+            last_met_abs = dt.strftime("%Y-%m-%d")
+            delta = datetime.now() - dt
+            days = delta.days
+            last_met_rel = f"{days}d ago" if days >= 1 else "today"
         except (ValueError, TypeError):
             pass
 
-    stats = (
-        f"[{C_PINK}]{pod.display_name or pod.name}[/{C_PINK}]"
-        f"[{C_DIM}]  ·  {pod.role}[/{C_DIM}]\n\n"
-        f"[{C_DIM}]meetings [/{C_DIM}][{C_PEACH}]{total}[/{C_PEACH}]"
-        f"   [{C_DIM}]enhanced [/{C_DIM}][{C_MINT}]{enhanced} ({pct})[/{C_MINT}]"
-        f"   [{C_DIM}]last met [/{C_DIM}][{C_PEACH}]{last_met}[/{C_PEACH}]\n"
+    from rich.console import Group
+
+    # ── Stat cards ──────────────────────────────────────────────────────────
+    cards = Table.grid(padding=(0, 2))
+    cards.add_column(min_width=18)
+    cards.add_column(min_width=18)
+    cards.add_column(min_width=18)
+
+    def _card(label: str, value: str, sub: str, col: str) -> Text:
+        t = Text()
+        t.append(f"{label}\n", style=C_DIM)
+        t.append(f"{value}\n", style=f"bold {col}")
+        t.append(sub, style=C_DIM)
+        return t
+
+    since = ""
+    if meetings:
+        try:
+            dt0 = datetime.fromisoformat(meetings[-1].started_at)
+            since = f"since {dt0.strftime('%b %Y')}"
+        except (ValueError, TypeError):
+            pass
+
+    cards.add_row(
+        _card("TOTAL MEETINGS", str(total), since, C_PEACH),
+        _card("ENHANCED", str(enhanced), pct, C_MINT),
+        _card("LAST MET", last_met_rel, last_met_abs, C_PEACH),
     )
 
-    # Recent meetings list
-    lines = [stats, f"[{C_DIM}]─── Recent meetings ───────────────────────────────[/{C_DIM}]"]
+    # ── Pod subtitle ────────────────────────────────────────────────────────
+    subtitle = Text()
+    subtitle.append(pod.display_name or pod.name, style=f"bold {C_PINK}")
+    if pod.role or pod.cadence:
+        parts = []
+        if pod.role:
+            parts.append(pod.role)
+        if pod.cadence:
+            parts.append(f"every {pod.cadence}")
+        subtitle.append("  " + " · ".join(parts), style=C_DIM)
+
+    # ── Recent meetings ──────────────────────────────────────────────────────
+    tbl = Table.grid(padding=(0, 1))
+    tbl.add_column(width=1)             # cursor
+    tbl.add_column(width=16)            # date
+    tbl.add_column(width=16)            # type badge
+    tbl.add_column(width=5)             # duration
+    tbl.add_column()                    # enh status (right-aligned via markup)
+
     for i, m in enumerate(meetings[:12]):
-        cursor = f"[{C_PINK}]▶[/{C_PINK}]" if i == state.main_idx else " "
+        cursor = Text("▶", style=C_PINK) if i == state.main_idx else Text(" ")
         try:
             dt = datetime.fromisoformat(m.started_at)
             date_str = dt.strftime("%Y-%m-%d %H:%M")
         except (ValueError, TypeError):
             date_str = m.started_at or m.id
-        mtype = f"[{C_PEACH}]{m.type or '–':12s}[/{C_PEACH}]"
-        dur = ""
-        if m.duration_sec:
-            from .cli import _hms
-            dur = f"[{C_DIM}]{_hms(m.duration_sec)}[/{C_DIM}]"
-        enh = f"[{C_MINT}]✓[/{C_MINT}]" if _meeting_enhanced(pod, m) else f"[{C_DIM}]·[/{C_DIM}]"
-        lines.append(f" {cursor} [{C_DIM}]{date_str}[/{C_DIM}]  {mtype}  {dur}  {enh}")
+        badge = Text.from_markup(_type_badge(m.type))
+        dur   = Text(_dur_fmt(m.duration_sec), style=C_DIM)
+        if _meeting_enhanced(pod, m):
+            enh_text = Text("✓ enhanced", style=C_MINT)
+        else:
+            enh_text = Text("→ raw", style=C_DIM)
+        tbl.add_row(cursor, Text(date_str, style=C_DIM), badge, dur, enh_text)
 
-    # Action hints — escape [ so Rich doesn't treat them as markup tags
-    hints = (
-        f"\n[{C_DIM}]"
-        r"\[r]ecord  \[e]nhance  \[c]ons  \[Enter]view  \[/]search  \[Tab]switch  \[q]quit"
-        f"[/{C_DIM}]"
+    # ── Key hints ────────────────────────────────────────────────────────────
+    hints_line1 = Text()
+    for key, label in [("r","record"), ("e","enhance"), ("c","consolidate"),
+                        ("Enter","view transcript"), ("/","search"), ("Tab","switch pane")]:
+        hints_line1.append_text(Text.from_markup(_key_pill(key, label) + "  "))
+    hints_line2 = Text.from_markup(_key_pill("q", "quit"))
+
+    from rich.padding import Padding
+    body = Group(
+        subtitle, Text(""),
+        cards, Text(""),
+        Text("RECENT MEETINGS", style=C_DIM),
+        Text("─" * 60, style=C_DIM),
+        tbl, Text(""),
+        hints_line1,
+        hints_line2,
     )
-    lines.append(hints)
-
     border = C_LILAC if state.focused_pane == "main" else C_DIM
-    return Panel("\n".join(lines), title="Dashboard", border_style=border)
+    return Panel(body, title="[bold]Dashboard[/bold]", border_style=border)
 
 
-def render_status_bar(state: "AppState", pod: Pod) -> str:
-    """Single Rich markup line for the status bar."""
+def render_status_bar(state: "AppState", pod: Pod, meetings: Optional[list] = None,
+                      llm_model: Optional[str] = None, llm_ctx: Optional[str] = None) -> Text:
+    """Full-width bottom status bar: mode badge left, model/ctx right."""
+    from datetime import datetime
     col = mode_colour(state.mode)
-    badge = f"[bold {col}] {state.mode} [/bold {col}]"
-    return f"{badge}  [{C_DIM}]{pod.name}[/{C_DIM}]"
+    t = Text(no_wrap=True, overflow="ellipsis")
+    # Mode badge
+    t.append(f" {state.mode} ", style=f"bold reverse {col}")
+    t.append("  ")
+    t.append(pod.name, style=f"bold {C_DIM}")
+
+    # Meeting count + last met
+    if meetings:
+        t.append(f"  ·  {len(meetings)} meetings", style=C_DIM)
+        try:
+            dt = datetime.fromisoformat(meetings[0].started_at)
+            delta = datetime.now() - dt
+            days = delta.days
+            ago = f"{days}d ago" if days >= 1 else "today"
+            t.append(f"  ·  last {ago}", style=C_DIM)
+        except (ValueError, TypeError):
+            pass
+
+    # Right side: model + ctx
+    if llm_model:
+        right = f"model [bold {C_PEACH}]{llm_model}[/bold {C_PEACH}]"
+        if llm_ctx and llm_ctx != "?":
+            right += f"  [{C_DIM}]ctx {llm_ctx}[/{C_DIM}]"
+        t.append("  " + right)
+
+    return t
 
 
 # ---------------------------------------------------------------------------
@@ -498,25 +633,62 @@ def record_view(pod: Pod, args) -> int:
         from .cli import _hms
         status_line["text"] = f"Done. Saved {n} segments ({_hms(meeting.duration_sec or 0)})"
 
-    def _render() -> Panel:
-        m, s = divmod(int(status.get("elapsed", 0)), 60)
-        h, m_ = divmod(m, 60)
-        footer = (
-            f"elapsed {h:02d}:{m_:02d}:{s:02d}  "
-            f"segs={status.get('segment_count', 0)}  "
-            f"VAD={status.get('vad_aggr', '?')}  "
-            f"overflow={'WARN' if status.get('overflow') else 'ok'}"
-        )
-        wave_str = "".join(_rms_to_bar_char(v) for v in waveform[-WAVEFORM_WIDTH:])
-        body = "\n".join(lines[-BUFFER_LINES:])
-        return Panel(
-            body + f"\n\n[{C_PINK}]{wave_str}[/{C_PINK}]\n" + footer + "\n" + status_line["text"],
-            title=f"[{C_PEACH}]record[/{C_PEACH}]",
-            border_style=C_PINK,
+    def _render():
+        from rich.console import Group as RGroup
+        from rich.rule import Rule
+
+        elapsed_sec = int(status.get("elapsed", 0))
+        h, rem = divmod(elapsed_sec, 3600)
+        m_, s = divmod(rem, 60)
+        elapsed_str = f"{h:02d}:{m_:02d}:{s:02d}"
+        segs = status.get("segment_count", 0)
+        vad  = status.get("vad_aggr", "?")
+        model_name = getattr(transcriber, "model_name", "?")
+
+        # Top header bar
+        hdr = Text(no_wrap=True, overflow="ellipsis")
+        hdr.append(" ● REC ", style=f"bold reverse {C_RED}")
+        hdr.append("  ")
+        hdr.append(f"{meeting.id}", style=f"bold {C_PINK}")
+        if meeting.type:
+            hdr.append(f"  ·  {meeting.type}", style=C_DIM)
+        hdr.append(
+            f"    elapsed [bold {C_PEACH}]{elapsed_str}[/bold {C_PEACH}]"
+            f"  segs [{C_PEACH}]{segs}[/{C_PEACH}]"
+            f"  VAD [{C_DIM}]{vad}[/{C_DIM}]"
+            f"  model [{C_DIM}]{model_name}[/{C_DIM}]"
         )
 
+        # Transcript body
+        body_text = Text(overflow="fold")
+        for line in lines[-BUFFER_LINES:]:
+            body_text.append_text(Text.from_markup(line + "\n"))
+
+        # Waveform + ctrl-c hint
+        wave_str = "".join(_rms_to_bar_char(v) for v in waveform[-WAVEFORM_WIDTH:])
+        wave_line = Text()
+        wave_line.append(wave_str, style=C_PINK)
+        wave_line.append("  Ctrl+C to stop", style=C_DIM)
+
+        # Bottom status bar
+        overflow_ok = not status.get("overflow", False)
+        status_bar = Text(no_wrap=True, overflow="ellipsis")
+        status_bar.append(" INSERT ", style=f"bold reverse {C_PINK}")
+        status_bar.append("  recording", style=f"bold {C_DIM}")
+        status_bar.append(f"  ·  {segs} segments captured", style=C_DIM)
+        status_bar.append(
+            f"  ·  overflow {'ok' if overflow_ok else 'WARN'}",
+            style=C_DIM if overflow_ok else f"bold {C_RED}",
+        )
+        status_bar.append(f"    {model_name}", style=C_DIM)
+
+        if status_line["text"]:
+            done = Text(status_line["text"], style=C_MINT)
+            return RGroup(hdr, Rule(style=C_DIM), body_text, wave_line, Rule(style=C_DIM), done, status_bar)
+        return RGroup(hdr, Rule(style=C_DIM), body_text, wave_line, Rule(style=C_DIM), status_bar)
+
     rc = 0
-    with Live(_render(), console=console, refresh_per_second=8) as live:
+    with Live(_render(), console=console, refresh_per_second=8, screen=True) as live:
         def _on_status_live(d: dict) -> None:
             _on_status(d)
             live.update(_render())
@@ -707,16 +879,30 @@ def launch() -> int:
 
     with Live(console=console, refresh_per_second=12, screen=True) as live:
         def _refresh():
-            pod = _current_pod()
-            meetings = _current_meetings()
             from rich.console import Group
-            header_text = render_header(pod, ollama_ok)
-            status_text = render_status_bar(state, pod)
+            from rich.rule import Rule
+            pod      = _current_pod()
+            meetings = _current_meetings()
+            llm_cfg  = pod.llm or load_project_config().get("llm") or {}
+            llm_model = llm_cfg.get("model")
+            llm_ctx: Optional[str] = None
+            if llm_model:
+                try:
+                    info = ollama_model_info(llm_model)
+                    llm_ctx = str((info.get("model_info") or {}).get("llama.context_length", "?"))
+                except Exception:
+                    llm_ctx = "?"
+            header    = render_header(pod, ollama_ok)
+            status    = render_status_bar(state, pod, meetings=meetings,
+                                          llm_model=llm_model, llm_ctx=llm_ctx)
             sidebar_panel = render_sidebar(state, pods)
             main_panel    = render_dashboard(pod, meetings, state)
             cols = Columns([sidebar_panel, main_panel], equal=False, expand=True)
-            from rich.text import Text
-            live.update(Group(Text.from_markup(header_text), cols, Text.from_markup(status_text)))
+            screen_label = Text(
+                f"SCREEN 1  —  {state.mode} MODE  ·  DASHBOARD VIEW",
+                style=C_DIM, justify="center",
+            )
+            live.update(Group(header, Rule(style=C_DIM), cols, Rule(style=C_DIM), status, screen_label))
 
         _refresh()
 
