@@ -545,3 +545,40 @@ def test_render_header_shows_ollama_status():
 
     hdr_off = render_header(pod, ollama_ok=False)
     assert "offline" in hdr_off
+
+
+def test_render_dashboard_shows_pod_name(tmp_path):
+    from podscribe.tui import AppState, render_dashboard
+    from podscribe.models import Pod
+    from io import StringIO
+    from rich.console import Console
+
+    pod = Pod(name="sam-chen", display_name="Sam Chen", role="Senior Eng",
+              base_path=tmp_path / "pods" / "sam-chen")
+    state = AppState(pod_names=["sam-chen"])
+    panel = render_dashboard(pod, meetings=[], state=state)
+
+    buf = StringIO()
+    Console(file=buf, no_color=True, width=80).print(panel)
+    text = buf.getvalue()
+    assert "Sam Chen" in text or "sam-chen" in text
+
+
+def test_render_status_bar_normal_mode():
+    from podscribe.tui import AppState, render_status_bar, C_LILAC
+    from podscribe.models import Pod
+    from pathlib import Path
+    pod = Pod(name="sam-chen", base_path=Path("/tmp/x"))
+    state = AppState(pod_names=["sam-chen"], mode="NORMAL")
+    bar = render_status_bar(state, pod)
+    assert "NORMAL" in bar
+    assert "sam-chen" in bar
+
+def test_render_status_bar_insert_mode():
+    from podscribe.tui import AppState, render_status_bar, C_PINK
+    from podscribe.models import Pod
+    from pathlib import Path
+    pod = Pod(name="sam-chen", base_path=Path("/tmp/x"))
+    state = AppState(pod_names=["sam-chen"], mode="INSERT")
+    bar = render_status_bar(state, pod)
+    assert "INSERT" in bar

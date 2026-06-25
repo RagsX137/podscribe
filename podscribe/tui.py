@@ -100,6 +100,82 @@ def render_sidebar(state: AppState, pods: list) -> Panel:
 
 
 # ---------------------------------------------------------------------------
+# Dashboard + status bar rendering
+# ---------------------------------------------------------------------------
+
+def _meeting_enhanced(pod: Pod, meeting) -> bool:
+    """Return True if an enhanced summary exists for this meeting."""
+    from datetime import datetime
+    try:
+        dt = datetime.fromisoformat(meeting.started_at)
+        date_str = fmt_date(dt)
+    except (ValueError, TypeError):
+        return False
+    summary_path = pod.summaries_dir_for(date_str) / f"{meeting.id}.md"
+    return summary_path.exists()
+
+
+def render_dashboard(pod: Pod, meetings: list, state: "AppState") -> Panel:
+    """Main pane default view: pod stats + recent meetings list."""
+    from datetime import datetime
+
+    # Stats
+    total = len(meetings)
+    enhanced = sum(1 for m in meetings if _meeting_enhanced(pod, m))
+    pct = f"{int(enhanced / total * 100)}%" if total else "–"
+    last_met = "–"
+    if meetings:
+        try:
+            dt = datetime.fromisoformat(meetings[0].started_at)
+            last_met = fmt_date(dt)
+        except (ValueError, TypeError):
+            pass
+
+    stats = (
+        f"[{C_PINK}]{pod.display_name or pod.name}[/{C_PINK}]"
+        f"[{C_DIM}]  ·  {pod.role}[/{C_DIM}]\n\n"
+        f"[{C_DIM}]meetings [/{C_DIM}][{C_PEACH}]{total}[/{C_PEACH}]"
+        f"   [{C_DIM}]enhanced [/{C_DIM}][{C_MINT}]{enhanced} ({pct})[/{C_MINT}]"
+        f"   [{C_DIM}]last met [/{C_DIM}][{C_PEACH}]{last_met}[/{C_PEACH}]\n"
+    )
+
+    # Recent meetings list
+    lines = [stats, f"[{C_DIM}]─── Recent meetings ───────────────────────────────[/{C_DIM}]"]
+    for i, m in enumerate(meetings[:12]):
+        cursor = f"[{C_PINK}]▶[/{C_PINK}]" if i == state.main_idx else " "
+        try:
+            dt = datetime.fromisoformat(m.started_at)
+            date_str = dt.strftime("%Y-%m-%d %H:%M")
+        except (ValueError, TypeError):
+            date_str = m.started_at or m.id
+        mtype = f"[{C_PEACH}]{m.type or '–':12s}[/{C_PEACH}]"
+        dur = ""
+        if m.duration_sec:
+            from .cli import _hms
+            dur = f"[{C_DIM}]{_hms(m.duration_sec)}[/{C_DIM}]"
+        enh = f"[{C_MINT}]✓[/{C_MINT}]" if _meeting_enhanced(pod, m) else f"[{C_DIM}]·[/{C_DIM}]"
+        lines.append(f" {cursor} [{C_DIM}]{date_str}[/{C_DIM}]  {mtype}  {dur}  {enh}")
+
+    # Action hints
+    hints = (
+        f"\n[{C_DIM}]"
+        f"[r]ecord  [e]nhance  [c]ons  [Enter]view  [/]search  [Tab]switch  [q]quit"
+        f"[/{C_DIM}]"
+    )
+    lines.append(hints)
+
+    border = C_LILAC if state.focused_pane == "main" else C_DIM
+    return Panel("\n".join(lines), title="Dashboard", border_style=border)
+
+
+def render_status_bar(state: "AppState", pod: Pod) -> str:
+    """Single Rich markup line for the status bar."""
+    col = mode_colour(state.mode)
+    badge = f"[bold {col}] {state.mode} [/bold {col}]"
+    return f"{badge}  [{C_DIM}]{pod.name}[/{C_DIM}]"
+
+
+# ---------------------------------------------------------------------------
 # Key reading + Ollama probe
 # ---------------------------------------------------------------------------
 
