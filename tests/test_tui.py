@@ -582,3 +582,33 @@ def test_render_status_bar_insert_mode():
     state = AppState(pod_names=["sam-chen"], mode="INSERT")
     bar = render_status_bar(state, pod)
     assert "INSERT" in bar
+
+
+def test_build_palette_candidates_includes_pods_and_cmds():
+    from podscribe.tui import build_palette_candidates, FuzzyCandidate
+    candidates = build_palette_candidates(["sam-chen", "alex-wu"])
+    kinds = [c.kind for c in candidates]
+    assert "pod" in kinds
+    assert "cmd" in kinds
+    pod_labels = [c.label for c in candidates if c.kind == "pod"]
+    assert "sam-chen" in pod_labels
+    assert "alex-wu" in pod_labels
+
+def test_fuzzy_filter_empty_query_returns_all():
+    from podscribe.tui import build_palette_candidates, fuzzy_filter
+    candidates = build_palette_candidates(["sam-chen"])
+    assert fuzzy_filter(candidates, "") == candidates
+
+def test_fuzzy_filter_narrows_by_substring():
+    from podscribe.tui import build_palette_candidates, fuzzy_filter
+    candidates = build_palette_candidates(["sam-chen", "alex-wu"])
+    result = fuzzy_filter(candidates, "sam")
+    labels = [c.label for c in result]
+    assert "sam-chen" in labels
+    assert "alex-wu" not in labels
+
+def test_fuzzy_filter_matches_kind_prefix():
+    from podscribe.tui import build_palette_candidates, fuzzy_filter
+    candidates = build_palette_candidates(["sam-chen"])
+    result = fuzzy_filter(candidates, "cmd")
+    assert all(c.kind == "cmd" for c in result)

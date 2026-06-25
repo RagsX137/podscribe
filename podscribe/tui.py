@@ -176,6 +176,80 @@ def render_status_bar(state: "AppState", pod: Pod) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Fuzzy command palette
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FuzzyCandidate:
+    kind: str   # "pod" | "cmd"
+    label: str
+    value: str  # pod name or command key
+
+_PALETTE_COMMANDS = [
+    FuzzyCandidate("cmd", "init",               "init"),
+    FuzzyCandidate("cmd", "export",             "export"),
+    FuzzyCandidate("cmd", "import",             "import"),
+    FuzzyCandidate("cmd", "search",             "search"),
+    FuzzyCandidate("cmd", "config-llm",         "config-llm"),
+    FuzzyCandidate("cmd", "config-consolidate", "config-consolidate"),
+]
+
+
+def build_palette_candidates(pod_names: list) -> list:
+    pods = [FuzzyCandidate("pod", n, n) for n in pod_names]
+    return pods + list(_PALETTE_COMMANDS)
+
+
+def fuzzy_filter(candidates: list, query: str) -> list:
+    if not query:
+        return candidates
+    q = query.lower()
+    return [c for c in candidates if q in f"{c.kind} {c.label}".lower()]
+
+
+def command_palette(console: Console, pod_names: list) -> Optional["FuzzyCandidate"]:
+    """Fuzzy-search overlay. Returns selected FuzzyCandidate or None."""
+    query = ""
+    selected = 0
+
+    def _render() -> Panel:
+        filtered = fuzzy_filter(build_palette_candidates(pod_names), query)
+        lines = [f"[{C_PEACH}]:[/{C_PEACH}] {query}▌\n"]
+        for i, c in enumerate(filtered[:16]):
+            cursor = f"[{C_PINK}]▶[/{C_PINK}]" if i == selected else " "
+            badge = f"[{C_LILAC}][{c.kind}][/{C_LILAC}]"
+            label = f"[{C_PINK}]{c.label}[/{C_PINK}]" if i == selected else c.label
+            lines.append(f" {cursor} {badge} {label}")
+        if not filtered:
+            lines.append(f"[{C_DIM}]  no matches[/{C_DIM}]")
+        return Panel("\n".join(lines), title="Command Palette", border_style=C_PEACH)
+
+    with Live(_render(), console=console, refresh_per_second=30) as live:
+        while True:
+            k = read_key()
+            filtered = fuzzy_filter(build_palette_candidates(pod_names), query)
+            n = min(len(filtered), 16)
+
+            if k in ("\x1b", "\x03"):   # Escape or Ctrl+C
+                return None
+            elif k in (KEY_ENTER, "\n"):
+                if filtered and 0 <= selected < len(filtered):
+                    return filtered[selected]
+                return None
+            elif k == KEY_UP:
+                selected = (selected - 1) % max(n, 1)
+            elif k == KEY_DOWN:
+                selected = (selected + 1) % max(n, 1)
+            elif k == "\x7f":           # Backspace
+                query = query[:-1]
+                selected = 0
+            elif k.isprintable():
+                query += k
+                selected = 0
+            live.update(_render())
+
+
+# ---------------------------------------------------------------------------
 # Key reading + Ollama probe
 # ---------------------------------------------------------------------------
 
