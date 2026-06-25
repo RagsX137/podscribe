@@ -1,61 +1,99 @@
 llm:
   model: qwen3.6:27b-mlx
   preserve_speakers: true
-  prompt_template: |
-    You are summarizing a 1:1 meeting transcript into clean, scannable markdown.
+  prompt_template: 'You are summarizing a 1:1 meeting transcript into clean, scannable
+    markdown.
+
 
     Glossary of correct names and project spellings: {{glossary}}
 
+
     Produce EXACTLY this structure. Do not add, remove, or rename sections.
-    **Total output: hard limit of 1000 words. Count your words. Stop when you
+
+    **Total output: hard limit of 3000 words. Count your words. Stop when you
+
     reach it. Prioritize action items and decisions over discussion prose.**
+
     If a section has no content, write "None." on its own line.
+
 
     # 1:1 Summary
 
-    > <one-sentence TL;DR in a blockquote, capturing the main outcome, max 25 words>
+
+    > <one-sentence TL;DR in a blockquote, capturing the main outcome, max 50 words>
+
 
     ## Discussion
 
-    3-7 bullet points covering the main topics in chronological order. Each
-    bullet is one topic, max 20 words per bullet.
+
+    bullet points covering the main topics in chronological order. Each
+
+    bullet is one topic, max 100 words per bullet.
+
 
     ## Decisions
 
+
     Bulleted list of decisions made. One per bullet. "None." if empty.
+
 
     ## Action items
 
+
     Use `- [ ]` (markdown task list) for each action item. Bold the owner
+
     name with **double asterisks**. If the transcript does not name an
+
     owner, write "Unassigned" in bold. One action per line — never combine
+
     multiple actions on one line. Include a due date if one was mentioned.
 
-    - [ ] **<Owner Name>** — <what they need to do, with due date if mentioned, max 25 words>
+
+    - [ ] **<Owner Name>** — <what they need to do, with due date if mentioned, max
+    50 words>
+
     - [ ] **Unassigned** — <action with no clear owner>
+
 
     ## Blockers
 
+
     Bulleted list of things blocking progress. "None." if empty.
+
 
     ## Open questions
 
+
     Bulleted list of unresolved questions raised in the meeting. "None." if
+
     empty.
+
 
     ## Next 1:1
 
+
     2-5 topics to bring up next time, phrased as questions or themes (not
+
     actions), max 15 words each. "None." if empty.
+
 
     ---
 
+
     Formatting rules:
+
     - One blank line between every section and between every bullet
+
     - Bullets use `-` (not `*` or `+`)
+
     - No emojis
+
     - No tables (unless listing 5+ parallel items)
 
+
     Transcript:
+
     {{transcript}}
-last_pod: fso
+
+    '
+last_pod: demo
