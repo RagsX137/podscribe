@@ -62,6 +62,44 @@ class AppState:
     waveform: list = field(default_factory=lambda: [0.0] * WAVEFORM_WIDTH)
 
 # ---------------------------------------------------------------------------
+# Header and sidebar rendering
+# ---------------------------------------------------------------------------
+
+def render_header(pod: Pod, ollama_ok: bool) -> str:
+    """Single-line Rich markup header string."""
+    ollama = (
+        f"[{C_MINT}]◉ ollama online[/{C_MINT}]"
+        if ollama_ok
+        else f"[{C_DIM}]○ ollama offline[/{C_DIM}]"
+    )
+    role = f"[{C_DIM}]{pod.role}[/{C_DIM}]" if pod.role else ""
+    sep = f"[{C_DIM}] · [/{C_DIM}]"
+    parts = [f"[{C_PEACH}]podscribe[/{C_PEACH}]", sep,
+             f"[{C_PINK}]{pod.name}[/{C_PINK}]"]
+    if role:
+        parts += [sep, role]
+    parts += ["  ", ollama]
+    return "".join(parts)
+
+
+def render_sidebar(state: AppState, pods: list) -> Panel:
+    """Rich Panel containing the pod list for the sidebar."""
+    lines = []
+    for i, pod in enumerate(pods):
+        if i == state.sidebar_idx:
+            cursor = f"[{C_PINK}]▶[/{C_PINK}]"
+            name   = f"[{C_PINK}]{pod.name}[/{C_PINK}]"
+            role   = f"[{C_DIM}]  {pod.role}[/{C_DIM}]" if pod.role else ""
+        else:
+            cursor = f"[{C_DIM}] [/{C_DIM}]"
+            name   = f"[{C_DIM}]{pod.name}[/{C_DIM}]"
+            role   = ""
+        lines.append(f" {cursor} {name}{role}")
+    border = C_LILAC if state.focused_pane == "sidebar" else C_DIM
+    return Panel("\n".join(lines) or " ", title="Pods", border_style=border)
+
+
+# ---------------------------------------------------------------------------
 # Key reading + Ollama probe
 # ---------------------------------------------------------------------------
 

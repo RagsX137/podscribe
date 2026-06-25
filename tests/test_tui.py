@@ -508,3 +508,40 @@ def test_app_state_waveform_push():
     s.waveform = s.waveform[-40:]
     assert s.waveform[-1] == 0.7
     assert len(s.waveform) <= 40
+
+
+def test_render_sidebar_marks_active_pod(tmp_path, monkeypatch):
+    from podscribe.tui import AppState, render_sidebar
+    from podscribe.models import Pod
+
+    pods = [
+        Pod(name="sam-chen", display_name="Sam Chen", role="SE", base_path=tmp_path / "pods" / "sam-chen"),
+        Pod(name="alex-wu",  display_name="Alex Wu",  role="Staff", base_path=tmp_path / "pods" / "alex-wu"),
+    ]
+    state = AppState(pod_names=["sam-chen", "alex-wu"], sidebar_idx=0)
+    panel = render_sidebar(state, pods)
+    # Render to a string to inspect
+    from rich.console import Console
+    from io import StringIO
+    buf = StringIO()
+    c = Console(file=buf, no_color=True, width=40)
+    c.print(panel)
+    text = buf.getvalue()
+    assert "sam-chen" in text
+    assert "alex-wu" in text
+    # Active item has the cursor character
+    assert "▶" in text
+
+
+def test_render_header_shows_ollama_status():
+    from podscribe.tui import render_header
+    from podscribe.models import Pod
+    from pathlib import Path
+    pod = Pod(name="sam-chen", display_name="Sam Chen", role="Senior Eng",
+              base_path=Path("/tmp/x"))
+    hdr = render_header(pod, ollama_ok=True)
+    assert "sam-chen" in hdr
+    assert "online" in hdr
+
+    hdr_off = render_header(pod, ollama_ok=False)
+    assert "offline" in hdr_off
