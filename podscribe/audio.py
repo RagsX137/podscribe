@@ -36,10 +36,14 @@ class AudioCapture:
         self,
         vad_aggressiveness: int = 2,
         device: Optional[int] = None,
+        on_level=lambda f: None,
     ):
-        """vad_aggressiveness: 0-3, higher = more aggressive (filters more)."""
+        """vad_aggressiveness: 0-3, higher = more aggressive (filters more).
+        on_level: called with float RMS in [0.0, 1.0] for each audio chunk.
+        """
         self.vad_aggressiveness = vad_aggressiveness
         self.device = device
+        self._on_level = on_level
         self._audio_q: "queue.Queue[np.ndarray]" = queue.Queue()
         self._stream: Optional[sd.InputStream] = None
         self._vad = None
@@ -60,8 +64,9 @@ class AudioCapture:
     def _callback(self, indata, frames, time_info, status):
         if status:
             self._overflow = True
-        # Mono float32
         chunk = indata.copy().reshape(-1)
+        rms = float(np.sqrt(np.mean(chunk ** 2)))
+        self._on_level(min(1.0, rms))
         self._audio_q.put(chunk)
 
     def _is_speech(self, pcm_int16: np.ndarray) -> bool:
