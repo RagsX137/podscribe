@@ -406,84 +406,7 @@ def _pick_meeting(console: Console, pod: Pod) -> Optional[object]:
 
 
 # ---------------------------------------------------------------------------
-# Banner + menus
-# ---------------------------------------------------------------------------
-
-def _render_banner(console: Console, pod: Pod, ollama_ok: bool) -> None:
-    ollama = (
-        f"[{C_MINT}]\u25c9 online[/{C_MINT}]"
-        if ollama_ok
-        else f"[{C_DIM}]\u25cb offline[/{C_DIM}]"
-    )
-    console.print(Panel(
-        f"[{C_PEACH}]podscribe[/{C_PEACH}]  "
-        f"[{C_DIM}]\u00b7[/{C_DIM}]  pod: [{C_PINK}]{pod.name}[/{C_PINK}]  "
-        f"[{C_DIM}]\u00b7[/{C_DIM}]  ollama: {ollama}",
-        border_style=C_LILAC,
-    ))
-
-
-def _action_menu(console: Console) -> str:
-    """Main action menu. Returns the chosen key ('1'-'4' or 'q')."""
-    items = [
-        ("1", "Record"),
-        ("2", "Enhance"),
-        ("3", "Consolidate"),
-        ("4", "Others"),
-    ]
-    choice = _select_menu(console, "Action", items, quit_label="Quit")
-    return choice if choice is not None else "q"
-
-
-def _others_menu(console: Console) -> str:
-    """Others submenu. Returns the chosen key, or 'q' for back."""
-    items = [
-        ("list", "List all meetings"),
-        ("show", "Show latest transcript"),
-        ("search", "Search transcripts"),
-        ("glossary", "Glossary management"),
-        ("export", "Export data"),
-        ("llm", "LLM config"),
-        ("consolidate-cfg", "Consolidate prompt"),
-        ("switch", "Switch pod"),
-    ]
-    choice = _select_menu(console, "Others", items, quit_label="Back")
-    return choice if choice is not None else "q"
-
-
-def _glossary_menu(console: Console) -> str:
-    """Glossary submenu. Returns the chosen key, or 'q' for back."""
-    items = [
-        ("list", "List glossary terms"),
-        ("add", "Add term"),
-        ("remove", "Remove term"),
-    ]
-    choice = _select_menu(console, "Glossary", items, quit_label="Back")
-    return choice if choice is not None else "q"
-
-
-def _llm_config_menu(console: Console) -> str:
-    """LLM config submenu. Returns the chosen key, or 'q' for back."""
-    items = [
-        ("show", "Show current config"),
-        ("set", "Set model + template"),
-    ]
-    choice = _select_menu(console, "LLM Config", items, quit_label="Back")
-    return choice if choice is not None else "q"
-
-
-def _consolidate_cfg_menu(console: Console) -> str:
-    """Consolidate prompt submenu. Returns the chosen key, or 'q' for back."""
-    items = [
-        ("show", "Show current prompt"),
-        ("set", "Set prompt"),
-    ]
-    choice = _select_menu(console, "Consolidate Prompt", items, quit_label="Back")
-    return choice if choice is not None else "q"
-
-
-# ---------------------------------------------------------------------------
-# Others submenu handlers
+# CLI dispatch helper
 # ---------------------------------------------------------------------------
 
 def _dispatch_cli(argv: list[str]) -> int:
@@ -496,76 +419,6 @@ def _pause(console: Console) -> None:
     """Print 'press any key' and wait."""
     console.print(f"\n[{C_DIM}]Press any key to continue...[/{C_DIM}]")
     read_key()
-
-
-def _others_glossary(console: Console, pod: Pod) -> None:
-    """Glossary management submenu."""
-    while True:
-        sub = _glossary_menu(console)
-        if sub == "q":
-            return
-        if sub == "list":
-            _dispatch_cli(["context", pod.name, "list"])
-            _pause(console)
-        elif sub == "add":
-            term = Prompt.ask("Term to add", console=console)
-            if not term.strip():
-                continue
-            category = Prompt.ask(
-                "Category (person/project/client/other)",
-                console=console, default="other",
-            )
-            _dispatch_cli(["context", pod.name, "add", term, "--category", category])
-            _pause(console)
-        elif sub == "remove":
-            term = Prompt.ask("Term to remove", console=console)
-            if not term.strip():
-                continue
-            _dispatch_cli(["context", pod.name, "remove", term])
-            _pause(console)
-
-
-def _others_llm_config(console: Console) -> None:
-    """LLM config submenu."""
-    while True:
-        sub = _llm_config_menu(console)
-        if sub == "q":
-            return
-        if sub == "show":
-            _dispatch_cli(["config", "llm", "show"])
-            _pause(console)
-        elif sub == "set":
-            model = Prompt.ask("Model name (e.g. qwen3.6:27b)", console=console)
-            if not model.strip():
-                continue
-            template = Prompt.ask(
-                "Prompt template (use {{transcript}} placeholder)",
-                console=console,
-            )
-            if not template.strip():
-                continue
-            _dispatch_cli(["config", "llm", "set", model, template])
-            _pause(console)
-
-
-def _others_consolidate_cfg(console: Console) -> None:
-    """Consolidate prompt submenu."""
-    while True:
-        sub = _consolidate_cfg_menu(console)
-        if sub == "q":
-            return
-        if sub == "show":
-            _dispatch_cli(["config", "consolidate", "show"])
-            _pause(console)
-        elif sub == "set":
-            prompt = Prompt.ask(
-                "Consolidate prompt (use {{summary}} placeholder)",
-                console=console,
-            )
-            if not prompt.strip():
-                continue
-            _dispatch_cli(["config", "consolidate", "set", prompt])
-            _pause(console)
 
 
 # ---------------------------------------------------------------------------
@@ -895,7 +748,7 @@ def launch() -> int:
                 live.stop()
                 args = Namespace(
                     type=None, model="large-v3-turbo",
-                    vad_aggressiveness=2, device=None, keep_audio=False,
+                    vad_aggressiveness=2, device=None, keep_audio=True,
                 )
                 state.mode = "INSERT"
                 record_view(pod, args)
