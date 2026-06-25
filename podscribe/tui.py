@@ -162,10 +162,10 @@ def render_dashboard(pod: Pod, meetings: list, state: "AppState") -> Panel:
         enh = f"[{C_MINT}]✓[/{C_MINT}]" if _meeting_enhanced(pod, m) else f"[{C_DIM}]·[/{C_DIM}]"
         lines.append(f" {cursor} [{C_DIM}]{date_str}[/{C_DIM}]  {mtype}  {dur}  {enh}")
 
-    # Action hints
+    # Action hints — escape [ so Rich doesn't treat them as markup tags
     hints = (
         f"\n[{C_DIM}]"
-        f"[r]ecord  [e]nhance  [c]ons  [Enter]view  [/]search  [Tab]switch  [q]quit"
+        r"\[r]ecord  \[e]nhance  \[c]ons  \[Enter]view  \[/]search  \[Tab]switch  \[q]quit"
         f"[/{C_DIM}]"
     )
     lines.append(hints)
