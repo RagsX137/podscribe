@@ -159,6 +159,18 @@ def test_parse_meeting_type_normalizes_case():
     assert parse_meeting_type("design-review") == "design-review"
 
 
+def test_parse_meeting_type_all_new_types_valid():
+    """All new meeting types added beyond the original 1:1-focused set are accepted."""
+    from podscribe.models import parse_meeting_type
+    new_types = [
+        "planning", "sprint-review", "all-hands", "team-sync",
+        "incident", "post-mortem", "brainstorm",
+        "customer", "vendor", "cross-team",
+    ]
+    for t in new_types:
+        assert parse_meeting_type(t) == t, f"{t} should be a valid meeting type"
+
+
 def test_parse_meeting_type_rejects_unknown():
     import pytest
     from podscribe.models import parse_meeting_type

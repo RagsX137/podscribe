@@ -29,12 +29,27 @@ def make_meeting_id(pod_name: str, when: Optional[datetime] = None) -> str:
 
 
 MEETING_TYPES = (
+    # 1:1 and direct-report meetings
     "1on1",
-    "retro",
     "skip-level",
-    "design-review",
-    "standup",
     "interview",
+    # Team / group meetings
+    "standup",
+    "retro",
+    "planning",
+    "sprint-review",
+    "all-hands",
+    "team-sync",
+    # Technical collaboration
+    "design-review",
+    "incident",
+    "post-mortem",
+    "brainstorm",
+    # External / cross-org
+    "customer",
+    "vendor",
+    "cross-team",
+    # Catch-all
     "other",
 )
 

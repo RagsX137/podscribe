@@ -725,10 +725,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_rec.add_argument("--model", default="large-v3-turbo", help="Whisper model (default: large-v3-turbo)")
     p_rec.add_argument("--vad-aggressiveness", type=int, default=2, choices=[0, 1, 2, 3], help="VAD strictness (0=loose, 3=strict; default 2)")
     p_rec.add_argument("--device", type=int, default=None, help="Input device index (default: system default)")
-    p_rec.add_argument("--keep-audio", action="store_true", help="Keep raw audio file (for debugging)")
+    p_rec.add_argument(
+        "--keep-audio", dest="keep_audio", action="store_true", default=True,
+        help="Keep audio file after recording (default: on; required for diarization)",
+    )
+    p_rec.add_argument(
+        "--no-keep-audio", dest="keep_audio", action="store_false",
+        help="Delete audio file after recording (overrides --keep-audio)",
+    )
     p_rec.add_argument(
         "--type",
-        help="Meeting type (e.g. 1on1, retro, skip-level, design-review, standup, interview, other)",
+        help=(
+            "Meeting type — 1:1s: 1on1, skip-level, interview; "
+            "team: standup, retro, planning, sprint-review, all-hands, team-sync; "
+            "technical: design-review, incident, post-mortem, brainstorm; "
+            "external: customer, vendor, cross-team; other"
+        ),
     )
     p_rec.set_defaults(func=cmd_record)
 
@@ -749,7 +761,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_list.add_argument(
         "--type", metavar="TYPE",
-        help="Filter by meeting type (1on1, retro, skip-level, design-review, standup, interview, other)",
+        help=(
+            "Filter by meeting type. 1:1s: 1on1, skip-level, interview; "
+            "team: standup, retro, planning, sprint-review, all-hands, team-sync; "
+            "technical: design-review, incident, post-mortem, brainstorm; "
+            "external: customer, vendor, cross-team; other"
+        ),
     )
     p_list.set_defaults(func=cmd_list)
 
@@ -791,7 +808,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("query", help="Search query (fixed-string match)")
     p_search.add_argument("--pod", help="Limit search to one pod")
     p_search.add_argument("--since", metavar="DURATION|DATE", help="Filter by date")
-    p_search.add_argument("--type", metavar="TYPE", help="Filter by meeting type")
+    p_search.add_argument(
+        "--type", metavar="TYPE",
+        help=(
+            "Filter by meeting type. 1:1s: 1on1, skip-level, interview; "
+            "team: standup, retro, planning, sprint-review, all-hands, team-sync; "
+            "technical: design-review, incident, post-mortem, brainstorm; "
+            "external: customer, vendor, cross-team; other"
+        ),
+    )
     p_search.add_argument(
         "--color", action="store_true",
         help="Highlight matches in ANSI colors",

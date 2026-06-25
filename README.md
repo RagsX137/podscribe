@@ -33,7 +33,7 @@ podscribe show sam-chen latest
 | Command | What it does |
 |---|---|
 | `podscribe init <name>` | Create a pod (one per person). Flags: `--display-name`, `--role`, `--cadence`, `--notes` |
-| `podscribe record <pod>` (alias `start`) | Live mic → transcript → pod storage. Flags: `--model`, `--vad-aggressiveness`, `--device`, `--keep-audio`, `--type` |
+| `podscribe record <pod>` (alias `start`) | Live mic → transcript → pod storage. Flags: `--model`, `--vad-aggressiveness`, `--device`, `--keep-audio` (default: **on**) / `--no-keep-audio`, `--type` |
 | `podscribe list` | List all pods and their meetings. Flags: `--all`, `--since`, `--recent`, `--type` |
 | `podscribe show <pod> [meeting-id-prefix \| latest]` | View transcript |
 | `podscribe context {add\|remove\|list}` | Manage the glossary (initial_prompt context) for a pod |
@@ -161,7 +161,7 @@ pods/<name>/
 │       └── [<type>/]                      # optional subdir, e.g. 1on1/, retro/
 │           ├── <meeting-id>.md            # e.g. 2026-06-22-143012-sam-chen.md (incremental, one [HH:MM:SS] line per segment)
 │           ├── <meeting-id>.json          # meeting metadata sidecar (model, duration, type, etc.)
-│           └── <meeting-id>.raw           # raw audio (deleted by default after finalize)
+│           └── <meeting-id>.raw           # raw audio (kept by default; use --no-keep-audio to delete)
 ├── summaries/
 │   └── DD-MMM-YYYY/
 │       └── <meeting-id>.md                # enhanced transcript (output of `podscribe enhance`)
@@ -222,7 +222,7 @@ Any other `--model` value is passed through to `mlx-whisper` unchanged, so full 
 ## Privacy
 
 - **All processing local.** Whisper runs via Apple MLX on your machine. No network calls during recording or transcription.
-- **Raw audio deleted by default** after transcript is saved. Use `--keep-audio` for debugging.
+- **Raw audio kept by default** to enable speaker diarization (future). Use `--no-keep-audio` to delete after recording.
 - **Pods are isolated.** Each person's data lives in its own directory. Easy to back up, share, or delete one without touching others.
 
 ## Tests
