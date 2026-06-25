@@ -796,12 +796,14 @@ def consolidate_screen(pod: Pod, meeting) -> int:
 # ---------------------------------------------------------------------------
 
 def launch() -> int:
-    """Top-level TUI entry: pod context + action menu + dispatch."""
+    """Top-level TUI entry: two-pane modal layout with j/k navigation."""
     from argparse import Namespace
+    from rich.columns import Columns
 
     console = Console()
 
-    if not _list_pod_names():
+    pod_names = _list_pod_names()
+    if not pod_names:
         console.print(Panel(
             "No pods yet. Run `podscribe init <name>` to create one.",
             title=f"[{C_PINK}]podscribe[/{C_PINK}]",
@@ -809,75 +811,169 @@ def launch() -> int:
         ))
         return 0
 
+    # Load last pod; default to first pod, focus on main (most recent meeting)
     last = load_last_pod()
-    pod = _resolve_pod(last)
-    if pod is None:
-        pod = _pick_pod(console)
-        if pod is None:
-            return 0
-        save_last_pod(pod.name)
+    if last and last in pod_names:
+        sidebar_idx = pod_names.index(last)
+    else:
+        sidebar_idx = 0
 
+    pods = [_resolve_pod(n) for n in pod_names]
+    pods = [p for p in pods if p is not None]
+    if not pods:
+        return 0
+
+    state = AppState(
+        pod_names=pod_names,
+        sidebar_idx=sidebar_idx,
+        main_idx=0,
+        focused_pane="main",
+    )
     ollama_ok = probe_ollama()
 
-    while True:
-        console.clear()
-        _render_banner(console, pod, ollama_ok)
-        key = _action_menu(console)
-        if key == "q":
-            return 0
-        if key == "1":
-            args = Namespace(
-                type=None, model="large-v3-turbo",
-                vad_aggressiveness=2, device=None, keep_audio=False,
-            )
-            record_view(pod, args)
-        elif key == "2":
-            meeting = _pick_meeting(console, pod)
-            if meeting is not None:
-                enhance_view(pod, meeting)
-        elif key == "3":
-            meeting = _pick_meeting(console, pod)
-            if meeting is not None:
-                consolidate_screen(pod, meeting)
-        elif key == "4":
-            sub = _others_menu(console)
-            if sub == "q":
-                continue
-            if sub == "switch":
-                new_pod = _pick_pod(console)
-                if new_pod is not None:
-                    pod = new_pod
-                    save_last_pod(pod.name)
-                continue
-            if sub == "list":
-                _dispatch_cli(["list", "--all"])
-                _pause(console)
-            elif sub == "show":
-                _dispatch_cli(["show", pod.name, "latest"])
-                _pause(console)
-            elif sub == "search":
-                console.print("[dim]Search query:[/dim] ", end="")
+    def _current_pod() -> Pod:
+        return pods[state.sidebar_idx]
+
+    def _current_meetings():
+        return list_meetings(_current_pod())
+
+    with Live(console=console, refresh_per_second=12, screen=False) as live:
+        def _refresh():
+            pod = _current_pod()
+            meetings = _current_meetings()
+            from rich.console import Group
+            header_text = render_header(pod, ollama_ok)
+            status_text = render_status_bar(state, pod)
+            sidebar_panel = render_sidebar(state, pods)
+            main_panel    = render_dashboard(pod, meetings, state)
+            cols = Columns([sidebar_panel, main_panel], equal=False, expand=True)
+            from rich.text import Text
+            live.update(Group(Text.from_markup(header_text), cols, Text.from_markup(status_text)))
+
+        _refresh()
+
+        while True:
+            k = read_key()
+            pod = _current_pod()
+            meetings = _current_meetings()
+            n_pods    = len(pods)
+            n_meetings = len(meetings)
+
+            # ── Navigation ──────────────────────────────────────────────
+            if k in (KEY_DOWN, "j"):
+                if state.focused_pane == "sidebar":
+                    state.sidebar_idx = (state.sidebar_idx + 1) % max(n_pods, 1)
+                    save_last_pod(pods[state.sidebar_idx].name)
+                else:
+                    state.main_idx = (state.main_idx + 1) % max(n_meetings, 1)
+            elif k in (KEY_UP, "k"):
+                if state.focused_pane == "sidebar":
+                    state.sidebar_idx = (state.sidebar_idx - 1) % max(n_pods, 1)
+                    save_last_pod(pods[state.sidebar_idx].name)
+                else:
+                    state.main_idx = (state.main_idx - 1) % max(n_meetings, 1)
+            elif k == "\t":   # Tab
+                state.focused_pane = "main" if state.focused_pane == "sidebar" else "sidebar"
+
+            # ── Actions ─────────────────────────────────────────────────
+            elif k == "r":
+                live.stop()
+                args = Namespace(
+                    type=None, model="large-v3-turbo",
+                    vad_aggressiveness=2, device=None, keep_audio=False,
+                )
+                state.mode = "INSERT"
+                record_view(pod, args)
+                state.mode = "NORMAL"
+                live.start()
+            elif k == "e":
+                live.stop()
+                meeting = _pick_meeting(console, pod)
+                if meeting is not None:
+                    state.mode = "STREAM"
+                    enhance_view(pod, meeting)
+                    state.mode = "NORMAL"
+                live.start()
+            elif k == "c":
+                live.stop()
+                meeting = _pick_meeting(console, pod)
+                if meeting is not None:
+                    consolidate_screen(pod, meeting)
+                live.start()
+            elif k in (KEY_ENTER, "\n"):
+                if state.focused_pane == "main" and meetings:
+                    live.stop()
+                    m = meetings[state.main_idx] if state.main_idx < len(meetings) else meetings[0]
+                    _dispatch_cli(["show", pod.name, m.id])
+                    _pause(console)
+                    live.start()
+            elif k == "/":
+                live.stop()
+                console.print(f"[{C_DIM}]Search: [/{C_DIM}]", end="")
                 try:
                     query = input().strip()
                 except (EOFError, KeyboardInterrupt):
                     query = ""
                 if query:
                     _dispatch_cli(["search", query])
-                _pause(console)
-            elif sub == "glossary":
-                _others_glossary(console, pod)
-            elif sub == "export":
-                from datetime import datetime
+                    _pause(console)
+                live.start()
+            elif k == ":":
+                live.stop()
+                candidate = command_palette(console, pod_names)
+                if candidate is not None:
+                    _dispatch_palette_candidate(console, candidate, pod)
+                live.start()
+            elif k in ("q", "\x03"):
+                return 0
 
-                default_path = f"podscribe-export-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
-                console.print(f"[dim]Export path [{default_path}]:[/dim] ", end="")
-                try:
-                    path = input().strip() or default_path
-                except (EOFError, KeyboardInterrupt):
-                    path = default_path
-                _dispatch_cli(["export", "--out", path])
+            _refresh()
+
+    return 0
+
+
+def _dispatch_palette_candidate(console: Console, candidate: "FuzzyCandidate", pod: Pod) -> None:
+    """Execute a selected palette candidate, prompting for args as needed."""
+    if candidate.kind == "pod":
+        # Focus switches in launch() by sidebar_idx; here just acknowledge
+        return
+    cmd = candidate.value
+    if cmd == "init":
+        name = Prompt.ask("Pod name (kebab-case)", console=console)
+        if name.strip():
+            display = Prompt.ask("Display name", console=console, default="")
+            role    = Prompt.ask("Role", console=console, default="")
+            _dispatch_cli(["init", name.strip(),
+                           *(["--display-name", display] if display else []),
+                           *(["--role", role] if role else [])])
+            _pause(console)
+    elif cmd == "export":
+        from datetime import datetime
+        default_path = f"podscribe-export-{datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
+        path = Prompt.ask("Export path", console=console, default=default_path)
+        _dispatch_cli(["export", "--out", path.strip() or default_path])
+        _pause(console)
+    elif cmd == "import":
+        path = Prompt.ask("Archive path", console=console)
+        if path.strip():
+            _dispatch_cli(["import", path.strip()])
+            _pause(console)
+    elif cmd == "search":
+        query = Prompt.ask("Search query", console=console)
+        if query.strip():
+            _dispatch_cli(["search", query.strip()])
+            _pause(console)
+    elif cmd == "config-llm":
+        model = Prompt.ask("Model name (e.g. qwen3.6:27b)", console=console)
+        if model.strip():
+            template = Prompt.ask("Prompt template (use {{transcript}} placeholder)",
+                                  console=console)
+            if template.strip():
+                _dispatch_cli(["config", "llm", "set", model.strip(), template.strip()])
                 _pause(console)
-            elif sub == "llm":
-                _others_llm_config(console)
-            elif sub == "consolidate-cfg":
-                _others_consolidate_cfg(console)
+    elif cmd == "config-consolidate":
+        prompt = Prompt.ask("Consolidate prompt (use {{summary}} placeholder)",
+                            console=console)
+        if prompt.strip():
+            _dispatch_cli(["config", "consolidate", "set", prompt.strip()])
+            _pause(console)

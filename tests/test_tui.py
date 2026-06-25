@@ -21,6 +21,25 @@ def test_launch_with_pod_and_q_exits_cleanly(tmp_path, monkeypatch):
     assert rc == 0
 
 
+def test_launch_tab_switches_focused_pane(tmp_path, monkeypatch):
+    """Tab key must switch focus between sidebar and main pane without crashing."""
+    monkeypatch.chdir(tmp_path)
+    from podscribe.storage import init_pod
+    init_pod("sam-chen", display_name="Sam Chen")
+    import podscribe.tui as tui
+
+    keys = iter(["Tab", "q"])
+    def fake_key():
+        k = next(keys)
+        return "\t" if k == "Tab" else k
+    monkeypatch.setattr(tui, "read_key", fake_key)
+    monkeypatch.setattr(tui, "probe_ollama", lambda: False)
+    rc = tui.launch()
+    assert rc == 0
+
+
+
+
 def test_action_menu_ctrl_c_returns_quit(tmp_path):
     """Ctrl+C (\\x03) in the action menu should be treated as 'q' (quit), not crash."""
     import podscribe.tui as tui
