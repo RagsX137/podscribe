@@ -705,7 +705,7 @@ def launch() -> int:
     def _current_meetings():
         return list_meetings(_current_pod())
 
-    with Live(console=console, refresh_per_second=12, screen=False) as live:
+    with Live(console=console, refresh_per_second=12, screen=True) as live:
         def _refresh():
             pod = _current_pod()
             meetings = _current_meetings()

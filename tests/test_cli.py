@@ -48,6 +48,20 @@ def test_record_command_args():
     assert args.keep_audio is True
 
 
+def test_record_keep_audio_default_is_true():
+    """--keep-audio is on by default (required for diarization)."""
+    parser = build_parser()
+    args = parser.parse_args(["record", "sam-chen"])
+    assert args.keep_audio is True
+
+
+def test_record_no_keep_audio_flag():
+    """--no-keep-audio opts out of saving audio."""
+    parser = build_parser()
+    args = parser.parse_args(["record", "sam-chen", "--no-keep-audio"])
+    assert args.keep_audio is False
+
+
 def test_show_command_latest():
     parser = build_parser()
     args = parser.parse_args(["show", "sam-chen", "latest"])
@@ -590,8 +604,8 @@ def test_cmd_record_writes_wav_with_keep_audio(tmp_path, monkeypatch):
         assert len(frames) == 8000 * 2
 
 
-def test_cmd_record_omits_audio_by_default(tmp_path, monkeypatch):
-    """Without --keep-audio, no .raw file is created."""
+def test_cmd_record_omits_audio_with_no_keep_audio(tmp_path, monkeypatch):
+    """--no-keep-audio deletes the audio file after recording."""
     monkeypatch.chdir(tmp_path)
     from unittest.mock import patch, MagicMock
     import numpy as np
@@ -614,7 +628,7 @@ def test_cmd_record_omits_audio_by_default(tmp_path, monkeypatch):
         with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
             with patch("podscribe.cli.signal.signal"):
                 with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5]):
-                    args = build_parser().parse_args(["record", "sam-chen", "--model", "base"])
+                    args = build_parser().parse_args(["record", "sam-chen", "--no-keep-audio", "--model", "base"])
                     rc = cmd_record(args)
                     assert rc == 0
 
@@ -821,14 +835,17 @@ def test_run_consolidate_calls_prompt_rewrite_and_appends(tmp_path, monkeypatch)
     # Minimal transcript and enhanced summary
     meeting.transcript_path.parent.mkdir(parents=True, exist_ok=True)
     meeting.transcript_path.write_text("# Meeting: x\n[00:00:00] hi\n")
-    summary_dir = pod.summaries_dir_for("23-JUN-2026")
+    from datetime import datetime
+    from podscribe.models import fmt_date
+    date_str = fmt_date(datetime.fromisoformat(meeting.started_at))
+    summary_dir = pod.summaries_dir_for(date_str)
     summary_dir.mkdir(parents=True, exist_ok=True)
     (summary_dir / f"{meeting.id}.md").write_text("Summary: stuff happened.")
     # Seed a prior log row so the prompt_rewrite branch is exercised.
     log_path(pod).parent.mkdir(parents=True, exist_ok=True)
     log_path(pod).write_text(
         "date,person,meeting_id,type,quick_summary,key_topics,action_items,blockers,next_steps,summary_file,transcript_file,duration_sec\n"
-        f"23-JUN-2026,Sam Chen,{meeting.id},,prior,, ,,,,,\n"
+        f"{date_str},Sam Chen,{meeting.id},,prior,, ,,,,,\n"
     )
 
     yaml_text = (
