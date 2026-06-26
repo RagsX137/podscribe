@@ -13,8 +13,10 @@ import sys
 import termios
 import threading
 import tty
+from io import StringIO
 from rich.columns import Columns
 from rich.console import Console, Group
+from rich.containers import Lines
 from rich.live import Live
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
@@ -49,6 +51,10 @@ OLLAMA_URL = "http://localhost:11434"
 KEY_UP    = "\x1b[A"
 KEY_DOWN  = "\x1b[B"
 KEY_ENTER = "\r"
+KEY_PGUP  = "\x1b[5~"
+KEY_PGDN  = "\x1b[6~"
+KEY_HOME  = "\x1b[H"
+KEY_END   = "\x1b[F"
 
 WAVEFORM_WIDTH = 40  # number of RMS buckets shown in the waveform bar
 
@@ -1178,6 +1184,7 @@ def god_view(model: Optional[str] = None) -> int:
     messages: list = []
     recording_active = False
     agent_busy = False
+    scroll_offset = 0
 
     def _idle_reference() -> list:
         return [
@@ -1202,24 +1209,76 @@ def god_view(model: Optional[str] = None) -> int:
     right_content: list = _idle_reference()
 
     def _render():
-        left_lines = list(messages)
+        nonlocal scroll_offset
 
+        # --- Build raw content items (Rich-markup strings) ---
+        raw_items = list(messages)
+
+        # Blank-line separator + input line / thinking indicator
         if agent_busy:
-            left_lines.append(f"\n[{C_DIM}]\u27b3 Agent is thinking...[/{C_DIM}]")
+            raw_items.append("")
+            raw_items.append(f"[{C_DIM}]\u27b3 Agent is thinking...[/{C_DIM}]")
         else:
             typed = "".join(input_buffer)
             cursor = f"[bold color(211)]You:[/bold color(211)] "
-            if typed:
-                left_lines.append(f"\n{cursor}{typed}[color(211)]\u258c[/color(211)]")
+            raw_items.append("")
+            raw_items.append(f"{cursor}{typed}[color(211)]\u258c[/color(211)]"
+                             if typed else f"{cursor}[color(211)]\u258c[/color(211)]")
+
+        # --- Flatten multi-line items ---
+        flat_items = []
+        for item in raw_items:
+            flat_items.extend(item.split('\n'))
+
+        # --- Measure pane dimensions ---
+        avail = console.width
+        pane_width = max(20, int(avail * 0.7) - 2)
+        pane_height = max(5, console.height - 7)
+
+        # --- Wrap every item at pane_width to count rendered lines ---
+        temp_console = Console(width=pane_width, file=StringIO(), color_system=None)
+        all_lines: list[Text] = []
+        for item in flat_items:
+            t = Text.from_markup(item)
+            if t.plain:
+                all_lines.extend(list(t.wrap(temp_console, width=pane_width)))
             else:
-                left_lines.append(f"\n{cursor}[color(211)]\u258c[/color(211)]")
+                all_lines.append(Text(""))
 
-        left_body = "\n".join(left_lines) if left_lines else "[color(244)]Ask me something...[/color(244)]"
-        left_panel = Panel(left_body, title="[bold]God Mode[/bold]", border_style=C_LILAC)
+        # --- Clamp scroll offset ---
+        total = len(all_lines)
+        max_offset = max(0, total - pane_height)
+        if scroll_offset > max_offset:
+            scroll_offset = max_offset
 
+        # --- Slice visible window ---
+        if total <= pane_height:
+            visible = all_lines
+            hidden = 0
+        else:
+            start = total - pane_height - scroll_offset
+            if start < 0:
+                start = 0
+                scroll_offset = max(0, total - pane_height)
+            visible = all_lines[start:start + pane_height]
+            hidden = start
+
+        # --- Build left panel ---
+        if hidden > 0:
+            indicator = Text(f"\u25b2 {hidden} lines hidden (\u2191\u2193 PgUp/PgDn)", style=C_DIM)
+            left_content = Group(indicator, Lines(visible))
+        elif not visible and not messages:
+            left_content = Text("Ask me something...", style=C_DIM)
+        else:
+            left_content = Lines(visible)
+
+        left_panel = Panel(left_content, title="[bold]God Mode[/bold]", border_style=C_LILAC)
+
+        # --- Right panel (unchanged) ---
         right_body = "\n".join(right_content)
         right_panel = Panel(right_body, title="[bold]Tools[/bold]", border_style=C_DIM)
 
+        # --- Status bar (unchanged) ---
         from datetime import datetime
         status = Text(no_wrap=True, overflow="ellipsis")
         status.append(f" {session.model} ", style=f"bold reverse {C_DIM}")
@@ -1254,7 +1313,8 @@ def god_view(model: Optional[str] = None) -> int:
         return text
 
     def _handle_slash(command: str) -> None:
-        nonlocal recording_active, right_content
+        nonlocal recording_active, right_content, scroll_offset
+        scroll_offset = 0
         parts = command.split()
         if not parts:
             return
@@ -1341,7 +1401,8 @@ def god_view(model: Optional[str] = None) -> int:
         session.add_system_context(f"/{command} executed \u2192 {last_msg}")
 
     def _send_to_agent(text: str) -> None:
-        nonlocal agent_busy
+        nonlocal agent_busy, scroll_offset
+        scroll_offset = 0
         messages.append(f"[bold color(211)]You:[/bold color(211)] {text}")
         agent_busy = True
         live.update(_render())
@@ -1392,6 +1453,7 @@ def god_view(model: Optional[str] = None) -> int:
                         continue
 
                     if recording_active and text == "s":
+                        scroll_offset = 0
                         result = agent_tools.stop_recording()
                         messages.append(f"[{C_LILAC}]\u25c7 stop_recording()[/{C_LILAC}]")
                         msg = f"finalized ({result.get('segments', 0)} segments, {result.get('duration_sec', 0)}s)"
@@ -1409,7 +1471,27 @@ def god_view(model: Optional[str] = None) -> int:
                     if input_buffer:
                         input_buffer.pop()
                     live.update(_render())
+                elif k in (KEY_UP, KEY_PGUP, KEY_HOME):
+                    if k == KEY_HOME:
+                        scroll_offset = 999999
+                    elif k == KEY_PGUP:
+                        pgh = max(5, console.height - 7)
+                        scroll_offset += max(1, pgh // 2)
+                    else:
+                        scroll_offset += 1
+                    live.update(_render())
+                elif k in (KEY_DOWN, KEY_PGDN, KEY_END):
+                    if k == KEY_END:
+                        scroll_offset = 0
+                    elif k == KEY_PGDN:
+                        pgh = max(5, console.height - 7)
+                        scroll_offset = max(0, scroll_offset - max(1, pgh // 2))
+                    else:
+                        scroll_offset = max(0, scroll_offset - 1)
+                    live.update(_render())
                 elif k is not None and (k.isprintable() or k in (" ",)):
+                    if scroll_offset > 0:
+                        scroll_offset = 0
                     input_buffer.append(k)
                     live.update(_render())
 
