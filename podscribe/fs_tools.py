@@ -96,13 +96,11 @@ def read_file_tool(
         return f"Not a file: {path}"
 
     try:
-        raw_bytes = resolved.read_bytes()
-        # Reject binary files
-        raw_bytes.decode("utf-8")
+        text = resolved.read_bytes().decode("utf-8")
     except UnicodeDecodeError:
         return {"error": "Binary file — cannot read as text."}
 
-    lines = raw_bytes.decode("utf-8").splitlines(keepends=True)
+    lines = text.splitlines(keepends=True)
     total = len(lines)
 
     s = (start_line - 1) if start_line is not None else 0
@@ -142,10 +140,10 @@ def search_fs(
 
     if _rg_available():
         cmd = ["rg", "--fixed-strings", "--line-number", "--no-heading", "--color=never",
-               "--max-count=100", "--", query, str(resolved)]
+               f"--max-total-matches={_MAX_SEARCH_HITS}", "--", query, str(resolved)]
         if include_glob:
             cmd = ["rg", "--fixed-strings", "--line-number", "--no-heading", "--color=never",
-                   "--max-count=100", f"--glob={include_glob}", "--", query, str(resolved)]
+                   f"--max-total-matches={_MAX_SEARCH_HITS}", f"--glob={include_glob}", "--", query, str(resolved)]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             return _parse_rg_output(proc.stdout, root)
@@ -215,8 +213,9 @@ def find_symbol(name: str, path: str = ".") -> list[dict] | dict:
     hits: list[dict] = []
 
     if _rg_available():
+        escaped = re.escape(name)
         cmd = ["rg", "--type=py", "--line-number", "--no-heading", "--color=never",
-               f"(def|class) {name}\\b", str(resolved)]
+               f"(def|class) {escaped}\\b", str(resolved)]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             for raw_line in proc.stdout.splitlines():
@@ -279,7 +278,7 @@ def find_references(name: str, path: str = ".") -> list[dict] | dict:
 
     if _rg_available():
         cmd = ["rg", "--fixed-strings", "--word-regexp", "--line-number",
-               "--no-heading", "--color=never", f"--max-count={_MAX_SEARCH_HITS}",
+               "--no-heading", "--color=never", f"--max-total-matches={_MAX_SEARCH_HITS}",
                "--", name, str(resolved)]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)

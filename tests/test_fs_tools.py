@@ -124,7 +124,7 @@ def test_search_fs_finds_match(tmp_path, monkeypatch):
     (tmp_path / "a.txt").write_text("hello world\nfoo bar\n")
     result = search_fs("hello", ".")
     assert len(result) >= 1
-    assert result[0]["file"] == "a.txt"
+    assert any(r["file"] == "a.txt" for r in result)
     assert result[0]["line"] == 1
     assert "hello" in result[0]["text"]
 
@@ -201,3 +201,19 @@ def test_find_references_empty(tmp_path, monkeypatch):
     (tmp_path / "a.py").write_text("x = 1\n")
     result = find_references("no_such_identifier", ".")
     assert result == []
+
+
+def test_read_file_binary(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data.bin").write_bytes(bytes(range(256)))
+    result = read_file_tool("data.bin")
+    assert isinstance(result, dict)
+    assert "error" in result
+    assert "binary" in result["error"].lower()
+
+
+def test_find_symbol_path_escape(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = find_symbol("foo", "../../etc")
+    assert isinstance(result, dict)
+    assert "error" in result
