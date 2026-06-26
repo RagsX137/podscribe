@@ -1351,3 +1351,50 @@ def test_cmd_config_god_show_no_config(tmp_path, monkeypatch, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "No model configured" in out
+
+
+# ── cmd_god one-shot empty response ───────────────────────────────────────────
+
+def test_cmd_god_oneshot_empty_response_returns_1(tmp_path, monkeypatch, capsys):
+    """An empty string response (e.g. tool-call-only with no final text) returns exit 1."""
+    monkeypatch.chdir(tmp_path)
+
+    class _StubSession:
+        model = "test-model"
+        def run_prompt(self, *a, **kw):
+            return ""  # empty — not None, but falsy
+
+    # GodSession is lazy-imported inside cmd_god; patch it at source
+    with patch("podscribe.agent.GodSession", return_value=_StubSession()):
+        rc = main(["god", "does not matter"])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "Failed" in out
+
+
+def test_cmd_god_oneshot_none_response_returns_1(tmp_path, monkeypatch, capsys):
+    """None response (connection error) returns exit 1."""
+    monkeypatch.chdir(tmp_path)
+
+    class _StubSession:
+        model = "test-model"
+        def run_prompt(self, *a, **kw):
+            return None
+
+    with patch("podscribe.agent.GodSession", return_value=_StubSession()):
+        rc = main(["god", "anything"])
+    assert rc == 1
+
+
+def test_cmd_god_oneshot_valid_response_returns_0(tmp_path, monkeypatch, capsys):
+    """A non-empty response returns exit 0."""
+    monkeypatch.chdir(tmp_path)
+
+    class _StubSession:
+        model = "test-model"
+        def run_prompt(self, *a, **kw):
+            return "Here are your pods: none"
+
+    with patch("podscribe.agent.GodSession", return_value=_StubSession()):
+        rc = main(["god", "list pods"])
+    assert rc == 0

@@ -407,6 +407,23 @@ def read_key() -> str:
     return readchar.readkey()
 
 
+def read_key_timeout(timeout: float) -> Optional[str]:
+    """Read a single key with a timeout. Returns None if no key arrives.
+
+    Used during recording so the right pane polls for new transcript lines
+    even when the user is not typing.
+    """
+    try:
+        fd = sys.stdin.fileno()
+        r, _, _ = select.select([fd], [], [], timeout)
+        if not r:
+            return None
+        return readchar.readkey()
+    except (OSError, AttributeError):
+        # stdin is not a real TTY (e.g. in tests) — behave like blocking read
+        return read_key()
+
+
 def probe_ollama() -> bool:
     """Return True if Ollama is reachable. 1s timeout. Wrapper for tests."""
     try:
@@ -1131,6 +1148,10 @@ def _dispatch_palette_candidate(console: Console, candidate: "FuzzyCandidate", p
             _pause(console)
 
 
+class _ExitGodView(Exception):
+    """Raised by /exit slash command to cleanly exit god_view."""
+
+
 def god_view(model: Optional[str] = None) -> int:
     """Two-pane God mode TUI: left = agent chat, right = tool ref / live transcript."""
     from .agent import GodSession, _format_tool_result
@@ -1156,6 +1177,7 @@ def god_view(model: Optional[str] = None) -> int:
     input_buffer: list = []
     messages: list = []
     recording_active = False
+    agent_busy = False
 
     def _idle_reference() -> list:
         return [
@@ -1181,10 +1203,16 @@ def god_view(model: Optional[str] = None) -> int:
 
     def _render():
         left_lines = list(messages)
-        if input_buffer:
-            left_lines.append(f"\n[bold color(211)]You:[/bold color(211)] {''.join(input_buffer)}")
-        elif recording_active:
-            left_lines.append(f"\n[color(203)]\u25cf Recording active — type 'stop' when done[/color(203)]")
+
+        if agent_busy:
+            left_lines.append(f"\n[{C_DIM}]\u27b3 Agent is thinking...[/{C_DIM}]")
+        else:
+            typed = "".join(input_buffer)
+            cursor = f"[bold color(211)]You:[/bold color(211)] "
+            if typed:
+                left_lines.append(f"\n{cursor}{typed}[color(211)]\u258c[/color(211)]")
+            else:
+                left_lines.append(f"\n{cursor}[color(211)]\u258c[/color(211)]")
 
         left_body = "\n".join(left_lines) if left_lines else "[color(244)]Ask me something...[/color(244)]"
         left_panel = Panel(left_body, title="[bold]God Mode[/bold]", border_style=C_LILAC)
@@ -1240,7 +1268,7 @@ def god_view(model: Optional[str] = None) -> int:
                 right_content = _idle_reference()
                 messages.append("[color(244)]Reference shown in right pane.[/color(244)]")
             elif cmd == "exit":
-                raise KeyboardInterrupt()
+                raise _ExitGodView()
             elif cmd == "stop":
                 result = agent_tools.stop_recording()
                 if "error" in result:
@@ -1313,63 +1341,94 @@ def god_view(model: Optional[str] = None) -> int:
         session.add_system_context(f"/{command} executed \u2192 {last_msg}")
 
     def _send_to_agent(text: str) -> None:
+        nonlocal agent_busy
         messages.append(f"[bold color(211)]You:[/bold color(211)] {text}")
-        session.run_prompt(
-            text,
-            on_token=_on_token,
-            on_tool_call=_on_tool_call,
-            on_result=_on_result,
-        )
+        agent_busy = True
+        live.update(_render())
+        try:
+            session.run_prompt(
+                text,
+                on_token=_on_token,
+                on_tool_call=_on_tool_call,
+                on_result=_on_result,
+            )
+        finally:
+            agent_busy = False
 
     with Live(_render(), console=console, refresh_per_second=8, screen=True) as live:
-        while True:
-            try:
-                k = read_key()
-            except KeyboardInterrupt:
-                break
-
-            if k in ("\r", "\n"):
-                text = _reset_input()
-                if not text:
-                    continue
-
-                if recording_active and text == "s":
-                    result = agent_tools.stop_recording()
-                    messages.append(f"[{C_LILAC}]\u25c7 stop_recording()[/{C_LILAC}]")
-                    msg = f"finalized ({result.get('segments', 0)} segments, {result.get('duration_sec', 0)}s)"
-                    messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {msg}")
-                    recording_active = False
-                    right_content = _idle_reference()
-                    session.add_system_context(f"/stop executed \u2192 meeting {result.get('meeting_id', '')} finalized")
-                elif text.startswith("/"):
-                    _handle_slash(text[1:])
+        try:
+            while True:
+                # During recording use a short timeout so the right pane polls
+                # for new transcript lines even when the user is not typing.
+                # Outside recording, block indefinitely (no wasted CPU).
+                if recording_active:
+                    k = read_key_timeout(0.5)
+                    if k is None:
+                        # Timeout — no key pressed; just poll transcript
+                        status = agent_tools.get_recording_status()
+                        if status.get("status") == "recording":
+                            latest = status.get("latest_lines", [])
+                            right_content = [
+                                f"[color(203)]\u25cf Recording {status['meeting_id']}[/color(203)]",
+                                f"  segments: {status['segment_count']}",
+                            ] + [f"[color(244)]{l}[/color(244)]" for l in latest[-10:]] + [
+                                "",
+                                "[color(244)]Type 'stop' or '/stop' to end[/color(244)]",
+                            ]
+                            live.update(_render())
+                        continue
                 else:
-                    _send_to_agent(text)
+                    try:
+                        k = read_key()
+                    except KeyboardInterrupt:
+                        break
 
-                live.update(_render())
-            elif k == "\x7f":
-                if input_buffer:
-                    input_buffer.pop()
-                live.update(_render())
-            elif k == "\x03":
-                break
-            elif k.isprintable() or k in (" ",):
-                input_buffer.append(k)
-                live.update(_render())
+                if k == "\x03":
+                    break
 
-            # Poll recording status for right pane updates
-            if recording_active:
-                status = agent_tools.get_recording_status()
-                if status.get("status") == "recording":
-                    latest = status.get("latest_lines", [])
-                    right_content = [
-                        f"[color(203)]\u25cf Recording {status['meeting_id']}[/color(203)]",
-                        f"  segments: {status['segment_count']}",
-                    ] + [f"[color(244)]{l}[/color(244)]" for l in latest[-10:]] + [
-                        "",
-                        "[color(244)]Type 'stop' or '/stop' to end[/color(244)]",
-                    ]
+                if k in ("\r", "\n"):
+                    text = _reset_input()
+                    if not text:
+                        continue
+
+                    if recording_active and text == "s":
+                        result = agent_tools.stop_recording()
+                        messages.append(f"[{C_LILAC}]\u25c7 stop_recording()[/{C_LILAC}]")
+                        msg = f"finalized ({result.get('segments', 0)} segments, {result.get('duration_sec', 0)}s)"
+                        messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {msg}")
+                        recording_active = False
+                        right_content = _idle_reference()
+                        session.add_system_context(f"/stop executed \u2192 meeting {result.get('meeting_id', '')} finalized")
+                    elif text.startswith("/"):
+                        _handle_slash(text[1:])
+                    else:
+                        _send_to_agent(text)
+
                     live.update(_render())
+                elif k == "\x7f":
+                    if input_buffer:
+                        input_buffer.pop()
+                    live.update(_render())
+                elif k is not None and (k.isprintable() or k in (" ",)):
+                    input_buffer.append(k)
+                    live.update(_render())
+
+                # After each keystroke during recording, poll transcript too
+                if recording_active:
+                    status = agent_tools.get_recording_status()
+                    if status.get("status") == "recording":
+                        latest = status.get("latest_lines", [])
+                        right_content = [
+                            f"[color(203)]\u25cf Recording {status['meeting_id']}[/color(203)]",
+                            f"  segments: {status['segment_count']}",
+                        ] + [f"[color(244)]{l}[/color(244)]" for l in latest[-10:]] + [
+                            "",
+                            "[color(244)]Type 'stop' or '/stop' to end[/color(244)]",
+                        ]
+                        live.update(_render())
+
+        except _ExitGodView:
+            pass
 
     console.print()
     return 0

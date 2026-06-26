@@ -638,7 +638,7 @@ def cmd_god(args) -> int:
             on_result=on_result,
         )
         console.print()
-        if result is None:
+        if not result:
             console.print(
                 f"[red]Failed to get response from model '{session.model}'. "
                 f"Check that Ollama is running and the model is pulled.[/red]"

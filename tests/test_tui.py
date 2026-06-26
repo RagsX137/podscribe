@@ -837,3 +837,89 @@ def test_set_input_raw_preserves_isig():
         f"ISIG was cleared in _set_input_raw (lflag={applied_lflag:#010b}); "
         "Ctrl+C would not deliver SIGINT"
     )
+
+
+# ── read_key_timeout ──────────────────────────────────────────────────────────
+
+def test_read_key_timeout_returns_none_when_no_input(monkeypatch):
+    """When stdin has no data within the timeout, returns None."""
+    import sys
+    import podscribe.tui as tui
+    # Give stdin a working fileno() so the select() path is reached
+    monkeypatch.setattr(sys.stdin, "fileno", lambda: 0, raising=False)
+    # Patch select to report no readable fds (timeout expired)
+    monkeypatch.setattr(tui.select, "select", lambda r, w, e, t: ([], [], []))
+    result = tui.read_key_timeout(0.1)
+    assert result is None
+
+
+def test_read_key_timeout_returns_key_when_input_ready(monkeypatch):
+    """When stdin is readable within the timeout, returns the key."""
+    import podscribe.tui as tui
+    import sys
+    monkeypatch.setattr(tui.select, "select", lambda r, w, e, t: (r, [], []))
+    monkeypatch.setattr(tui, "read_key", lambda: "x")
+    result = tui.read_key_timeout(0.1)
+    assert result == "x"
+
+
+def test_read_key_timeout_falls_back_on_oserror(monkeypatch):
+    """Falls back to blocking read_key() when stdin.fileno() raises OSError."""
+    import podscribe.tui as tui
+    import sys
+    monkeypatch.setattr(tui, "read_key", lambda: "y")
+
+    class _FakeSysStdin:
+        def fileno(self):
+            raise OSError("not a tty")
+
+    monkeypatch.setattr(sys, "stdin", _FakeSysStdin())
+    result = tui.read_key_timeout(0.1)
+    assert result == "y"
+
+
+# ── _ExitGodView sentinel ──────────────────────────────────────────────────────
+
+def test_exit_godview_is_not_exception_subtype():
+    """_ExitGodView must be an Exception so it's catchable separately from BaseException."""
+    from podscribe.tui import _ExitGodView
+    assert issubclass(_ExitGodView, Exception)
+
+
+def test_exit_godview_not_caught_by_keyboard_interrupt_handler():
+    """_ExitGodView must NOT be KeyboardInterrupt so it takes its own code path."""
+    from podscribe.tui import _ExitGodView
+    assert not issubclass(_ExitGodView, KeyboardInterrupt)
+
+
+def test_handle_slash_exit_raises_exit_sentinel(tmp_path, monkeypatch):
+    """Typing /exit inside god_view must raise _ExitGodView, not KeyboardInterrupt."""
+    import podscribe.tui as tui
+    import podscribe.agent as agent_mod
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(tui, "probe_ollama", lambda: True)
+
+    chars = list("/exit\r")
+    char_iter = iter(chars)
+
+    def fake_read_key():
+        try:
+            return next(char_iter)
+        except StopIteration:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(tui, "read_key", fake_read_key)
+    monkeypatch.setattr(tui, "read_key_timeout", lambda t: fake_read_key())
+
+    class _StubSession:
+        model = "test-model"
+        def add_system_context(self, _): pass
+        def run_prompt(self, *a, **kw): return ""
+
+    # GodSession is lazy-imported inside god_view from .agent — patch there
+    monkeypatch.setattr(agent_mod, "GodSession", lambda model=None: _StubSession())
+
+    # /exit must return 0, not 130 (which a bare KI would give)
+    rc = tui.god_view(model="test-model")
+    assert rc == 0
