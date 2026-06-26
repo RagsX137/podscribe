@@ -279,7 +279,8 @@ def find_references(name: str, path: str = ".") -> list[dict] | dict:
 
     if _rg_available():
         cmd = ["rg", "--fixed-strings", "--word-regexp", "--line-number",
-               "--no-heading", "--color=never", "--", name, str(resolved)]
+               "--no-heading", "--color=never", f"--max-count={_MAX_SEARCH_HITS}",
+               "--", name, str(resolved)]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             return _parse_rg_output(proc.stdout, root)
