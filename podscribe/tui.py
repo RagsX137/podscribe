@@ -664,6 +664,14 @@ def record_view(pod: Pod, args) -> int:
     from .storage import start_meeting
     from .config import get_effective_glossary
     from .glossary import format_glossary_prompt
+    from .agent_tools import is_recording_active
+
+    if is_recording_active():
+        Console().print(
+            "[red]A god-mode recording is already in progress. "
+            "Stop it first with /stop or 'stop' in god mode.[/red]"
+        )
+        return 1
 
     try:
         meeting_type = parse_meeting_type(getattr(args, "type", None))

@@ -158,6 +158,11 @@ def show_meeting(pod_name: str, meeting_id: str) -> str:
 _recording_session: Optional[dict] = None
 
 
+def is_recording_active() -> bool:
+    """Return True if a god-mode background recording is currently running."""
+    return _recording_session is not None
+
+
 def start_recording(
     pod_name: str,
     model: str = "large-v3-turbo",

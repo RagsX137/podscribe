@@ -204,10 +204,19 @@ def run_record_session(
 def cmd_record(args) -> int:
     """Live record + transcribe a meeting (thin wrapper around run_record_session)."""
     from .models import parse_meeting_type
+    from .agent_tools import is_recording_active
     try:
         meeting_type = parse_meeting_type(args.type)
     except ValueError as e:
         print(str(e), file=sys.stderr)
+        return 1
+
+    if is_recording_active():
+        print(
+            "A god-mode recording is already in progress. "
+            "Stop it first with /stop or 'stop' in god mode.",
+            file=sys.stderr,
+        )
         return 1
 
     if not pod_exists(args.pod):
