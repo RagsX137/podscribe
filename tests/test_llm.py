@@ -418,6 +418,20 @@ def test_chat_stream_retries_on_5xx():
     assert mock_post.call_count == 3
 
 
+def test_chat_stream_5xx_all_attempts_fail():
+    """All 5xx attempts fail: retried 3 times, returns None."""
+    bad = MagicMock()
+    bad.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 503")
+    bad.status_code = 503
+    bad.iter_lines = MagicMock(return_value=iter([]))
+
+    with patch("podscribe.llm.requests.post", return_value=bad) as mock_post:
+        with patch("podscribe.llm.time.sleep"):
+            result = chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}])
+    assert result is None
+    assert mock_post.call_count == 3
+
+
 def test_chat_stream_no_retry_on_4xx():
     bad = MagicMock()
     bad.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 400")
