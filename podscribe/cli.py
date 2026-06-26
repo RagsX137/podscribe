@@ -13,6 +13,7 @@ from typing import Optional
 import numpy as np
 
 from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_project_config
+from rich.console import Console
 from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields, ollama_model_info
 from .models import Segment, fmt_date
@@ -580,6 +581,50 @@ def cmd_search(args) -> int:
     return 0
 
 
+def cmd_god(args) -> int:
+    """Agentic mode: LLM brain with tool access."""
+    if args.prompt:
+        from .agent import GodSession
+        session = GodSession(model=args.model)
+        console = Console()
+        full_text: list = []
+
+        def on_token(t: str) -> None:
+            full_text.append(t)
+            console.print(t, end="", style="bold color(152)")
+
+        def on_tool_call(name: str, args_str: str) -> None:
+            console.print(f"\n[color(183)]\u25c7 {name}({args_str})[/color(183)]")
+
+        def on_result(text: str) -> None:
+            from .agent_tools import MAX_TOOL_RESULT_CHARS
+            preview = text[:200] + "..." if len(text) > 200 else text
+            console.print(f"[color(244)]Result: {preview}[/color(244)]")
+
+        console.print(f"[color(211)]\u25cf God mode: {session.model}[/color(211)]")
+        console.print()
+
+        result = session.run_prompt(
+            args.prompt,
+            on_token=on_token,
+            on_tool_call=on_tool_call,
+            on_result=on_result,
+        )
+        console.print()
+        if result is None:
+            console.print("[red]Failed to reach Ollama. Start with: ollama serve[/red]")
+            return 1
+        return 0
+
+    # REPL: launch two-pane TUI
+    if sys.stdout.isatty():
+        from .tui import god_view
+        return god_view(model=args.model)
+
+    print("god mode requires a TTY.", file=sys.stderr)
+    return 2
+
+
 def run_consolidate(
     pod: "Pod",
     meeting: "Meeting",
@@ -823,6 +868,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_search.set_defaults(func=cmd_search)
 
+    # god
+    p_god = sub.add_parser("god", help="Agentic mode: LLM brain with tool access.")
+    p_god.add_argument("prompt", nargs="?", help="One-shot prompt (omit for REPL)")
+    p_god.add_argument("--model", default=None, help="Ollama model tag")
+    p_god.set_defaults(func=cmd_god)
+
     # export
     p_export = sub.add_parser("export", help="Export pod data to a tarball.")
     p_export.add_argument(
@@ -873,7 +924,7 @@ def rewrite_argv(argv: list[str]) -> list[str]:
     `podscribe <pod> <command> [args]` → `<command> <pod> [args]`
     `start` → `record`, `summarize` → `enhance`
     """
-    known_commands = {"init", "record", "list", "show", "context", "enhance", "config", "consolidate", "search"}
+    known_commands = {"init", "record", "list", "show", "context", "enhance", "config", "consolidate", "search", "god"}
     aliases = {"start": "record", "summarize": "enhance", "cons": "consolidate"}
 
     if not argv:
