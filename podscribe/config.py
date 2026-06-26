@@ -80,13 +80,26 @@ def save_last_pod(name: str) -> None:
     save_project_config(cfg)
 
 
+def _normalise_entry(e: str | dict) -> dict:
+    """Coerce a raw YAML glossary entry — string or dict — to canonical form."""
+    if isinstance(e, str):
+        return {"term": e, "category": ""}
+    return e
+
+
 def load_leadership_glossary() -> list:
-    """Load global glossary from leadership_team.yaml."""
+    """Load global glossary from leadership_team.yaml.
+
+    Normalises plain-string entries (e.g. ``["Yassine Parakh"]``) to
+    the canonical dict form ``{"term": "...", "category": ""}`` so that
+    all consumers can assume dict access.
+    """
     if not LEADERSHIP_CONFIG_PATH.exists():
         return []
     with LEADERSHIP_CONFIG_PATH.open() as f:
         data = yaml.safe_load(f) or {}
-    return data.get("glossary") or []
+    raw = data.get("glossary") or []
+    return [_normalise_entry(e) for e in raw]
 
 
 CONSOLIDATE_PROMPT_DEFAULT = """Given the following enhanced meeting summary, extract structured information.
@@ -133,7 +146,8 @@ def _leadership_yaml_path() -> Path:
 def _read_effective_glossary(pod: Pod) -> list:
     """Read leadership_team.yaml + pod.glossary. The actual disk read."""
     leadership = load_leadership_glossary() or []
-    return leadership + list(pod.glossary or [])
+    pod_glossary = list(pod.glossary or [])
+    return [_normalise_entry(e) for e in leadership + pod_glossary]
 
 
 def get_effective_glossary(pod: Pod) -> list:

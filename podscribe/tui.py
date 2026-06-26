@@ -5,8 +5,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import os
 import readchar
 import requests
+import select
+import sys
+import termios
+import threading
+import tty
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -556,6 +562,55 @@ def _pause(console: Console) -> None:
     read_key()
 
 
+def _set_input_raw(fd: int) -> list:
+    """Put only input processing in raw mode; preserve output flags.
+    Returns the previous termios attributes for restore.
+    """
+    old = termios.tcgetattr(fd)
+    mode = termios.tcgetattr(fd)
+    mode[0] &= ~(termios.BRKINT | termios.ICRNL | termios.INPCK | termios.ISTRIP | termios.IXON)
+    mode[3] &= ~(termios.ECHO | termios.ICANON | termios.IEXTEN | termios.ISIG)
+    mode[6][termios.VMIN] = 1
+    mode[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSADRAIN, mode)
+    return old
+
+
+def _listen_for_stop(
+    capture,
+    wake_fd: int,
+    stop_event: threading.Event,
+) -> None:
+    """Thread target: read stdin for 's' to stop recording.
+    Sets stdin to input-raw mode for the lifetime of the thread.
+    Watches *wake_fd* (read-end of a pipe) so the main thread can
+    unblock select() and cause a clean exit.
+    """
+    try:
+        fd = sys.stdin.fileno()
+    except (OSError, AttributeError):
+        return
+    old_term = _set_input_raw(fd)
+    try:
+        while not stop_event.is_set():
+            try:
+                r, _, _ = select.select([fd, wake_fd], [], [], 1.0)
+            except (ValueError, OSError):
+                return
+            if wake_fd in r:
+                return
+            if fd in r:
+                ch = os.read(fd, 1).decode("utf-8", errors="replace")
+                if ch in ("s", "S"):
+                    capture.stop()
+                    return
+    finally:
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_term)
+        except (ValueError, OSError, termios.error):
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Live views
 # ---------------------------------------------------------------------------
@@ -588,7 +643,7 @@ def record_view(pod: Pod, args) -> int:
     BUFFER_LINES = 200
     lines: list[str] = [
         f"[{C_PINK}]Recording meeting {meeting.id}[/{C_PINK}]",
-        "  Ctrl+C to stop.",
+        "  \u2018s\u2019 to stop  \u00b7  Ctrl+C fallback",
     ]
     console = Console()
 
@@ -668,7 +723,7 @@ def record_view(pod: Pod, args) -> int:
         wave_str = "".join(_rms_to_bar_char(v) for v in waveform[-WAVEFORM_WIDTH:])
         wave_line = Text()
         wave_line.append(wave_str, style=C_PINK)
-        wave_line.append("  Ctrl+C to stop", style=C_DIM)
+        wave_line.append("  \u2018s\u2019 stop  \u00b7  Ctrl+C", style=C_DIM)
 
         # Bottom status bar
         overflow_ok = not status.get("overflow", False)
@@ -687,23 +742,49 @@ def record_view(pod: Pod, args) -> int:
             return RGroup(hdr, Rule(style=C_DIM), body_text, wave_line, Rule(style=C_DIM), done, status_bar)
         return RGroup(hdr, Rule(style=C_DIM), body_text, wave_line, Rule(style=C_DIM), status_bar)
 
-    rc = 0
-    with Live(_render(), console=console, refresh_per_second=8, screen=True) as live:
-        def _on_status_live(d: dict) -> None:
-            _on_status(d)
-            live.update(_render())
+    # Start background key listener (daemon thread) so 's' stops recording
+    r_fd, w_fd = os.pipe()
+    _stop_ev = threading.Event()
+    _listener = threading.Thread(
+        target=_listen_for_stop,
+        args=(capture, r_fd, _stop_ev),
+        daemon=True,
+    )
+    _listener.start()
 
+    rc = 0
+    try:
+        with Live(_render(), console=console, refresh_per_second=8, screen=True) as live:
+            def _on_status_live(d: dict) -> None:
+                _on_status(d)
+                live.update(_render())
+
+            try:
+                run_record_session(
+                    pod, meeting, capture, transcriber,
+                    glossary_prompt=glossary_prompt, wav_writer=wav_writer,
+                    on_segment=_on_segment,
+                    on_status=_on_status_live,
+                    on_done=_on_done,
+                )
+            except KeyboardInterrupt:
+                rc = 130
+            live.update(_render())
+    finally:
+        _stop_ev.set()
         try:
-            run_record_session(
-                pod, meeting, capture, transcriber,
-                glossary_prompt=glossary_prompt, wav_writer=wav_writer,
-                on_segment=_on_segment,
-                on_status=_on_status_live,
-                on_done=_on_done,
-            )
-        except KeyboardInterrupt:
-            rc = 130
-        live.update(_render())
+            os.write(w_fd, b"\x00")
+        except OSError:
+            pass
+        try:
+            os.close(w_fd)
+        except OSError:
+            pass
+        try:
+            os.close(r_fd)
+        except OSError:
+            pass
+        _listener.join(timeout=2.0)
     console.print(f"  [dim]\u2192 {meeting.transcript_path}[/dim]")
     return rc
 
