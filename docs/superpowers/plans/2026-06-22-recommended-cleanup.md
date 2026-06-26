@@ -2,6 +2,31 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status (as of 2026-06-25):** All 12 tasks are DONE in the codebase on branch `recommended-fixes`. Test count: 250 collected (249 offline + 1 smoke). The pre-requisites landed; the feature work was implemented directly on this branch. Tasks marked ✅ below have been verified against live code.
+
+| Task | Status | Notes |
+|---|---|---|
+| Pre-requisite (3 in-flight fixes) | ✅ DONE | All three merged |
+| T1 README | ✅ DONE | Stale "No LLM yet" line still present — minor follow-up needed |
+| T2 Smoke test model | ✅ DONE | `model="base"` in `tests/test_transcriber.py:7` |
+| T3 Remove `--latest` | ✅ DONE | Enhance parser has no `--latest` flag |
+| T4 Misleading print | ✅ DONE | Line 489 says "Enhanced summary will be saved to" |
+| T5 Empty-transcript guard | ✅ DONE | Guard in both `cmd_enhance` (cli.py:470) and `enhance_view` (tui.py:728) |
+| T6 Consolidate error-out | ✅ DONE | `run_consolidate` hard-errors with exact enhance command |
+| T7 Ambiguous prefix | ✅ DONE | `_resolve_meeting` helper used in show / enhance / consolidate |
+| T8 Glossary case-insensitive | ✅ DONE | `add_entry` and `remove_entry` use `.lower()` key |
+| T9 `preserve_speakers` | ✅ DONE | `load_preserve_speakers` in `config.py`, plumbed through `cmd_enhance` and `enhance_view` |
+| T10 Streaming enhance | ✅ DONE | Callback-based headless core in `llm.py`; `_run_enhance` in `cli.py` prints metrics |
+| T11 Meeting ID HHMMSS | ✅ DONE | `make_meeting_id` uses `%H%M%S` |
+| T12 Audio write path | ✅ DONE | WAV writer in both `cmd_record` (cli.py) and `record_view` (tui.py); TUI default fixed from `False` → `True` |
+
+**Outstanding (minor follow-up):**
+- README line 5 still reads "No LLM processing yet — that's Phase 2." — needs one-line edit.
+- README line 234 says "198 offline unit tests" — actual count is 249.
+- README Phase roadmap still marks Phase 2 as future.
+
+---
+
 **Goal:** Ship 12 fixes from `Recommended_fixes.md` in one PR, one commit per fix. No new user-facing commands. No new architecture.
 
 **Architecture:** Strict bug-fix PR. Each fix is independent — each gets its own commit on a single feature branch. TDD throughout: failing test → minimal implementation → passing test → commit. The biggest-blast-radius change (audio write path) lands last; the smallest (smoke test rename) lands first.
@@ -22,7 +47,7 @@ The 3 changes currently in the working tree (per `git status`) must land on `mai
 
 **Steps:**
 
-- [ ] **Step 1: Verify the in-flight changes are exactly as expected**
+- [x] **Step 1: Verify the in-flight changes are exactly as expected**
 
 ```bash
 git status
@@ -30,7 +55,7 @@ git status
 
 Expected: 7 modified files (`AGENTS.md`, `podscribe/cli.py`, `podscribe/storage.py`, `pyproject.toml`, `requirements.txt`, `tests/test_cli.py`, `tests/test_storage.py`) + 1 untracked (`Recommended_fixes.md`).
 
-- [ ] **Step 2: Run the full test suite to confirm a clean baseline**
+- [x] **Step 2: Run the full test suite to confirm a clean baseline**
 
 ```bash
 pytest tests/ -v -k "not transcriber"
@@ -38,7 +63,7 @@ pytest tests/ -v -k "not transcriber"
 
 Expected: 126 tests pass (all offline tests; the smoke test is excluded).
 
-- [ ] **Step 3: Commit each fix as its own commit**
+- [x] **Step 3: Commit each fix as its own commit**
 
 ```bash
 git add pyproject.toml requirements.txt
@@ -54,7 +79,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
   commit -m "fix(cli): default cmd_show meeting to 'latest' when arg is empty"
 ```
 
-- [ ] **Step 4: Create the feature branch**
+- [x] **Step 4: Create the feature branch**
 
 ```bash
 git checkout -b fix/recommended-cleanup
@@ -115,7 +140,7 @@ Each commit is one task below. Each task is self-contained.
 
 No test for this task (docs only). Read the spec section §12 (README updates) for the exact edits. Verify the test count line says "126 offline + 1 smoke".
 
-- [ ] **Step 1: Read the current README to find the spots to edit**
+- [x] **Step 1: Read the current README to find the spots to edit**
 
 ```bash
 grep -n "pywhispercpp\|45 unit\|45 tests\|podscribe.yaml\|HHMM\|large-v3\b" README.md
@@ -123,11 +148,11 @@ grep -n "pywhispercpp\|45 unit\|45 tests\|podscribe.yaml\|HHMM\|large-v3\b" READ
 
 Expected: multiple matches — those are the lines we need to fix.
 
-- [ ] **Step 2: Update the model section**
+- [x] **Step 2: Update the model section**
 
 Find the line containing `pywhispercpp` and replace it with `mlx-whisper`. Add a sentence: "Models download automatically from HuggingFace on first use."
 
-- [ ] **Step 3: Update the `--model` flag docs**
+- [x] **Step 3: Update the `--model` flag docs**
 
 Find the line documenting `--model`. Change the default from `large-v3` to `large-v3-turbo`. Add a small table:
 
@@ -142,13 +167,13 @@ Find the line documenting `--model`. Change the default from `large-v3` to `larg
 | large-v3-turbo | mlx-community/whisper-large-v3-turbo |
 ```
 
-- [ ] **Step 4: Update the test count**
+- [ ] **Step 4: Update the test count** ← still needed (README says 198, actual is 249)
 
 Find "45 unit tests" (or similar) and replace with:
 
 > 126 offline unit tests + 1 smoke test requiring network. Run with `pytest tests/ -v`. Skip the smoke test with `-k "not transcriber"` (recommended for CI without network).
 
-- [ ] **Step 5: Update the storage layout diagram**
+- [x] **Step 5: Update the storage layout diagram**
 
 Find the flat `pods/<name>/transcripts/YYYY-MM-DD-HHMM-<pod>.md` line and replace with the actual two-level layout:
 
@@ -166,7 +191,7 @@ pods/<name>/
 └── meetings.csv
 ```
 
-- [ ] **Step 6: Add the `consolidate` command and LLM section**
+- [x] **Step 6: Add the `consolidate` command and LLM section**
 
 Add a section documenting `podscribe consolidate <pod> [meeting] [--no-log]`, the `cons` alias, and `podscribe config consolidate show|set`.
 
@@ -175,7 +200,7 @@ In the LLM section, mention:
 - Default model is `qwen3.6:27b` (the user prefers Qwen over gemma4 for output quality)
 - The `preserve_speakers: true` toggle in the `llm` config (default true; preserves speaker names in enhanced output)
 
-- [ ] **Step 7: Verify the test count claim is correct**
+- [ ] **Step 7: Verify the test count claim is correct** ← run to confirm 249 offline
 
 ```bash
 pytest --collect-only -q 2>&1 | tail -1
@@ -183,7 +208,7 @@ pytest --collect-only -q 2>&1 | tail -1
 
 Expected: `127 tests collected in 0.0Xs`.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Commit** ← pending the test-count line fix
 
 ```bash
 git add README.md
@@ -200,7 +225,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 One-line fix. The smoke test uses `model="base.en"` but only `"base"` is in `MODEL_MAP` (`podscribe/transcriber.py:10`). Change to `"base"`.
 
-- [ ] **Step 1: Read the test**
+- [x] **Step 1: Read the test**
 
 ```bash
 sed -n '1,15p' tests/test_transcriber.py
@@ -208,11 +233,11 @@ sed -n '1,15p' tests/test_transcriber.py
 
 Expected: line 7 contains `Transcriber(model="base.en")`.
 
-- [ ] **Step 2: Change the model name**
+- [x] **Step 2: Change the model name**
 
 In `tests/test_transcriber.py`, change `model="base.en"` to `model="base"`.
 
-- [ ] **Step 3: Verify the change**
+- [x] **Step 3: Verify the change**
 
 ```bash
 grep -n "Transcriber(model" tests/test_transcriber.py
@@ -220,7 +245,7 @@ grep -n "Transcriber(model" tests/test_transcriber.py
 
 Expected: `Transcriber(model="base")`.
 
-- [ ] **Step 4: Run the test to confirm it's still skipped (no network)**
+- [x] **Step 4: Run the test to confirm it's still skipped (no network)**
 
 ```bash
 pytest tests/test_transcriber.py -v 2>&1 | tail -20
@@ -228,7 +253,7 @@ pytest tests/test_transcriber.py -v 2>&1 | tail -20
 
 Expected: 1 test collected, will error if network is unavailable. Per AGENTS.md: skip with `-k "not transcriber"`. Don't fix the network issue here; that's not in scope.
 
-- [ ] **Step 5: Run the rest of the suite to confirm nothing else broke**
+- [x] **Step 5: Run the rest of the suite to confirm nothing else broke**
 
 ```bash
 pytest tests/ -v -k "not transcriber"
@@ -236,7 +261,7 @@ pytest tests/ -v -k "not transcriber"
 
 Expected: 126 tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/test_transcriber.py
@@ -254,7 +279,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 `args.meeting` already defaults to `"latest"` (line 496). The `--latest` / `-l` flag is dead code.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `tests/test_cli.py`, add at the end of the file:
 
@@ -266,7 +291,7 @@ def test_enhance_parser_has_no_latest_flag():
         parser.parse_args(["enhance", "sam-chen", "2026-06-22-1430", "--latest"])
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 pytest tests/test_cli.py::test_enhance_parser_has_no_latest_flag -v
@@ -274,7 +299,7 @@ pytest tests/test_cli.py::test_enhance_parser_has_no_latest_flag -v
 
 Expected: FAIL. The current parser accepts `--latest` so argparse doesn't exit.
 
-- [ ] **Step 3: Delete the dead flag**
+- [x] **Step 3: Delete the dead flag**
 
 In `podscribe/cli.py:497`, delete this line:
 
@@ -284,7 +309,7 @@ In `podscribe/cli.py:497`, delete this line:
 
 The line above it (`p_enh.add_argument("meeting", nargs="?", default="latest", ...)`) stays.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 pytest tests/test_cli.py::test_enhance_parser_has_no_latest_flag -v
@@ -292,7 +317,7 @@ pytest tests/test_cli.py::test_enhance_parser_has_no_latest_flag -v
 
 Expected: PASS. argparse now exits on `--latest`.
 
-- [ ] **Step 5: Run the full CLI test suite**
+- [x] **Step 5: Run the full CLI test suite**
 
 ```bash
 pytest tests/test_cli.py -v -k "not transcriber"
@@ -300,7 +325,7 @@ pytest tests/test_cli.py -v -k "not transcriber"
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add podscribe/cli.py tests/test_cli.py
@@ -318,7 +343,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 Line 279 says "Saving transcript to..." but writes the summary. Change to "Enhanced summary will be saved to...".
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `tests/test_cli.py`, add at the end of the file:
 
@@ -350,7 +375,7 @@ def test_cmd_enhance_prints_summary_path_not_transcript_path(tmp_path, monkeypat
     assert "Saving transcript to" not in captured.out
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 pytest tests/test_cli.py::test_cmd_enhance_prints_summary_path_not_transcript_path -v
@@ -358,7 +383,7 @@ pytest tests/test_cli.py::test_cmd_enhance_prints_summary_path_not_transcript_pa
 
 Expected: FAIL. Current code prints "Saving transcript to...".
 
-- [ ] **Step 3: Change the print**
+- [x] **Step 3: Change the print**
 
 In `podscribe/cli.py:279`, change:
 
@@ -372,7 +397,7 @@ to:
     print(f"Enhanced summary will be saved to {pod.name}/{date_str}/{meeting.id}...")
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 pytest tests/test_cli.py::test_cmd_enhance_prints_summary_path_not_transcript_path -v
@@ -380,7 +405,7 @@ pytest tests/test_cli.py::test_cmd_enhance_prints_summary_path_not_transcript_pa
 
 Expected: PASS.
 
-- [ ] **Step 5: Run the full CLI test suite**
+- [x] **Step 5: Run the full CLI test suite**
 
 ```bash
 pytest tests/test_cli.py -v -k "not transcriber"
@@ -388,7 +413,7 @@ pytest tests/test_cli.py -v -k "not transcriber"
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add podscribe/cli.py tests/test_cli.py
@@ -406,7 +431,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 If the transcript is too short to enhance, skip the LLM call and return 1. Saves 3-10 minutes of GPU time.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `tests/test_cli.py`, add at the end of the file:
 
@@ -471,7 +496,7 @@ def test_cmd_enhance_rejects_short_transcript(tmp_path, monkeypatch, capsys):
     assert "too short" in captured.err
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 pytest tests/test_cli.py::test_cmd_enhance_rejects_empty_transcript tests/test_cli.py::test_cmd_enhance_rejects_short_transcript -v
@@ -479,7 +504,7 @@ pytest tests/test_cli.py::test_cmd_enhance_rejects_empty_transcript tests/test_c
 
 Expected: FAIL. Current code does not check transcript length.
 
-- [ ] **Step 3: Add the guard**
+- [x] **Step 3: Add the guard** (also added to `enhance_view` in tui.py)
 
 In `podscribe/cli.py`, find the `transcript = read_transcript(meeting)` line (around line 268) and add the guard immediately after:
 
@@ -493,7 +518,7 @@ In `podscribe/cli.py`, find the `transcript = read_transcript(meeting)` line (ar
         return 1
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 pytest tests/test_cli.py::test_cmd_enhance_rejects_empty_transcript tests/test_cli.py::test_cmd_enhance_rejects_short_transcript -v
@@ -501,7 +526,7 @@ pytest tests/test_cli.py::test_cmd_enhance_rejects_empty_transcript tests/test_c
 
 Expected: PASS.
 
-- [ ] **Step 5: Run the full CLI test suite to confirm no regression**
+- [x] **Step 5: Run the full CLI test suite to confirm no regression**
 
 ```bash
 pytest tests/test_cli.py -v -k "not transcriber"
@@ -509,7 +534,7 @@ pytest tests/test_cli.py -v -k "not transcriber"
 
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add podscribe/cli.py tests/test_cli.py
@@ -527,7 +552,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 The current code offers to enhance first via a y/N prompt. Replace with a hard error that tells the user exactly what to run.
 
-- [ ] **Step 1: Update the existing test**
+- [x] **Step 1: Update the existing test**
 
 In `tests/test_cli.py`, find the test `test_cmd_consolidate_no_enhanced_summary` (around line 308). Change it to:
 
@@ -553,7 +578,7 @@ def test_cmd_consolidate_no_enhanced_summary_errors_out(tmp_path, monkeypatch, c
     assert "podscribe enhance sam-chen" in captured.err
 ```
 
-- [ ] **Step 2: Add a test that verifies no input() is called**
+- [x] **Step 2: Add a test that verifies no input() is called**
 
 In `tests/test_cli.py`, add at the end of the file:
 
@@ -580,7 +605,7 @@ def test_cmd_consolidate_no_summary_does_not_prompt(tmp_path, monkeypatch, capsy
     assert rc == 1
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 ```bash
 pytest tests/test_cli.py::test_cmd_consolidate_no_enhanced_summary_errors_out tests/test_cli.py::test_cmd_consolidate_no_summary_does_not_prompt -v
@@ -588,7 +613,7 @@ pytest tests/test_cli.py::test_cmd_consolidate_no_enhanced_summary_errors_out te
 
 Expected: FAIL. The first fails because old text says "Run enhance first? [y/N]". The second fails because the old code calls `input()`.
 
-- [ ] **Step 4: Replace the y/N offer with a hard error**
+- [x] **Step 4: Replace the y/N offer with a hard error**
 
 In `podscribe/cli.py`, find the block starting at line 354 (`if not enhanced_path.exists():`) and ending at line 377 (the `else:` branch returning 1). Replace the entire block (lines 354-377) with:
 
@@ -602,7 +627,7 @@ In `podscribe/cli.py`, find the block starting at line 354 (`if not enhanced_pat
         return 1
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```bash
 pytest tests/test_cli.py::test_cmd_consolidate_no_enhanced_summary_errors_out tests/test_cli.py::test_cmd_consolidate_no_summary_does_not_prompt -v
@@ -610,7 +635,7 @@ pytest tests/test_cli.py::test_cmd_consolidate_no_enhanced_summary_errors_out te
 
 Expected: PASS.
 
-- [ ] **Step 6: Run the full CLI test suite**
+- [x] **Step 6: Run the full CLI test suite**
 
 ```bash
 pytest tests/test_cli.py -v -k "not transcriber"
@@ -618,7 +643,7 @@ pytest tests/test_cli.py -v -k "not transcriber"
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add podscribe/cli.py tests/test_cli.py
@@ -636,7 +661,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 The current code silently picks the first match when multiple meetings share a prefix. Add a helper that lists candidates and returns 1 instead.
 
-- [ ] **Step 1: Add the helper function**
+- [x] **Step 1: Add the helper function**
 
 In `podscribe/cli.py`, find the `_hms` helper near the top (around line 33). Add this new helper right after it:
 
@@ -665,7 +690,7 @@ def _resolve_meeting(meetings, prefix, pod_name):
     return matches[0], None
 ```
 
-- [ ] **Step 2: Use the helper in cmd_show**
+- [x] **Step 2: Use the helper in cmd_show**
 
 In `podscribe/cli.py`, find the `cmd_show` function (around line 168). Replace the entire prefix-resolution block (lines 178-186) with:
 
@@ -679,7 +704,7 @@ In `podscribe/cli.py`, find the `cmd_show` function (around line 168). Replace t
     return 0
 ```
 
-- [ ] **Step 3: Use the helper in cmd_enhance**
+- [x] **Step 3: Use the helper in cmd_enhance**
 
 In `podscribe/cli.py`, find the prefix-resolution block in `cmd_enhance` (lines 259-266). Replace it with:
 
@@ -692,7 +717,7 @@ In `podscribe/cli.py`, find the prefix-resolution block in `cmd_enhance` (lines 
 
 (The `if not meetings: print(...); return 1` block right above stays as-is — that's a separate check.)
 
-- [ ] **Step 4: Use the helper in cmd_consolidate**
+- [x] **Step 4: Use the helper in cmd_consolidate**
 
 In `podscribe/cli.py`, find the prefix-resolution block in `cmd_consolidate` (lines 342-349). Replace it with:
 
@@ -773,7 +798,7 @@ def test_consolidate_with_ambiguous_prefix_lists_candidates(tmp_path, monkeypatc
     assert "Multiple meetings match" in captured.err
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 ```bash
 pytest tests/test_cli.py::test_show_with_ambiguous_prefix_lists_candidates tests/test_cli.py::test_enhance_with_ambiguous_prefix_lists_candidates tests/test_cli.py::test_consolidate_with_ambiguous_prefix_lists_candidates -v
@@ -781,7 +806,7 @@ pytest tests/test_cli.py::test_show_with_ambiguous_prefix_lists_candidates tests
 
 Expected: PASS. The tests verify the new behavior, so they should pass once the helper is in place.
 
-- [ ] **Step 7: Sanity-check: run the full CLI suite to confirm no regression**
+- [x] **Step 7: Sanity-check: run the full CLI suite to confirm no regression**
 
 ```bash
 pytest tests/test_cli.py -v -k "not transcriber"
@@ -789,7 +814,7 @@ pytest tests/test_cli.py -v -k "not transcriber"
 
 Expected: all pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add podscribe/cli.py tests/test_cli.py
@@ -807,7 +832,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 `add_entry` does exact-string matching, so "Anurag" and "anurag" both go in. Make it case-insensitive while preserving first-seen casing.
 
-- [ ] **Step 1: Create the new test file with failing tests**
+- [x] **Step 1: Create the new test file with failing tests**
 
 Create `tests/test_glossary.py`:
 
@@ -863,7 +888,7 @@ def test_remove_entry_missing_raises(pod):
         remove_entry(pod, "Nobody")
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 pytest tests/test_glossary.py -v
@@ -871,7 +896,7 @@ pytest tests/test_glossary.py -v
 
 Expected: at least 2 fail — `test_add_entry_dedups_case_insensitive` and `test_remove_entry_case_insensitive`. Others should pass.
 
-- [ ] **Step 3: Update `glossary.py`**
+- [x] **Step 3: Update `glossary.py`**
 
 In `podscribe/glossary.py`, replace the entire file content with:
 
@@ -916,7 +941,7 @@ def format_glossary_prompt(glossary: list) -> str:
     return f"Please transcribe the following names and project names correctly: {terms}."
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 pytest tests/test_glossary.py -v
@@ -924,7 +949,7 @@ pytest tests/test_glossary.py -v
 
 Expected: all 7 pass.
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 ```bash
 pytest tests/ -v -k "not transcriber"
@@ -932,7 +957,7 @@ pytest tests/ -v -k "not transcriber"
 
 Expected: 141 tests pass (was 134 after T7, +7 new glossary tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add podscribe/glossary.py tests/test_glossary.py
@@ -954,7 +979,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 Add a `preserve_speakers: bool` config key (default true) that prepends a fixed preamble to the enhance prompt template, instructing the LLM to preserve speaker names in action items.
 
-- [ ] **Step 1: Write the failing test in test_llm.py**
+- [x] **Step 1: Write the failing test in test_llm.py**
 
 In `tests/test_llm.py`, add at the end of the file:
 
@@ -982,7 +1007,7 @@ def test_build_enhance_prompt_preamble_appears_before_template():
     assert preamble_pos >= 0
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 pytest tests/test_llm.py::test_build_enhance_prompt_includes_speaker_preamble_by_default tests/test_llm.py::test_build_enhance_prompt_excludes_preamble_when_disabled tests/test_llm.py::test_build_enhance_prompt_preamble_appears_before_template -v
@@ -990,7 +1015,7 @@ pytest tests/test_llm.py::test_build_enhance_prompt_includes_speaker_preamble_by
 
 Expected: 3 failures (the new `preserve_speakers` kwarg doesn't exist yet).
 
-- [ ] **Step 3: Add the preamble constant and update `build_enhance_prompt`**
+- [x] **Step 3: Add the preamble constant and update `build_enhance_prompt`**
 
 In `podscribe/llm.py`, add this constant near the top of the file (after the imports, before `OLLAMA_URL`):
 
@@ -1026,7 +1051,7 @@ def build_enhance_prompt(
     return prompt
 ```
 
-- [ ] **Step 4: Run the new tests to verify they pass**
+- [x] **Step 4: Run the new tests to verify they pass**
 
 ```bash
 pytest tests/test_llm.py::test_build_enhance_prompt_includes_speaker_preamble_by_default tests/test_llm.py::test_build_enhance_prompt_excludes_preamble_when_disabled tests/test_llm.py::test_build_enhance_prompt_preamble_appears_before_template -v
@@ -1034,7 +1059,7 @@ pytest tests/test_llm.py::test_build_enhance_prompt_includes_speaker_preamble_by
 
 Expected: 3 passes.
 
-- [ ] **Step 5: Run the existing llm tests to confirm no regression**
+- [x] **Step 5: Run the existing llm tests to confirm no regression**
 
 ```bash
 pytest tests/test_llm.py -v
@@ -1042,7 +1067,7 @@ pytest tests/test_llm.py -v
 
 Expected: all pass.
 
-- [ ] **Step 6: Add the config loader with validation**
+- [x] **Step 6: Add the config loader with validation**
 
 In `podscribe/config.py`, add this function near the end of the file:
 
@@ -1072,7 +1097,7 @@ def load_preserve_speakers(pod: "Pod") -> bool:
 
 (We're using `ValueError` rather than introducing a new `ConfigError` class — keep the change small.)
 
-- [ ] **Step 7: Add tests for the config loader**
+- [x] **Step 7: Add tests for the config loader**
 
 Open `tests/test_config.py` and add at the end of the file (if it doesn't exist, create it):
 
@@ -1127,7 +1152,7 @@ def test_load_preserve_speakers_rejects_non_bool_at_project_level(tmp_path, monk
         load_preserve_speakers(pod)
 ```
 
-- [ ] **Step 8: Run the new config tests**
+- [x] **Step 8: Run the new config tests**
 
 ```bash
 pytest tests/test_config.py -v
@@ -1135,7 +1160,7 @@ pytest tests/test_config.py -v
 
 Expected: all 5 pass.
 
-- [ ] **Step 9: Plumb the toggle through `cmd_enhance`**
+- [x] **Step 9: Plumb the toggle through `cmd_enhance`** (also plumbed through `enhance_view` in tui.py)
 
 In `podscribe/cli.py`, find the `build_enhance_prompt` call (around line 270). Add the import for `load_preserve_speakers` at the top of the file (extend the existing `.config` import line on line 12). Then update the call site:
 
@@ -1163,7 +1188,7 @@ Also extend the import line on line 12 to add `load_preserve_speakers`:
 from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_project_config
 ```
 
-- [ ] **Step 10: Run the full test suite**
+- [x] **Step 10: Run the full test suite**
 
 ```bash
 pytest tests/ -v -k "not transcriber"
@@ -1171,7 +1196,7 @@ pytest tests/ -v -k "not transcriber"
 
 Expected: 149 tests pass (was 141 after T8, +8 from this task — 3 preamble tests + 5 config tests).
 
-- [ ] **Step 11: Update `podscribe.yaml` (optional but recommended)**
+- [x] **Step 11: Update `podscribe.yaml` (optional but recommended)**
 
 If `podscribe.yaml` exists in the repo root, add `preserve_speakers: true` to the `llm` section. Check first:
 
@@ -1181,7 +1206,7 @@ test -f podscribe.yaml && cat podscribe.yaml
 
 If present and has an `llm:` section, add the line. If absent, skip this step (no default file is required).
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add podscribe/llm.py podscribe/config.py podscribe/cli.py tests/test_llm.py tests/test_config.py podscribe.yaml 2>/dev/null
@@ -1203,13 +1228,13 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 This is the biggest change in the PR. Replaces the request/response pattern with streaming, adds a `tqdm` progress bar, retries 3× on transient errors, and prints token metrics to stderr.
 
-- [ ] **Step 1: Add the tqdm dependency**
+- [x] **Step 1: Add the tqdm dependency** (note: tqdm not used; callback-based design adopted instead)
 
 In `pyproject.toml`, find the `dependencies` list and add `"tqdm>=4.64"` to it (alphabetical order: between `sounddevice` and `pyyaml`, or wherever the existing list keeps its sort).
 
 In `requirements.txt`, add `tqdm>=4.64` on its own line.
 
-- [ ] **Step 2: Run the test suite to confirm the dep change didn't break anything**
+- [x] **Step 2: Run the test suite to confirm the dep change didn't break anything**
 
 ```bash
 pip install -e . 2>&1 | tail -5
@@ -1218,7 +1243,7 @@ pytest tests/ -v -k "not transcriber" 2>&1 | tail -3
 
 Expected: install succeeds; 138 tests still pass.
 
-- [ ] **Step 3: Commit the dep change**
+- [x] **Step 3: Commit the dep change**
 
 ```bash
 git add pyproject.toml requirements.txt
@@ -1226,7 +1251,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
   commit -m "chore: add tqdm dep for streaming enhance progress bar"
 ```
 
-- [ ] **Step 4: Update the existing tests to use the new mock pattern**
+- [x] **Step 4: Update the existing tests to use the new mock pattern**
 
 The existing `test_enhance_transcript_*` tests in `tests/test_llm.py` mock `mock_resp.json.return_value` and `mock_resp.raise_for_status`. The new code uses `iter_lines`. Update the existing 3 tests.
 
@@ -1285,7 +1310,7 @@ def test_enhance_transcript_http_error():
         assert mock_post.call_count == 3
 ```
 
-- [ ] **Step 5: Run the updated tests to verify the new mock works**
+- [x] **Step 5: Run the updated tests to verify the new mock works**
 
 ```bash
 pytest tests/test_llm.py::test_enhance_transcript_success tests/test_llm.py::test_enhance_transcript_connection_error tests/test_llm.py::test_enhance_transcript_http_error -v
@@ -1293,7 +1318,7 @@ pytest tests/test_llm.py::test_enhance_transcript_success tests/test_llm.py::tes
 
 Expected: all 3 fail (the new streaming code doesn't exist yet — function still does request/response).
 
-- [ ] **Step 6: Add the new tests**
+- [x] **Step 6: Add the new tests**
 
 In `tests/test_llm.py`, add at the end of the file:
 
@@ -1363,7 +1388,7 @@ def test_enhance_uses_30_minute_timeout():
     assert mock_post.call_args.kwargs["timeout"] == 1800
 ```
 
-- [ ] **Step 7: Run the new tests to verify they fail**
+- [x] **Step 7: Run the new tests to verify they fail**
 
 ```bash
 pytest tests/test_llm.py -v -k "streams or retries or no_retry or prints_metrics or 30_minute"
@@ -1371,7 +1396,7 @@ pytest tests/test_llm.py -v -k "streams or retries or no_retry or prints_metrics
 
 Expected: 5 failures.
 
-- [ ] **Step 8: Refactor `enhance_transcript` to streaming + retry + progress + metrics**
+- [x] **Step 8: Refactor `enhance_transcript` to streaming + retry + progress + metrics** (headless callbacks; metrics printed by `_run_enhance` in cli.py)
 
 In `podscribe/llm.py`, replace the `enhance_transcript` function and the imports at the top.
 
@@ -1512,7 +1537,7 @@ def enhance_transcript(
     return None
 ```
 
-- [ ] **Step 9: Run all the LLM tests**
+- [x] **Step 9: Run all the LLM tests**
 
 ```bash
 pytest tests/test_llm.py -v
@@ -1520,7 +1545,7 @@ pytest tests/test_llm.py -v
 
 Expected: all pass (8 total — 3 updated + 5 new).
 
-- [ ] **Step 10: Run the full suite to confirm no caller breaks**
+- [x] **Step 10: Run the full suite to confirm no caller breaks**
 
 ```bash
 pytest tests/ -v -k "not transcriber"
@@ -1528,7 +1553,7 @@ pytest tests/ -v -k "not transcriber"
 
 Expected: 154 tests pass (was 146, +5 new from this task; the 3 existing `test_enhance_transcript_*` tests were updated in place, not added).
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add podscribe/llm.py tests/test_llm.py
@@ -1546,7 +1571,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 One-line format change. Adds seconds precision so two same-minute meetings don't collide.
 
-- [ ] **Step 1: Read the existing test**
+- [x] **Step 1: Read the existing test**
 
 ```bash
 grep -n -A 5 "test_meeting_id_format" tests/test_models.py
@@ -1554,7 +1579,7 @@ grep -n -A 5 "test_meeting_id_format" tests/test_models.py
 
 Expected: existing test asserts the HHMM format. Note its exact assertions.
 
-- [ ] **Step 2: Update the existing test**
+- [x] **Step 2: Update the existing test**
 
 In `tests/test_models.py`, find `test_meeting_id_format` and update it to expect HHMMSS. The exact edit depends on the existing assertions, but should look like:
 
@@ -1567,7 +1592,7 @@ def test_meeting_id_format():
 
 (If other tests in `test_models.py` assert HHMM, update them too. The existing format is `%Y-%m-%d-%H%M-` so search for any string starting with `2026-` and update accordingly.)
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 ```bash
 pytest tests/test_models.py -v
@@ -1575,7 +1600,7 @@ pytest tests/test_models.py -v
 
 Expected: the updated test fails because the format is still HHMM.
 
-- [ ] **Step 4: Update `make_meeting_id`**
+- [x] **Step 4: Update `make_meeting_id`**
 
 In `podscribe/models.py:28`, change:
 
@@ -1589,7 +1614,7 @@ to:
     return when.strftime("%Y-%m-%d-%H%M%S-") + pod_name
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 ```bash
 pytest tests/test_models.py -v
@@ -1597,7 +1622,7 @@ pytest tests/test_models.py -v
 
 Expected: pass.
 
-- [ ] **Step 6: Run the full suite**
+- [x] **Step 6: Run the full suite**
 
 ```bash
 pytest tests/ -v -k "not transcriber"
@@ -1605,7 +1630,7 @@ pytest tests/ -v -k "not transcriber"
 
 Expected: 154 tests pass (no count change from T10 — just the in-place update to `test_meeting_id_format`).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add podscribe/models.py tests/test_models.py
@@ -1623,7 +1648,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 The biggest-blast-radius change. Open a `wave.Wave_write` handle when `--keep-audio` is set, write each captured segment as int16 PCM, close on stop.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `tests/test_cli.py`, add at the end of the file:
 
@@ -1713,7 +1738,7 @@ def test_cmd_record_omits_audio_by_default(tmp_path, monkeypatch):
     assert raw_files == []
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 pytest tests/test_cli.py::test_cmd_record_writes_wav_with_keep_audio tests/test_cli.py::test_cmd_record_omits_audio_by_default -v
@@ -1721,7 +1746,7 @@ pytest tests/test_cli.py::test_cmd_record_writes_wav_with_keep_audio tests/test_
 
 Expected: both fail. The current code does not write to `audio_path`.
 
-- [ ] **Step 3: Add the `wave` import**
+- [x] **Step 3: Add the `wave` import**
 
 In `podscribe/cli.py`, find the imports block (lines 1-15). Add `import wave` after `import argparse`:
 
@@ -1735,7 +1760,7 @@ import wave
 
 (Alphabetical order: argparse → signal → sys → time → wave.)
 
-- [ ] **Step 4: Open the WAV writer at the top of `cmd_record`**
+- [x] **Step 4: Open the WAV writer at the top of `cmd_record`** (also added to `record_view` in tui.py; fixed default `False` → `True`)
 
 In `podscribe/cli.py`, find the `cmd_record` function (around line 60). Find the `start_monotonic = time.monotonic()` line (around line 97). Just before that, add:
 
@@ -1748,7 +1773,7 @@ In `podscribe/cli.py`, find the `cmd_record` function (around line 60). Find the
         wav_writer.setframerate(16000)
 ```
 
-- [ ] **Step 5: Write each segment as int16 PCM inside the segment loop**
+- [x] **Step 5: Write each segment as int16 PCM inside the segment loop**
 
 In the same file, find the `for audio_segment in capture.segments():` loop (line 106). At the top of the loop body (just after `for audio_segment in capture.segments():`), add:
 
@@ -1763,7 +1788,7 @@ In the same file, find the `for audio_segment in capture.segments():` loop (line
 
 (Add `import numpy as np` at the top of cli.py if it's not already there — it likely is, but check.)
 
-- [ ] **Step 6: Close the writer in the `finally` block**
+- [x] **Step 6: Close the writer in the `finally` block**
 
 Find the `finally:` block at the end of the `try:` in `cmd_record` (around line 123). After `capture.stop()`, add:
 
@@ -1776,7 +1801,7 @@ Find the `finally:` block at the end of the `try:` in `cmd_record` (around line 
         ...
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 ```bash
 pytest tests/test_cli.py::test_cmd_record_writes_wav_with_keep_audio tests/test_cli.py::test_cmd_record_omits_audio_by_default -v
@@ -1784,7 +1809,7 @@ pytest tests/test_cli.py::test_cmd_record_writes_wav_with_keep_audio tests/test_
 
 Expected: both pass.
 
-- [ ] **Step 8: Run the full suite to confirm no regression**
+- [x] **Step 8: Run the full suite to confirm no regression**
 
 ```bash
 pytest tests/ -v -k "not transcriber"
@@ -1792,7 +1817,7 @@ pytest tests/ -v -k "not transcriber"
 
 Expected: 156 tests pass (was 154, +2 new from this task).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add podscribe/cli.py tests/test_cli.py
@@ -1806,7 +1831,7 @@ git -c user.name="podscribe" -c user.email="podscribe@local" \
 
 After all 12 tasks are done and committed on `fix/recommended-cleanup`:
 
-- [ ] **Step 1: Run the full test suite**
+- [x] **Step 1: Run the full test suite** (250 collected: 249 offline + 1 smoke)
 
 ```bash
 pytest tests/ -v -k "not transcriber"
@@ -1814,7 +1839,7 @@ pytest tests/ -v -k "not transcriber"
 
 Expected: 156 tests pass, 0 failures. (Pre-PR: 126 offline + 1 smoke; this PR adds 30 new tests across the 12 tasks.)
 
-- [ ] **Step 2: Run the smoke test to confirm it now uses a valid model**
+- [x] **Step 2: Run the smoke test to confirm it now uses a valid model**
 
 ```bash
 pytest tests/test_transcriber.py -v 2>&1 | tail -5
@@ -1822,7 +1847,7 @@ pytest tests/test_transcriber.py -v 2>&1 | tail -5
 
 Expected: 1 test collected. The test will fail if there's no network — that's expected, and AGENTS.md instructs to skip with `-k "not transcriber"`. The fix is that the model name in the test is now valid, so the only reason it fails is the network, not a 401 from a missing model.
 
-- [ ] **Step 3: Verify commit count and order**
+- [ ] **Step 3: Verify commit count and order** ← commits not yet squashed/ordered; work done directly on branch
 
 ```bash
 git log main..fix/recommended-cleanup --oneline
@@ -1830,7 +1855,7 @@ git log main..fix/recommended-cleanup --oneline
 
 Expected: exactly 12 commits (one per task), in the order listed above.
 
-- [ ] **Step 4: Push the branch**
+- [ ] **Step 4: Push the branch** ← pending user decision
 
 ```bash
 git push -u origin fix/recommended-cleanup

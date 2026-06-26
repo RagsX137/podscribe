@@ -605,7 +605,7 @@ def record_view(pod: Pod, args) -> int:
         device=getattr(args, "device", None),
         on_level=_on_level,
     )
-    keep_audio = bool(getattr(args, "keep_audio", False))
+    keep_audio = bool(getattr(args, "keep_audio", True))
     wav_writer = None
     if keep_audio:
         import wave
@@ -934,7 +934,7 @@ def launch() -> int:
                 live.stop()
                 args = Namespace(
                     type=None, model="large-v3-turbo",
-                    vad_aggressiveness=2, device=None, keep_audio=False,
+                    vad_aggressiveness=2, device=None, keep_audio=True,
                 )
                 state.mode = "INSERT"
                 record_view(pod, args)
