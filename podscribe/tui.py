@@ -13,10 +13,12 @@ import sys
 import termios
 import threading
 import tty
-from rich.console import Console
+from rich.columns import Columns
+from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
+from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
@@ -564,12 +566,18 @@ def _pause(console: Console) -> None:
 
 def _set_input_raw(fd: int) -> list:
     """Put only input processing in raw mode; preserve output flags.
+
+    Clears ICANON (line buffering) and ECHO so each keypress is delivered
+    immediately without echoing.  Intentionally preserves ISIG so that
+    Ctrl+C still generates SIGINT — the run_record_session SIGINT handler
+    depends on this.
+
     Returns the previous termios attributes for restore.
     """
     old = termios.tcgetattr(fd)
     mode = termios.tcgetattr(fd)
     mode[0] &= ~(termios.BRKINT | termios.ICRNL | termios.INPCK | termios.ISTRIP | termios.IXON)
-    mode[3] &= ~(termios.ECHO | termios.ICANON | termios.IEXTEN | termios.ISIG)
+    mode[3] &= ~(termios.ECHO | termios.ICANON | termios.IEXTEN)
     mode[6][termios.VMIN] = 1
     mode[6][termios.VTIME] = 0
     termios.tcsetattr(fd, termios.TCSADRAIN, mode)
@@ -582,7 +590,9 @@ def _listen_for_stop(
     stop_event: threading.Event,
 ) -> None:
     """Thread target: read stdin for 's' to stop recording.
-    Sets stdin to input-raw mode for the lifetime of the thread.
+    Sets stdin to cbreak mode (no line buffering, no echo) for the lifetime
+    of the thread.  ISIG is intentionally preserved so Ctrl+C still delivers
+    SIGINT to run_record_session's signal handler.
     Watches *wake_fd* (read-end of a pipe) so the main thread can
     unblock select() and cause a clean exit.
     """
@@ -590,8 +600,14 @@ def _listen_for_stop(
         fd = sys.stdin.fileno()
     except (OSError, AttributeError):
         return
-    old_term = _set_input_raw(fd)
+    old_term = None
     try:
+        try:
+            old_term = _set_input_raw(fd)
+        except termios.error:
+            # stdin is not a real tty (redirected, piped) — fall back to
+            # raw select only; terminal is already in whatever mode it is.
+            pass
         while not stop_event.is_set():
             try:
                 r, _, _ = select.select([fd, wake_fd], [], [], 1.0)
@@ -605,10 +621,11 @@ def _listen_for_stop(
                     capture.stop()
                     return
     finally:
-        try:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_term)
-        except (ValueError, OSError, termios.error):
-            pass
+        if old_term is not None:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_term)
+            except (ValueError, OSError, termios.error):
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -1112,3 +1129,246 @@ def _dispatch_palette_candidate(console: Console, candidate: "FuzzyCandidate", p
         if prompt.strip():
             _dispatch_cli(["config", "consolidate", "set", prompt.strip()])
             _pause(console)
+
+
+def god_view(model: Optional[str] = None) -> int:
+    """Two-pane God mode TUI: left = agent chat, right = tool ref / live transcript."""
+    from .agent import GodSession, _format_tool_result
+    from . import agent_tools
+    import json
+
+    console = Console()
+
+    try:
+        session = GodSession(model=model)
+    except Exception as e:
+        console.print(f"[red]Failed to initialize God session: {e}[/red]")
+        return 1
+
+    # Quick Ollama check
+    if not probe_ollama():
+        console.print(Panel(
+            "Ollama not reachable. Start with: ollama serve",
+            title="[red]Error[/red]", border_style="red",
+        ))
+        return 1
+
+    input_buffer: list = []
+    messages: list = []  # rendered message lines for left pane
+    recording_active = False
+    right_content: list = _idle_reference()
+
+    def _idle_reference() -> list:
+        return [
+            "[bold color(183)]Slash Commands[/bold color(183)]",
+            "[color(244)]/record <pod> [--type][/color(244)]",
+            "[color(244)]/stop[/color(244)]",
+            "[color(244)]/enhance <pod> [meeting][/color(244)]",
+            "[color(244)]/consolidate <pod> [meeting][/color(244)]",
+            "[color(244)]/list [pod][/color(244)]",
+            "[color(244)]/show <pod> <meeting>[/color(244)]",
+            "[color(244)]/search <query>[/color(244)]",
+            "[color(244)]/init <name>[/color(244)]",
+            "[color(244)]/export[/color(244)]",
+            "[color(244)]/help  /exit[/color(244)]",
+            "",
+            "[bold color(183)]Tips[/bold color(183)]",
+            "[color(244)]Type naturally — the agent will call tools[/color(244)]",
+            "[color(244)]Type 'stop' or '/stop' to end recording[/color(244)]",
+            "[color(244)]'s' alone on a line stops recording too[/color(244)]",
+        ]
+
+    def _render():
+        left_lines = list(messages)
+        if input_buffer:
+            left_lines.append(f"\n[bold color(211)]You:[/bold color(211)] {''.join(input_buffer)}")
+        elif recording_active:
+            left_lines.append(f"\n[color(203)]\u25cf Recording active — type 'stop' when done[/color(203)]")
+
+        left_body = "\n".join(left_lines) if left_lines else "[color(244)]Ask me something...[/color(244)]"
+        left_panel = Panel(left_body, title="[bold]God Mode[/bold]", border_style=C_LILAC)
+
+        right_body = "\n".join(right_content)
+        right_panel = Panel(right_body, title="[bold]Tools[/bold]", border_style=C_DIM)
+
+        from datetime import datetime
+        status = Text(no_wrap=True, overflow="ellipsis")
+        status.append(f" {session.model} ", style=f"bold reverse {C_DIM}")
+        status.append(f"  {datetime.now().strftime('%H:%M:%S')}", style=C_DIM)
+
+        return Group(
+            Text("podscribe god mode", style=f"bold {C_PEACH}"),
+            Rule(style=C_DIM),
+            Columns([left_panel, right_panel], equal=False, expand=True),
+            Rule(style=C_DIM),
+            status,
+        )
+
+    def _on_token(t: str) -> None:
+        nonlocal messages
+        if messages and messages[-1].startswith(f"[{C_PEACH}]\u25cf"):
+            messages[-1] += t
+        else:
+            messages.append(f"[{C_PEACH}]\u25cf[/{C_PEACH}] {t}")
+
+    def _on_tool_call(name: str, args_str: str) -> None:
+        messages.append(f"[{C_LILAC}]\u25c7[/{C_LILAC}] {name}({args_str})")
+
+    def _on_result(text: str) -> None:
+        preview = text[:300] + "..." if len(text) > 300 else text
+        messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {preview}")
+
+    def _reset_input() -> str:
+        nonlocal input_buffer
+        text = "".join(input_buffer).strip()
+        input_buffer = []
+        return text
+
+    def _handle_slash(command: str) -> None:
+        nonlocal recording_active, right_content
+        parts = command.split()
+        if not parts:
+            return
+        cmd = parts[0]
+        args = parts[1:]
+
+        messages.append(f"[{C_LILAC}]\u25c7 /{command}[/{C_LILAC}]")
+
+        try:
+            if cmd == "help":
+                right_content = _idle_reference()
+                messages.append("[color(244)]Reference shown in right pane.[/color(244)]")
+            elif cmd == "exit":
+                raise KeyboardInterrupt()
+            elif cmd == "stop":
+                result = agent_tools.stop_recording()
+                if "error" in result:
+                    messages.append(f"[red]Error: {result['error']}[/red]")
+                else:
+                    msg = f"{result.get('meeting_id', '')} finalized ({result.get('segments', 0)} segments, {result.get('duration_sec', 0)}s)"
+                    messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {msg}")
+                recording_active = False
+                right_content = _idle_reference()
+            elif cmd == "record":
+                pod = args[0] if args else ""
+                mt = None
+                if "--type" in args:
+                    idx = args.index("--type")
+                    if idx + 1 < len(args):
+                        mt = args[idx + 1]
+                result = agent_tools.start_recording(pod, meeting_type=mt)
+                if "error" in result:
+                    messages.append(f"[red]Error: {result['error']}[/red]")
+                else:
+                    messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {result.get('meeting_id', '')} recording")
+                    recording_active = True
+                    right_content = [f"[color(203)]\u25cf Recording {result.get('meeting_id', '')}[/color(203)]"]
+            elif cmd == "list":
+                if args:
+                    result = agent_tools.list_meetings_tool(args[0])
+                else:
+                    result = agent_tools.list_pods()
+                messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {json.dumps(result, indent=2)}")
+            elif cmd == "show":
+                if len(args) >= 2:
+                    result = agent_tools.show_meeting(args[0], args[1])
+                else:
+                    result = "Usage: /show <pod> <meeting>"
+                messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {agent_tools._truncate(result)}")
+            elif cmd == "enhance":
+                pod = args[0] if args else ""
+                mid = args[1] if len(args) > 1 else "latest"
+                result = agent_tools.enhance_meeting(pod, mid)
+                messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {result}")
+            elif cmd == "consolidate":
+                pod = args[0] if args else ""
+                mid = args[1] if len(args) > 1 else "latest"
+                nl = "--no-log" in args or "-n" in args
+                result = agent_tools.consolidate_meeting(pod, mid, no_log=nl)
+                messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {json.dumps(result, indent=2)}")
+            elif cmd == "search":
+                query = " ".join(args) if args else ""
+                if query:
+                    result = agent_tools.search_transcripts(query)
+                    messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {json.dumps(result[:5], indent=2)}")
+                else:
+                    messages.append("[color(244)]Usage: /search <query>[/color(244)]")
+            elif cmd == "init":
+                if args:
+                    result = agent_tools.init_pod_tool(args[0])
+                    messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {json.dumps(result, indent=2)}")
+                else:
+                    messages.append("[color(244)]Usage: /init <name>[/color(244)]")
+            elif cmd == "export":
+                result = agent_tools.export_data()
+                messages.append(f"[{C_DIM}]Result:[/{C_DIM}] Exported to {result}")
+            else:
+                messages.append(f"[red]Unknown command: /{cmd}[/red]")
+        except Exception as e:
+            messages.append(f"[red]Error: {e}[/red]")
+
+        # Inject into agent context
+        last_msg = messages[-1] if messages else ""
+        session.add_system_context(f"/{command} executed \u2192 {last_msg}")
+
+    def _send_to_agent(text: str) -> None:
+        messages.append(f"[bold color(211)]You:[/bold color(211)] {text}")
+        session.run_prompt(
+            text,
+            on_token=_on_token,
+            on_tool_call=_on_tool_call,
+            on_result=_on_result,
+        )
+
+    with Live(_render(), console=console, refresh_per_second=8, screen=True) as live:
+        while True:
+            try:
+                k = read_key()
+            except KeyboardInterrupt:
+                break
+
+            if k in ("\r", "\n"):
+                text = _reset_input()
+                if not text:
+                    continue
+
+                if recording_active and text == "s":
+                    result = agent_tools.stop_recording()
+                    messages.append(f"[{C_LILAC}]\u25c7 stop_recording()[/{C_LILAC}]")
+                    msg = f"finalized ({result.get('segments', 0)} segments, {result.get('duration_sec', 0)}s)"
+                    messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {msg}")
+                    recording_active = False
+                    right_content = _idle_reference()
+                    session.add_system_context(f"/stop executed \u2192 meeting {result.get('meeting_id', '')} finalized")
+                elif text.startswith("/"):
+                    _handle_slash(text[1:])
+                else:
+                    _send_to_agent(text)
+
+                live.update(_render())
+            elif k == "\x7f":
+                if input_buffer:
+                    input_buffer.pop()
+                live.update(_render())
+            elif k == "\x03":
+                break
+            elif k.isprintable() or k in (" ",):
+                input_buffer.append(k)
+                live.update(_render())
+
+            # Poll recording status for right pane updates
+            if recording_active:
+                status = agent_tools.get_recording_status()
+                if status.get("status") == "recording":
+                    latest = status.get("latest_lines", [])
+                    right_content = [
+                        f"[color(203)]\u25cf Recording {status['meeting_id']}[/color(203)]",
+                        f"  segments: {status['segment_count']}",
+                    ] + [f"[color(244)]{l}[/color(244)]" for l in latest[-10:]] + [
+                        "",
+                        "[color(244)]Type 'stop' or '/stop' to end[/color(244)]",
+                    ]
+                    live.update(_render())
+
+    console.print()
+    return 0
