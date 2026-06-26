@@ -184,7 +184,8 @@ def start_recording(
     meeting = start_meeting(pod, meeting_type=mt)
     capture = AudioCapture(vad_aggressiveness=vad)
     transcriber = Transcriber(model=model)
-    glossary = format_glossary_prompt(get_effective_glossary(pod)) if get_effective_glossary(pod) else None
+    effective_glossary = get_effective_glossary(pod)
+    glossary = format_glossary_prompt(effective_glossary) if effective_glossary else None
     lines: list = []
 
     def _record_thread():
@@ -200,7 +201,9 @@ def start_recording(
                 results = transcriber.transcribe(audio_segment, **kwargs)
                 for r in results:
                     elapsed = time.monotonic() - start_ts
-                    seg = Segment(start_sec=elapsed, end_sec=elapsed, text=r["text"])
+                    seg_duration = max(0.0, r["end"] - r["start"])
+                    seg_start = max(0.0, elapsed - seg_duration)
+                    seg = Segment(start_sec=seg_start, end_sec=elapsed, text=r["text"])
                     append_segment(meeting, seg)
                     lines.append(f"[{_fmt_time(seg.start_sec)}] {seg.text}")
         finally:
@@ -236,6 +239,9 @@ def stop_recording() -> dict:
         return {"error": "No active recording."}
     session["capture"].stop()
     session["thread"].join(timeout=10)
+    if session["thread"].is_alive():
+        _recording_session = None
+        return {"error": "Recording thread did not stop within timeout."}
     _recording_session = None
     m = session["meeting"]
     return {
@@ -454,5 +460,8 @@ def export_data(out_path: Optional[str] = None) -> str:
     from pathlib import Path
     from .export import create_export
     out = Path(out_path) if out_path else None
-    result = create_export(out)
-    return str(result)
+    try:
+        result = create_export(out)
+        return str(result)
+    except OSError as e:
+        return f"Export failed: {e}"
