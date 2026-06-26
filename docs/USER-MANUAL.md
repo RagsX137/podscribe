@@ -56,6 +56,14 @@ $ podscribe
 
 ### Meeting picker
 
+### God mode
+
+The `Others → God mode` option or `g` key opens the god mode chat interface — an agentic loop where an LLM can inspect your project files, manage pods, run recordings, search transcripts, and more using 20+ tools.
+
+**Input:** Type a message at the `>` prompt. The assistant shows tool calls in the right pane and responses in the left.
+
+**Navigation:** `Esc` to toggle pane focus, `/exit` to leave god mode, arrow keys to scroll, `/list` to see all slash commands.
+
 When you select Enhance or Consolidate, a meeting picker appears showing all meetings for the current pod, newest first:
 
 ```
@@ -76,6 +84,7 @@ Each entry shows the date, time, type (if set), and duration (if finalized). Nav
 | List all meetings | Runs `podscribe list --all` |
 | Show latest transcript | Runs `podscribe show <pod> latest` |
 | Search transcripts | Prompts for a query, then runs `podscribe search <query>` |
+| God mode | Opens the agentic chat view — LLM can use 20+ tools |
 | Glossary management | Submenu: list, **add**, **remove** terms |
 | Export data | Prompts for a path (default: `podscribe-export-<timestamp>.tar.gz`) |
 | LLM config | Submenu: show, **set** model + template |
@@ -346,22 +355,87 @@ Preserve all technical terms and names.
 
 ---
 
+### `podscribe config god`
+Manage the god mode model (stored under `god.model` in `podscribe.yaml`). Falls back to `llm.model` if unset.
+
+```
+podscribe config god show                  # view current god model
+podscribe config god set qwen3.6:35b-mlx   # set a model
+```
+
+---
+
+### `podscribe god [prompt]`
+Enter god mode — an agentic loop where an LLM can use tools to inspect your project, manage pods, run recordings, search transcripts, and more.
+
+```
+podscribe god                              # opens interactive REPL (requires TTY)
+podscribe god "list all meetings"          # one-shot: runs the prompt, prints result, exits
+```
+
+**What it can do:** list pods, get pod info, create pods, list/show meetings, start/stop recordings, enhance/consolidate meetings, search transcripts, manage glossary, export data, list directories, read files, search files for strings/symbols/references — all through natural language.
+
+**Model priority:** CLI `--model` flag → `podscribe.yaml` → `god.model` → `llm.model` → error telling you to configure one.
+
+---
+
+### `podscribe search <query>`
+Full-text search across transcripts. Uses ripgrep if available, falls back to Python.
+
+```
+podscribe search "deploy pipeline"              # all pods
+podscribe search "deploy pipeline" --pod sam-chen # one pod
+podscribe search "deploy pipeline" --since 7d    # last 7 days
+podscribe search "deploy pipeline" --type 1on1   # specific meeting type
+```
+
+---
+
+### `podscribe export`
+Bundle all pod data into a portable `.tar.gz` archive.
+
+```
+podscribe export                           # saves to podscribe-export-<timestamp>.tar.gz
+podscribe export --out my-backup.tar.gz    # custom filename
+podscribe export --out -                   # writes to stdout (for piping)
+```
+
+**What's included:** `pods/` (all transcripts, summaries, configs, CSVs), `leadership_team.yaml`, `podscribe.yaml`.
+**Excluded:** `.raw` audio files, `.env`, `__pycache__/`, `.pytest_cache/`, `.venv/`.
+
+---
+
+### `podscribe import <archive>`
+Restore from an export tarball.
+
+```
+podscribe import podscribe-export-20260626.tar.gz       # safe import
+podscribe import podscribe-export-20260626.tar.gz --force  # overwrite existing pods
+podscribe import podscribe-export-20260626.tar.gz --dry-run # preview only
+```
+
+**Safety:** Refuses path-traversal and symlink members. Skips `podscribe.yaml` root-level file to avoid overwriting local LLM config. `--dry-run` prints what would be restored without writing anything.
+
+---
+
 ## File structure
 
 ```
-pods/<name>/                          # one directory per person
+pods/<name>/                          # one directory per person or project
 ├── config.yaml                       # pod metadata + glossary + optional LLM config
+├── meetings.csv                      # consolidated log (one row per consolidate run)
 ├── transcripts/
 │   └── 22-JUN-2026/                  # organized by date (DD-MMM-YYYY)
-│       ├── 2026-06-22-101500-name.md # transcript (incremental, crash-safe)
-│       ├── 2026-06-22-101500-name.json # metadata sidecar
-│       └── 2026-06-22-101500-name.raw  # raw audio (deleted by default)
+│       ├── [type/]                   # optional subdir when record --type is used
+│       │   ├── 2026-06-22-101500-name.md # transcript (incremental, crash-safe)
+│       │   ├── 2026-06-22-101500-name.json # metadata sidecar
+│       │   └── 2026-06-22-101500-name.raw  # raw audio (deleted by default)
+│       └── (or flat, without type subdir)
 ├── summaries/
 │   └── 22-JUN-2026/
-│       └── 2026-06-22-101500-name.md # LLM-enhanced output
-└── meetings.csv                      # consolidated log (one row per consolidate run)
+│       └── 2026-06-22-101500-name.md # LLM-enhanced output (mirrors transcript layout)
 
-podscribe.yaml                         # project-wide LLM + consolidate config
+podscribe.yaml                         # project-wide LLM + consolidate + god config
 leadership_team.yaml                   # global glossary terms (optional)
 ```
 
@@ -380,6 +454,11 @@ leadership_team.yaml                   # global glossary terms (optional)
 | Set project LLM | `podscribe config llm set <model> '<template>'` |
 | View project LLM | `podscribe config llm show` |
 | Set consolidate prompt | `podscribe config consolidate set '<prompt>'` |
+| Set/view god model | `podscribe config god set/show` |
+| God mode (agentic) | `podscribe god [prompt]` |
+| Search transcripts | `podscribe search <query> [--pod <name> --since <n>d]` |
+| Export all pods | `podscribe export [--out <path>]` |
+| Import pods | `podscribe import <archive> [--force --dry-run]` |
 | List all pods | `podscribe list` |
 
 ## Tips & troubleshooting
