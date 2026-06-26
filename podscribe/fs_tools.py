@@ -55,6 +55,16 @@ def list_directory(path: str = ".", recursive: bool = False) -> list[str] | dict
     if recursive:
         for dirpath, dirnames, filenames in os.walk(resolved):
             dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+            for dname in sorted(dirnames):
+                full = Path(dirpath) / dname
+                try:
+                    rel = str(full.relative_to(root))
+                except ValueError:
+                    rel = str(full)
+                entries.append(rel + "/")
+                if len(entries) >= _MAX_DIR_ENTRIES:
+                    entries.append("[...truncated at 500 entries]")
+                    return entries
             for name in sorted(filenames):
                 full = Path(dirpath) / name
                 try:
@@ -215,6 +225,7 @@ def find_symbol(name: str, path: str = ".") -> list[dict] | dict:
     if _rg_available():
         escaped = re.escape(name)
         cmd = ["rg", "--type=py", "--line-number", "--no-heading", "--color=never",
+               f"--max-total-matches={_MAX_SEARCH_HITS}",
                f"(def|class) {escaped}\\b", str(resolved)]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
