@@ -7,6 +7,7 @@ import requests
 from podscribe.llm import (
     build_consolidate_prompt,
     build_enhance_prompt,
+    chat_stream,
     enhance_transcript,
     extract_structured_fields,
 )
@@ -311,3 +312,118 @@ def test_enhance_transcript_does_not_import_tqdm():
     """The core must not depend on tqdm; the fictional progress bar is gone."""
     import podscribe.llm as llm_mod
     assert not hasattr(llm_mod, "tqdm"), "llm.py must not import tqdm"
+
+
+def make_chat_stream_response(chunks, tool_call_msg=None, final_extra=None):
+    """Build a mock streaming response for /api/chat."""
+    lines = []
+    for c in chunks:
+        lines.append(json.dumps({
+            "model": "qwen3.6:27b",
+            "message": {"role": "assistant", "content": c},
+            "done": False,
+        }))
+    final_msg = tool_call_msg or {"role": "assistant", "content": ""}
+    final = {
+        "model": "qwen3.6:27b",
+        "message": final_msg,
+        "done": True,
+        **(final_extra or {}),
+    }
+    lines.append(json.dumps(final))
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.iter_lines = MagicMock(return_value=iter(lines))
+    resp.status_code = 200
+    return resp
+
+
+def test_chat_stream_text_response():
+    """Text-only response: tokens stream via on_token, full text returned."""
+    resp = make_chat_stream_response(["Hello", " ", "World"])
+    tokens: list = []
+    msgs: list = []
+
+    with patch("podscribe.llm.requests.post", return_value=resp) as mock_post:
+        result = chat_stream(
+            "qwen3.6:27b",
+            [{"role": "user", "content": "say hi"}],
+            on_token=tokens.append,
+            on_message=msgs.append,
+        )
+
+    assert result == "Hello World"
+    assert tokens == ["Hello", " ", "World"]
+    assert len(msgs) == 1
+    assert msgs[0]["role"] == "assistant"
+    assert msgs[0]["content"] == ""
+    assert mock_post.call_args.kwargs["stream"] is True
+    assert mock_post.call_args.kwargs["timeout"] == 1800
+
+
+def test_chat_stream_tool_call():
+    """Tool call response: on_message receives tool_calls, text is empty."""
+    tool_call = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {"function": {"name": "list_pods", "arguments": "{}"}, "type": "function"}
+        ],
+    }
+    resp = make_chat_stream_response([], tool_call_msg=tool_call)
+    tokens: list = []
+    msgs: list = []
+
+    with patch("podscribe.llm.requests.post", return_value=resp):
+        result = chat_stream(
+            "qwen3.6:27b",
+            [{"role": "user", "content": "list pods"}],
+            on_token=tokens.append,
+            on_message=msgs.append,
+        )
+
+    assert result == ""
+    assert tokens == []
+    assert len(msgs) == 1
+    assert "tool_calls" in msgs[0]
+    assert msgs[0]["tool_calls"][0]["function"]["name"] == "list_pods"
+
+
+def test_chat_stream_passes_tools():
+    """Tools list is included in the request payload."""
+    resp = make_chat_stream_response(["ok"])
+    tools = [{"type": "function", "function": {"name": "list_pods"}}]
+    with patch("podscribe.llm.requests.post", return_value=resp) as mock_post:
+        chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}], tools=tools)
+    assert mock_post.call_args.kwargs["json"]["tools"] == tools
+
+
+def test_chat_stream_connection_error():
+    with patch("podscribe.llm.requests.post", side_effect=requests.ConnectionError):
+        result = chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}])
+    assert result is None
+
+
+def test_chat_stream_retries_on_5xx():
+    bad = MagicMock()
+    bad.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 503")
+    bad.status_code = 503
+    bad.iter_lines = MagicMock(return_value=iter([]))
+    good = make_chat_stream_response(["ok"])
+
+    with patch("podscribe.llm.requests.post", side_effect=[bad, bad, good]) as mock_post:
+        with patch("podscribe.llm.time.sleep"):
+            result = chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}])
+    assert result == "ok"
+    assert mock_post.call_count == 3
+
+
+def test_chat_stream_no_retry_on_4xx():
+    bad = MagicMock()
+    bad.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 400")
+    bad.status_code = 400
+
+    with patch("podscribe.llm.requests.post", return_value=bad) as mock_post:
+        result = chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}])
+    assert result is None
+    assert mock_post.call_count == 1

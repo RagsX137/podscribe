@@ -189,3 +189,82 @@ def _extract_fenced_yaml(text: str) -> Optional[str]:
     if match:
         return match.group(1).strip()
     return None
+
+
+OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
+
+
+def chat_stream(
+    model: str,
+    messages: list,
+    tools: Optional[list] = None,
+    *,
+    max_retries: int = 3,
+    on_token: Callable[[str], None] = lambda t: None,
+    on_message: Callable[[dict], None] = lambda d: None,
+) -> Optional[str]:
+    """Stream from Ollama /api/chat with optional tools support.
+
+    messages: list of dicts with 'role' and 'content' keys.
+    tools: optional list of tool definitions (JSON schema for Ollama).
+    on_token: called with each content token string.
+    on_message: called once with the final message dict
+        (may contain 'tool_calls' key for function calling).
+
+    Returns the full accumulated text on success, or None on failure.
+    """
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+        "keep_alive": "-1",
+    }
+    if tools:
+        payload["tools"] = tools
+
+    delays = [1, 2, 4]
+
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(OLLAMA_CHAT_URL, json=payload, stream=True, timeout=1800)
+            resp.raise_for_status()
+
+            text_parts: list = []
+            done_data: dict = {}
+
+            for line in resp.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                msg = chunk.get("message", {})
+                if msg.get("content"):
+                    text_parts.append(msg["content"])
+                    on_token(msg["content"])
+
+                if chunk.get("done"):
+                    done_data = msg
+                    break
+
+            if done_data:
+                on_message(done_data)
+            return "".join(text_parts)
+
+        except requests.HTTPError as e:
+            status = e.response.status_code if e.response is not None else getattr(resp, "status_code", None)
+            if status is not None and 400 <= status < 500:
+                return None
+            if attempt < max_retries - 1:
+                time.sleep(delays[min(attempt, len(delays) - 1)])
+                continue
+            return None
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                time.sleep(delays[min(attempt, len(delays) - 1)])
+                continue
+            return None
+
+    return None
