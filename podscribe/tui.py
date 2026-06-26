@@ -802,7 +802,7 @@ def record_view(pod: Pod, args) -> int:
             try:
                 run_record_session(
                     pod, meeting, capture, transcriber,
-                    glossary_prompt=glossary_prompt, wav_writer=wav_writer,
+                    glossary_prompt=glossary_prompt, wav_writer=wav_writer, keep_audio=keep_audio,
                     on_segment=_on_segment,
                     on_status=_on_status_live,
                     on_done=_on_done,
