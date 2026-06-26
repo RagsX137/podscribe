@@ -1185,6 +1185,7 @@ def god_view(model: Optional[str] = None) -> int:
     recording_active = False
     agent_busy = False
     scroll_offset = 0
+    _last_tool_name: list = [""]   # mutable cell so closures can write it
 
     def _idle_reference() -> list:
         return [
@@ -1300,11 +1301,29 @@ def god_view(model: Optional[str] = None) -> int:
             messages.append(f"[{C_PEACH}]\u25cf[/{C_PEACH}] {t}")
 
     def _on_tool_call(name: str, args_str: str) -> None:
+        _last_tool_name[0] = name
         messages.append(f"[{C_LILAC}]\u25c7[/{C_LILAC}] {name}({args_str})")
 
     def _on_result(text: str) -> None:
+        nonlocal recording_active, right_content
         preview = text[:300] + "..." if len(text) > 300 else text
         messages.append(f"[{C_DIM}]Result:[/{C_DIM}] {preview}")
+        # Keep recording_active in sync when the agent calls start/stop_recording
+        if _last_tool_name[0] == "start_recording" and '"status": "recording"' in text:
+            recording_active = True
+            # Seed the right pane immediately; the polling loop will fill in lines
+            import re as _re
+            mid_match = _re.search(r'"meeting_id":\s*"([^"]+)"', text)
+            mid = mid_match.group(1) if mid_match else "recording"
+            right_content = [
+                f"[color(203)]\u25cf Recording {mid}[/color(203)]",
+                "[color(244)]Waiting for first segment...[/color(244)]",
+                "",
+                "[color(244)]Type 'stop' or '/stop' to end[/color(244)]",
+            ]
+        elif _last_tool_name[0] == "stop_recording" and "error" not in text.lower():
+            recording_active = False
+            right_content = _idle_reference()
 
     def _reset_input() -> str:
         nonlocal input_buffer
