@@ -12,7 +12,7 @@ from typing import Optional
 
 import numpy as np
 
-from .config import get_effective_glossary, load_consolidate_prompt, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_project_config
+from .config import get_effective_glossary, load_consolidate_prompt, load_god_model, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_god_model, save_project_config
 from rich.console import Console
 from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields, ollama_model_info
@@ -534,6 +534,33 @@ def cmd_config_consolidate_set(args) -> int:
     return 0
 
 
+def cmd_config_god_show(args) -> int:
+    """Show the configured god-mode agent model."""
+    from .config import load_project_config
+    cfg = load_project_config()
+    god_model = (cfg.get("god") or {}).get("model")
+    llm_model = (cfg.get("llm") or {}).get("model")
+    effective = load_god_model()
+    if god_model:
+        print(f"god.model: {god_model}  (agent-specific)")
+    else:
+        print("god.model: (not set)")
+    if llm_model:
+        print(f"llm.model: {llm_model}  (shared enhance/consolidate)")
+    if effective:
+        print(f"effective: {effective}")
+    else:
+        print("No model configured. Set with: podscribe config god set <model>")
+    return 0
+
+
+def cmd_config_god_set(args) -> int:
+    """Set the god-mode agent model in podscribe.yaml under god.model."""
+    save_god_model(args.model)
+    print(f"God mode model set: {args.model}")
+    return 0
+
+
 def cmd_export(args) -> int:
     """Export all pod data to a tarball."""
     from .export import create_export
@@ -612,7 +639,10 @@ def cmd_god(args) -> int:
         )
         console.print()
         if result is None:
-            console.print("[red]Failed to reach Ollama. Start with: ollama serve[/red]")
+            console.print(
+                f"[red]Failed to get response from model '{session.model}'. "
+                f"Check that Ollama is running and the model is pulled.[/red]"
+            )
             return 1
         return 0
 
@@ -914,6 +944,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_cons_set = cons_sub.add_parser("set", help="Set consolidate prompt.")
     p_cons_set.add_argument("prompt", help="Prompt template with {{summary}} placeholder")
     p_cons_set.set_defaults(func=cmd_config_consolidate_set)
+
+    p_cfg_god = cfg_sub.add_parser("god", help="Manage god-mode agent model.")
+    god_sub = p_cfg_god.add_subparsers(dest="god_action", required=True)
+    p_god_show = god_sub.add_parser("show", help="Show god-mode model config.")
+    p_god_show.set_defaults(func=cmd_config_god_show)
+    p_god_set = god_sub.add_parser("set", help="Set god-mode model (stored under god.model in podscribe.yaml).")
+    p_god_set.add_argument("model", help="Ollama model tag (e.g. qwen3.6:35b-mlx)")
+    p_god_set.set_defaults(func=cmd_config_god_set)
 
     return p
 

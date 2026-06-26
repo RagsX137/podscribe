@@ -531,3 +531,309 @@ def test_record_view_waveform_on_level_passed_to_capture(tmp_path, monkeypatch):
 
     assert "on_level" in captured_kwargs, "on_level not passed to AudioCapture"
     assert callable(captured_kwargs["on_level"])
+
+
+# ── _listen_for_stop unit tests ─────────────────────────────────────
+
+def test_listen_for_stop_s_key_calls_capture_stop():
+    """Pressing 's' in the pipe causes capture.stop() to be called."""
+    import os
+    import threading
+    import unittest.mock as mock
+    from podscribe.tui import _listen_for_stop
+
+    r_fd, w_fd = os.pipe()
+    stop_ev = threading.Event()
+    mock_capture = mock.MagicMock()
+
+    # Write 's' to the read-end via a second pipe pair so the listener
+    # sees it as stdin.  We cannot redirect sys.stdin safely in a unit test,
+    # so we use a fake fd by passing our pipe read-end as wake_fd and feeding
+    # the key through a dedicated stdin-pipe.
+    stdin_r, stdin_w = os.pipe()
+
+    import sys, termios
+    orig_stdin = sys.stdin
+
+    # Replace sys.stdin.fileno() to point at stdin_r
+    class FakeFd:
+        def fileno(self):
+            return stdin_r
+
+    sys.stdin = FakeFd()
+    try:
+        t = threading.Thread(target=_listen_for_stop, args=(mock_capture, r_fd, stop_ev))
+        t.start()
+        # Give the thread time to enter select()
+        import time
+        time.sleep(0.05)
+        os.write(stdin_w, b"s")
+        t.join(timeout=2.0)
+    finally:
+        sys.stdin = orig_stdin
+        for fd in (r_fd, w_fd, stdin_r, stdin_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    assert not t.is_alive(), "listener thread did not exit after 's'"
+    mock_capture.stop.assert_called_once()
+
+
+def test_listen_for_stop_uppercase_S_calls_capture_stop():
+    """Pressing 'S' (uppercase) also stops recording."""
+    import os
+    import threading
+    import unittest.mock as mock
+    from podscribe.tui import _listen_for_stop
+
+    r_fd, w_fd = os.pipe()
+    stop_ev = threading.Event()
+    mock_capture = mock.MagicMock()
+    stdin_r, stdin_w = os.pipe()
+
+    import sys
+    orig_stdin = sys.stdin
+
+    class FakeFd:
+        def fileno(self):
+            return stdin_r
+
+    sys.stdin = FakeFd()
+    try:
+        t = threading.Thread(target=_listen_for_stop, args=(mock_capture, r_fd, stop_ev))
+        t.start()
+        import time
+        time.sleep(0.05)
+        os.write(stdin_w, b"S")
+        t.join(timeout=2.0)
+    finally:
+        sys.stdin = orig_stdin
+        for fd in (r_fd, w_fd, stdin_r, stdin_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    assert not t.is_alive(), "listener thread did not exit after 'S'"
+    mock_capture.stop.assert_called_once()
+
+
+def test_listen_for_stop_non_s_key_ignored():
+    """Non-'s' keypresses do not call capture.stop()."""
+    import os
+    import threading
+    import unittest.mock as mock
+    from podscribe.tui import _listen_for_stop
+
+    r_fd, w_fd = os.pipe()
+    stop_ev = threading.Event()
+    mock_capture = mock.MagicMock()
+    stdin_r, stdin_w = os.pipe()
+
+    import sys, time
+    orig_stdin = sys.stdin
+
+    class FakeFd:
+        def fileno(self):
+            return stdin_r
+
+    sys.stdin = FakeFd()
+    try:
+        t = threading.Thread(target=_listen_for_stop, args=(mock_capture, r_fd, stop_ev))
+        t.start()
+        time.sleep(0.05)
+        # Write several non-stop keys
+        os.write(stdin_w, b"x")
+        os.write(stdin_w, b"q")
+        os.write(stdin_w, b"\r")
+        time.sleep(0.05)
+        # Thread should still be alive (no stop key yet)
+        assert t.is_alive(), "thread exited prematurely on non-stop key"
+    finally:
+        # Wake the thread via wake_fd and let it exit
+        try:
+            os.write(w_fd, b"\x00")
+        except OSError:
+            pass
+        t.join(timeout=2.0)
+        sys.stdin = orig_stdin
+        for fd in (r_fd, w_fd, stdin_r, stdin_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    mock_capture.stop.assert_not_called()
+
+
+def test_listen_for_stop_wake_fd_exits_without_stop():
+    """Writing to wake_fd causes the thread to exit cleanly without capture.stop()."""
+    import os
+    import threading
+    import unittest.mock as mock
+    from podscribe.tui import _listen_for_stop
+
+    r_fd, w_fd = os.pipe()
+    stop_ev = threading.Event()
+    mock_capture = mock.MagicMock()
+    stdin_r, stdin_w = os.pipe()
+
+    import sys, time
+    orig_stdin = sys.stdin
+
+    class FakeFd:
+        def fileno(self):
+            return stdin_r
+
+    sys.stdin = FakeFd()
+    try:
+        t = threading.Thread(target=_listen_for_stop, args=(mock_capture, r_fd, stop_ev))
+        t.start()
+        time.sleep(0.05)
+        os.write(w_fd, b"\x00")  # Signal via wake_fd
+        t.join(timeout=2.0)
+    finally:
+        sys.stdin = orig_stdin
+        for fd in (r_fd, w_fd, stdin_r, stdin_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    assert not t.is_alive(), "thread did not exit after wake_fd write"
+    mock_capture.stop.assert_not_called()
+
+
+def test_listen_for_stop_stop_event_exits_thread():
+    """Setting stop_event causes the thread to exit within select timeout."""
+    import os
+    import threading
+    import unittest.mock as mock
+    from podscribe.tui import _listen_for_stop
+
+    r_fd, w_fd = os.pipe()
+    stop_ev = threading.Event()
+    mock_capture = mock.MagicMock()
+    stdin_r, stdin_w = os.pipe()
+
+    import sys, time
+    orig_stdin = sys.stdin
+
+    class FakeFd:
+        def fileno(self):
+            return stdin_r
+
+    sys.stdin = FakeFd()
+    try:
+        t = threading.Thread(target=_listen_for_stop, args=(mock_capture, r_fd, stop_ev))
+        t.start()
+        time.sleep(0.05)
+        stop_ev.set()
+        t.join(timeout=2.0)
+    finally:
+        sys.stdin = orig_stdin
+        for fd in (r_fd, w_fd, stdin_r, stdin_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    assert not t.is_alive(), "thread did not exit after stop_event was set"
+    mock_capture.stop.assert_not_called()
+
+
+def test_listen_for_stop_non_tty_stdin_exits_gracefully():
+    """If sys.stdin has no fileno() (e.g. StringIO), thread exits immediately."""
+    import io
+    import os
+    import threading
+    import unittest.mock as mock
+    from podscribe.tui import _listen_for_stop
+
+    r_fd, w_fd = os.pipe()
+    stop_ev = threading.Event()
+    mock_capture = mock.MagicMock()
+
+    import sys
+    orig_stdin = sys.stdin
+    sys.stdin = io.StringIO()  # No fileno() that works
+
+    try:
+        t = threading.Thread(target=_listen_for_stop, args=(mock_capture, r_fd, stop_ev))
+        t.start()
+        t.join(timeout=2.0)
+    finally:
+        sys.stdin = orig_stdin
+        for fd in (r_fd, w_fd):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    assert not t.is_alive(), "thread should exit immediately when stdin has no real fd"
+    mock_capture.stop.assert_not_called()
+
+
+def test_listen_for_stop_closed_fds_exits_without_crash():
+    """Closing fds while the thread is running must not crash the thread."""
+    import os
+    import threading
+    import unittest.mock as mock
+    from podscribe.tui import _listen_for_stop
+
+    r_fd, w_fd = os.pipe()
+    stop_ev = threading.Event()
+    mock_capture = mock.MagicMock()
+    stdin_r, stdin_w = os.pipe()
+
+    import sys, time
+    orig_stdin = sys.stdin
+
+    class FakeFd:
+        def fileno(self):
+            return stdin_r
+
+    sys.stdin = FakeFd()
+    try:
+        t = threading.Thread(target=_listen_for_stop, args=(mock_capture, r_fd, stop_ev))
+        t.start()
+        time.sleep(0.05)
+        # Close the fds while the thread is blocked in select
+        os.close(r_fd)
+        os.close(stdin_r)
+        t.join(timeout=2.0)
+    finally:
+        sys.stdin = orig_stdin
+        for fd in (w_fd, stdin_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    assert not t.is_alive(), "thread should exit cleanly when fds are closed under it"
+
+
+def test_set_input_raw_preserves_isig():
+    """_set_input_raw must NOT clear ISIG so Ctrl+C still delivers SIGINT."""
+    import sys
+    import termios
+    import unittest.mock as mock
+    from podscribe.tui import _set_input_raw
+
+    captured_modes = []
+
+    def fake_tcsetattr(fd, when, mode):
+        captured_modes.append(list(mode))
+
+    with mock.patch("podscribe.tui.termios.tcgetattr", return_value=[0, 0, 0, 0b11111111, 0, 0, [0]*20]):
+        with mock.patch("podscribe.tui.termios.tcsetattr", side_effect=fake_tcsetattr):
+            _set_input_raw(0)
+
+    assert captured_modes, "tcsetattr was never called"
+    applied_lflag = captured_modes[0][3]
+    assert applied_lflag & termios.ISIG, (
+        f"ISIG was cleared in _set_input_raw (lflag={applied_lflag:#010b}); "
+        "Ctrl+C would not deliver SIGINT"
+    )

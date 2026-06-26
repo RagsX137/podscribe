@@ -219,7 +219,7 @@ def chat_stream(
         "model": model,
         "messages": messages,
         "stream": True,
-        "keep_alive": "-1",
+        "keep_alive": -1,
     }
     if tools:
         payload["tools"] = tools
@@ -231,6 +231,7 @@ def chat_stream(
 
             text_parts: list = []
             done_data: dict = {}
+            accumulated_tool_calls: list = []
 
             for line in resp.iter_lines(decode_unicode=True):
                 if not line:
@@ -245,8 +246,13 @@ def chat_stream(
                     text_parts.append(msg["content"])
                     on_token(msg["content"])
 
+                if msg.get("tool_calls"):
+                    accumulated_tool_calls.extend(msg["tool_calls"])
+
                 if chunk.get("done"):
-                    done_data = msg
+                    done_data = dict(msg)
+                    if accumulated_tool_calls:
+                        done_data["tool_calls"] = accumulated_tool_calls
                     break
 
             if done_data:

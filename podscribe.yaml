@@ -1,5 +1,7 @@
+god:
+  model: gemma4:12b-mlx
 llm:
-  model: qwen3.6:27b-mlx
+  model: qwen3.6:35b-mlx
   preserve_speakers: true
   prompt_template: 'You are summarizing a 1:1 meeting transcript into clean, scannable
     markdown.

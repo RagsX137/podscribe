@@ -1301,3 +1301,53 @@ def test_main_help_still_works(capsys):
     # argparse exits with code 0 after printing help
     assert rc == 0
 
+
+
+# ── config god ────────────────────────────────────────────────────────────────
+
+def test_config_god_show_parses():
+    parser = build_parser()
+    args = parser.parse_args(["config", "god", "show"])
+    assert args.command == "config"
+    assert args.action == "god"
+    assert args.god_action == "show"
+
+
+def test_config_god_set_parses():
+    parser = build_parser()
+    args = parser.parse_args(["config", "god", "set", "qwen3.6:35b-mlx"])
+    assert args.command == "config"
+    assert args.action == "god"
+    assert args.god_action == "set"
+    assert args.model == "qwen3.6:35b-mlx"
+
+
+def test_cmd_config_god_set_persists(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    rc = main(["config", "god", "set", "qwen3.6:35b-mlx"])
+    assert rc == 0
+    from podscribe.config import load_god_model
+    assert load_god_model() == "qwen3.6:35b-mlx"
+    out = capsys.readouterr().out
+    assert "qwen3.6:35b-mlx" in out
+
+
+def test_cmd_config_god_show_effective(tmp_path, monkeypatch, capsys):
+    """show resolves effective model: god.model > llm.model."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "podscribe.yaml").write_text(
+        "god:\n  model: qwen3.6:35b-mlx\nllm:\n  model: qwen3.6:27b\n"
+    )
+    rc = main(["config", "god", "show"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "qwen3.6:35b-mlx" in out
+    assert "effective" in out
+
+
+def test_cmd_config_god_show_no_config(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    rc = main(["config", "god", "show"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "No model configured" in out

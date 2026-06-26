@@ -42,18 +42,24 @@ def test_build_tool_defs_has_all_tools():
 # ── Model resolution ──────────────────────────────────────────────────────────
 
 def test_resolve_model_uses_flag_first():
-    with patch("podscribe.agent.load_project_config", return_value={"llm": {"model": "qwen3.6:27b"}}):
+    with patch("podscribe.agent.load_god_model", return_value="qwen3.6:27b"):
         assert _resolve_model("custom-model") == "custom-model"
 
 
-def test_resolve_model_uses_config():
-    with patch("podscribe.agent.load_project_config", return_value={"llm": {"model": "qwen3.6:27b"}}):
+def test_resolve_model_uses_god_model_key():
+    with patch("podscribe.agent.load_god_model", return_value="qwen3.6:35b-mlx"):
+        assert _resolve_model(None) == "qwen3.6:35b-mlx"
+
+
+def test_resolve_model_falls_back_to_llm_model():
+    # god.model not set, falls back to llm.model via load_god_model
+    with patch("podscribe.agent.load_god_model", return_value="qwen3.6:27b"):
         assert _resolve_model(None) == "qwen3.6:27b"
 
 
-def test_resolve_model_falls_back():
-    with patch("podscribe.agent.load_project_config", return_value={}):
-        assert _resolve_model(None) == "qwen3.6:27b-mlx"
+def test_resolve_model_returns_none_when_unconfigured():
+    with patch("podscribe.agent.load_god_model", return_value=None):
+        assert _resolve_model(None) is None
 
 
 # ── Truncation ────────────────────────────────────────────────────────────────
@@ -77,10 +83,11 @@ def test_truncate_exact_boundary():
 
 # ── Format tool result ────────────────────────────────────────────────────────
 
-def test_format_tool_result_dict():
+def test_format_tool_result_list_is_newline_joined():
+    # lists are joined with newlines for cleaner LLM consumption (not JSON)
     result = _format_tool_result("list_pods", ["pod-a", "pod-b"])
-    parsed = json.loads(result)
-    assert parsed == ["pod-a", "pod-b"]
+    assert "pod-a" in result
+    assert "pod-b" in result
 
 
 def test_format_tool_result_string():

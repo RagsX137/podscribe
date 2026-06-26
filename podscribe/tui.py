@@ -1154,9 +1154,8 @@ def god_view(model: Optional[str] = None) -> int:
         return 1
 
     input_buffer: list = []
-    messages: list = []  # rendered message lines for left pane
+    messages: list = []
     recording_active = False
-    right_content: list = _idle_reference()
 
     def _idle_reference() -> list:
         return [
@@ -1177,6 +1176,8 @@ def god_view(model: Optional[str] = None) -> int:
             "[color(244)]Type 'stop' or '/stop' to end recording[/color(244)]",
             "[color(244)]'s' alone on a line stops recording too[/color(244)]",
         ]
+
+    right_content: list = _idle_reference()
 
     def _render():
         left_lines = list(messages)

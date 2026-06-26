@@ -102,6 +102,33 @@ def load_leadership_glossary() -> list:
     return [_normalise_entry(e) for e in raw]
 
 
+def load_god_model() -> Optional[str]:
+    """Return the god-mode agent model from podscribe.yaml.
+
+    Resolution order:
+    1. podscribe.yaml → god.model  (agent-specific override)
+    2. podscribe.yaml → llm.model  (shared with enhance/consolidate)
+    3. None — caller must handle missing config gracefully
+    """
+    cfg = load_project_config()
+    return (
+        (cfg.get("god") or {}).get("model")
+        or (cfg.get("llm") or {}).get("model")
+        or None
+    )
+
+
+def save_god_model(model: str) -> None:
+    """Persist the god-mode agent model to podscribe.yaml under god.model."""
+    if not model or not isinstance(model, str):
+        raise ValueError("god model must be a non-empty string")
+    cfg = load_project_config()
+    if "god" not in cfg:
+        cfg["god"] = {}
+    cfg["god"]["model"] = model
+    save_project_config(cfg)
+
+
 CONSOLIDATE_PROMPT_DEFAULT = """Given the following enhanced meeting summary, extract structured information.
 
 Return ONLY valid YAML with these fields:

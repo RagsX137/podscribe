@@ -378,3 +378,52 @@ def test_save_last_pod_rejects_empty_and_non_string(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="non-empty string"):
         save_last_pod(123)
     assert load_last_pod() is None  # nothing was written
+
+
+# ── God model config ──────────────────────────────────────────────────────────
+
+def test_load_god_model_from_god_key(tmp_path, monkeypatch):
+    """god.model takes priority over llm.model."""
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import load_god_model
+    (tmp_path / "podscribe.yaml").write_text(
+        "god:\n  model: qwen3.6:35b-mlx\nllm:\n  model: qwen3.6:27b\n"
+    )
+    assert load_god_model() == "qwen3.6:35b-mlx"
+
+
+def test_load_god_model_falls_back_to_llm(tmp_path, monkeypatch):
+    """Falls back to llm.model when god.model is absent."""
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import load_god_model
+    (tmp_path / "podscribe.yaml").write_text(
+        "llm:\n  model: qwen3.6:27b\n"
+    )
+    assert load_god_model() == "qwen3.6:27b"
+
+
+def test_load_god_model_returns_none_when_unconfigured(tmp_path, monkeypatch):
+    """Returns None when neither god.model nor llm.model is set."""
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import load_god_model
+    assert load_god_model() is None
+
+
+def test_save_god_model_persists_under_god_key(tmp_path, monkeypatch):
+    """save_god_model writes to god.model and doesn't clobber other keys."""
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import save_god_model, load_project_config
+    (tmp_path / "podscribe.yaml").write_text(
+        "llm:\n  model: qwen3.6:27b\n  prompt_template: x\n"
+    )
+    save_god_model("qwen3.6:35b-mlx")
+    cfg = load_project_config()
+    assert cfg["god"]["model"] == "qwen3.6:35b-mlx"
+    assert cfg["llm"]["model"] == "qwen3.6:27b"  # unchanged
+
+
+def test_save_god_model_rejects_empty(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import save_god_model
+    with pytest.raises(ValueError, match="non-empty string"):
+        save_god_model("")

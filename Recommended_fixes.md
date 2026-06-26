@@ -4,6 +4,34 @@
 Ollama `qwen3.6:27b` and `gemma4:latest`. Findings ordered by severity.
 
 ---
+## Nice to haves
+Six categories worth considering, roughly in priority order:
+
+1. Pre-meeting prep — the biggest gap right now
+
+Agenda generator: "What should I ask Sam next week?" — mine past meetings for open loops and recurring themes, draft the agenda automatically. The tech lead's biggest cost is the 20 minutes they spend re-reading old notes before each 1:1.
+Open-loops tracker: Extract action items assigned to the tech lead across all pods and surface anything never followed up on. Broken promises erode trust faster than almost anything else.
+2. Post-meeting follow-through
+
+Follow-up message draft: Generate a Slack/email summary of "what we agreed" immediately after recording. Saves context-switching back to your notes editor.
+JIRA ticket drafts: Extract "needs a ticket" action items into clipboard-ready ticket descriptions.
+3. Longitudinal insight — the real differentiator
+
+Sentiment trend per pod: Track emotional tone over time. A declining trend for 3 weeks is an attrition warning signal nobody else can give you from raw conversation data.
+Topic recurrence map: "You've talked about on-call load with Sam in 9 of the last 12 meetings." That's a systemic issue, not a one-off conversation.
+Cross-pod theme detection: When the same topic appears across 4 of your 5 reports in the same week, that's a team-level signal to escalate.
+4. Relationship health
+
+Cadence monitor: Pods already have a --cadence field. Surface a podscribe status that tells you who you're overdue to meet.
+Career/growth timeline: Extract all promotion/growth mentions across meetings so review season isn't a memory exercise.
+5. Perf reviews — highest-leverage
+
+Review draft generator: Synthesise 6 months of enhanced summaries into a structured performance review draft. This is the most painful, most time-consuming manager task that Podscribe's data is uniquely positioned to solve.
+Skip-level prep pack: A briefing doc for when your manager wants to skip-level with your reports.
+6. Quality-of-life
+
+Calendar integration to auto-detect the meeting and pre-fill the pod
+Speaker diarization (already on the roadmap, raw audio is kept for exactly this)
 
 ## Applied (branches `fix/recommended-cleanup`, integration PR)
 

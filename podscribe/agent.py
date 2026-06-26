@@ -6,7 +6,7 @@ import shlex
 from typing import Any, Callable, Optional
 
 from . import agent_tools
-from .config import load_project_config
+from .config import load_god_model
 from .llm import chat_stream
 
 SYSTEM_PROMPT = """You are the Podscribe assistant — a tool-calling agent for meeting transcription and management.
@@ -254,16 +254,30 @@ def _build_tool_descriptions() -> str:
     return "\n".join(lines)
 
 
-def _resolve_model(cli_model: Optional[str] = None) -> str:
+def _resolve_model(cli_model: Optional[str] = None) -> Optional[str]:
+    """Resolve the Ollama model tag for god mode.
+
+    Priority:
+    1. --model CLI flag
+    2. podscribe.yaml → god.model
+    3. podscribe.yaml → llm.model
+    4. None (caller should surface a "configure a model" error)
+    """
     if cli_model:
         return cli_model
-    cfg = load_project_config().get("llm", {})
-    return cfg.get("model") or "qwen3.6:27b-mlx"
+    return load_god_model()
 
 
 def _format_tool_result(name: str, result: Any) -> str:
-    """Format a tool result into a string for the conversation."""
-    text = json.dumps(result, indent=2, default=str) if not isinstance(result, str) else result
+    """Format a tool result into a plain string for Ollama tool-role messages."""
+    if isinstance(result, str):
+        text = result
+    elif isinstance(result, list):
+        text = "\n".join(str(item) for item in result)
+    elif isinstance(result, dict) and "error" in result:
+        text = f"Error: {result['error']}"
+    else:
+        text = json.dumps(result, indent=2, default=str)
     return agent_tools._truncate(text)
 
 
@@ -290,7 +304,15 @@ class GodSession:
     """Agent loop: conversation history, Ollama function calling, tool dispatch."""
 
     def __init__(self, model: Optional[str] = None):
-        self.model = _resolve_model(model)
+        resolved = _resolve_model(model)
+        if not resolved:
+            raise ValueError(
+                "No LLM model configured for god mode.\n"
+                "Set one with: podscribe config god set <model>\n"
+                "  e.g. podscribe config god set qwen3.6:35b-mlx\n"
+                "Or set a shared model: podscribe config llm set <model> '<template>'"
+            )
+        self.model = resolved
         self.tool_defs = _build_tool_defs()
         self.registry = TOOL_REGISTRY
         self._build_system_message()
@@ -336,9 +358,13 @@ class GodSession:
             if accumulated_text is None:
                 return None
 
-            # Check if the last assistant message has tool_calls
-            last = self.messages[-1] if self.messages else None
-            if last and last.get("role") == "assistant" and last.get("tool_calls"):
+            # Check if the most recent assistant message has tool_calls
+            last_assistant = None
+            for m in reversed(self.messages):
+                if m.get("role") == "assistant":
+                    last_assistant = m
+                    break
+            if last_assistant and last_assistant.get("tool_calls"):
                 # Loop back — tool results are already in messages
                 continue
 
