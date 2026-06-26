@@ -142,10 +142,10 @@ def search_fs(
 
     if _rg_available():
         cmd = ["rg", "--fixed-strings", "--line-number", "--no-heading", "--color=never",
-               "--", query, str(resolved)]
+               "--max-count=100", "--", query, str(resolved)]
         if include_glob:
             cmd = ["rg", "--fixed-strings", "--line-number", "--no-heading", "--color=never",
-                   f"--glob={include_glob}", "--", query, str(resolved)]
+                   "--max-count=100", f"--glob={include_glob}", "--", query, str(resolved)]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             return _parse_rg_output(proc.stdout, root)
@@ -237,6 +237,8 @@ def find_symbol(name: str, path: str = ".") -> list[dict] | dict:
                 except ValueError:
                     rel = fpath_str
                 hits.append({"file": rel, "line": lineno, "kind": kind, "name": name})
+                if len(hits) >= _MAX_SEARCH_HITS:
+                    break
             return hits
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass  # fall through
@@ -260,6 +262,8 @@ def find_symbol(name: str, path: str = ".") -> list[dict] | dict:
                     except ValueError:
                         rel = str(fpath)
                     hits.append({"file": rel, "line": lineno, "kind": m.group(1), "name": name})
+                    if len(hits) >= _MAX_SEARCH_HITS:
+                        return hits
     return hits
 
 
