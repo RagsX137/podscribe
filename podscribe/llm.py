@@ -95,7 +95,6 @@ def enhance_transcript(
         (so views can show "retrying…").
     """
     payload = {"model": model, "prompt": prompt, "stream": True}
-    delays = [1, 2, 4]
 
     for attempt in range(max_retries):
         try:
@@ -127,7 +126,7 @@ def enhance_transcript(
             except requests.RequestException as e:
                 if attempt < max_retries - 1:
                     on_retry(attempt + 1, str(e))
-                    time.sleep(delays[min(attempt, len(delays) - 1)])
+                    time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                     continue
                 return None
 
@@ -142,13 +141,13 @@ def enhance_transcript(
             # 5xx (or unknown status): mirror the RequestException arm
             if attempt < max_retries - 1:
                 on_retry(attempt + 1, str(e))
-                time.sleep(delays[min(attempt, len(delays) - 1)])
+                time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                 continue
             return None
         except requests.RequestException as e:
             if attempt < max_retries - 1:
                 on_retry(attempt + 1, str(e))
-                time.sleep(delays[min(attempt, len(delays) - 1)])
+                time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                 continue
             return None
 
@@ -193,6 +192,8 @@ def _extract_fenced_yaml(text: str) -> Optional[str]:
 
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 
+RETRY_DELAYS = [1, 2, 4]
+
 
 def chat_stream(
     model: str,
@@ -202,6 +203,7 @@ def chat_stream(
     max_retries: int = 3,
     on_token: Callable[[str], None] = lambda t: None,
     on_message: Callable[[dict], None] = lambda d: None,
+    on_retry: Callable[[int, str], None] = lambda a, e: None,
 ) -> Optional[str]:
     """Stream from Ollama /api/chat with optional tools support.
 
@@ -221,8 +223,6 @@ def chat_stream(
     }
     if tools:
         payload["tools"] = tools
-
-    delays = [1, 2, 4]
 
     for attempt in range(max_retries):
         try:
@@ -258,12 +258,14 @@ def chat_stream(
             if status is not None and 400 <= status < 500:
                 return None
             if attempt < max_retries - 1:
-                time.sleep(delays[min(attempt, len(delays) - 1)])
+                on_retry(attempt + 1, str(e))
+                time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                 continue
             return None
         except requests.RequestException as e:
             if attempt < max_retries - 1:
-                time.sleep(delays[min(attempt, len(delays) - 1)])
+                on_retry(attempt + 1, str(e))
+                time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
                 continue
             return None
 

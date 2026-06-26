@@ -441,3 +441,23 @@ def test_chat_stream_no_retry_on_4xx():
         result = chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}])
     assert result is None
     assert mock_post.call_count == 1
+
+
+def test_chat_stream_cleans_up_on_stream_error():
+    """If iter_lines raises mid-stream, returns None and does not re-raise."""
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.iter_lines = MagicMock(side_effect=requests.ConnectionError("stream dropped"))
+
+    tokens: list = []
+    msgs: list = []
+
+    with patch("podscribe.llm.requests.post", return_value=resp):
+        with patch("podscribe.llm.time.sleep"):
+            result = chat_stream(
+                "qwen3.6:27b", [{"role": "user", "content": "hi"}], max_retries=1,
+                on_token=tokens.append, on_message=msgs.append,
+            )
+    assert result is None
+    assert tokens == []
+    assert msgs == []
