@@ -59,3 +59,25 @@ def load_manifest(asr_dir: Path) -> list[dict]:
         clip["f32_path"] = str(f32)
         clip["txt_path"] = str(txt)
     return clips
+
+
+# --- stubs (replaced by Tasks 4-5) ----------------------------------------- #
+
+def normalize_pair(reference: str, hypothesis: str) -> tuple[str, str]:
+    """STUB: replaced in Task 4."""
+    raise NotImplementedError("normalize_pair: implemented in Task 4")
+
+
+def parse_clip_line(line: str) -> dict:
+    """STUB: replaced in Task 4."""
+    raise NotImplementedError("parse_clip_line: implemented in Task 4")
+
+
+def aggregate_results(records: list[dict]) -> dict:
+    """STUB: replaced in Task 5."""
+    raise NotImplementedError("aggregate_results: implemented in Task 5")
+
+
+def render_markdown_table(aggregated: dict) -> str:
+    """STUB: replaced in Task 5."""
+    raise NotImplementedError("render_markdown_table: implemented in Task 5")
