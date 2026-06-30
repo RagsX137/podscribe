@@ -1,7 +1,16 @@
 # podscribe
 
-Local-first live transcription for 1:1s and team meetings.  
+Podscribe is a Local-first Live Transcription and summarization tool for team meetings and 1:1s to help team leads manage different teams. 
+
+Built from the ground up with Apple Silicon in mind.
+
+Use Podscribe to act as your econd pair of eyes and help manage your pods/teams effectively 
+
+In a nutshell:
+
 mic → VAD → mlx-whisper → markdown · fully on your machine · no cloud.
+
+VAD (Voice Activity Detection) is a foundational AI technology used in live transcription to determine exactly when a human starts and stops speaking. It acts as an audio "traffic controller," filtering out background noise and only sending actual human speech to the transcription model
 
 ---
 
@@ -156,11 +165,11 @@ Running `podscribe` at a TTY opens the two-pane modal interface:
 SCREEN 1  —  NORMAL MODE  ·  DASHBOARD VIEW
 ┌─ PODS ──────┐ ┌─ Dashboard ──────────────────────────────────────┐
 │ ▶ sam-chen  │ │ Sam Chen  ·  Senior Engineer  ·  weekly          │
-│   alex-tan  │ │                                                   │
+│   alex-tan  │ │                                                  │
 │   priya-k   │ │  TOTAL MEETINGS   ENHANCED       LAST MET        │
-│             │ │  12               9  75%          3d ago          │
-│             │ │                                                   │
-│             │ │  RECENT MEETINGS                                  │
+│             │ │  12               9  75%          3d ago         │
+│             │ │                                                  │
+│             │ │  RECENT MEETINGS                                 │
 │             │ │  ▶  2026-06-27 14:02  [1on1]   42m  ✓ enhanced   │
 │             │ │     2026-06-20 09:15  [1on1]   38m  → raw        │
 └─────────────┘ └──────────────────────────────────────────────────┘
