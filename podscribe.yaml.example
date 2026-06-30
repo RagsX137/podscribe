@@ -1,8 +1,8 @@
 god:
-  model: gemma4:12b-mlx
+  model: llama3.2:3b              # Ollama model tag for god mode (falls back to llm.model)
 llm:
-  model: qwen3.6:35b-mlx
-  preserve_speakers: true
+  model: qwen2.5:7b               # Ollama model tag for enhance / consolidate
+  preserve_speakers: true         # prepend speaker-preservation preamble to LLM calls
   prompt_template: 'You are summarizing a 1:1 meeting transcript into clean, scannable
     markdown.
 
@@ -98,4 +98,5 @@ llm:
     {{transcript}}
 
     '
-last_pod: demo
+# last_pod is written automatically by the CLI; tracks most-recently used pod
+# last_pod: my-pod-name

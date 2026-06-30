@@ -15,6 +15,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
+# 1b. Set up config files (gitignored — contain your real names and model prefs)
+cp podscribe.yaml.example podscribe.yaml
+cp leadership_team.yaml.example leadership_team.yaml
+# Edit each file: add your team members to leadership_team.yaml and
+# choose your Ollama model in podscribe.yaml
+
 # 2. Create a pod for your first direct report
 podscribe init sam-chen --display-name "Sam Chen" --role "Senior Engineer"
 
@@ -224,6 +230,7 @@ Any other `--model` value is passed through to `mlx-whisper` unchanged, so full 
 - **All processing local.** Whisper runs via Apple MLX on your machine. No network calls during recording or transcription.
 - **Raw audio kept by default** to enable speaker diarization (future). Use `--no-keep-audio` to delete after recording.
 - **Pods are isolated.** Each person's data lives in its own directory. Easy to back up, share, or delete one without touching others.
+- **Config files are gitignored.** `podscribe.yaml` and `leadership_team.yaml` contain your real team names and personal settings and are excluded from version control. Copy from the `.example` files to get started.
 
 ## Tests
 
