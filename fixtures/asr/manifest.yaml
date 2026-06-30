@@ -1,0 +1,13 @@
+clips:
+  - name: short-clear
+    duration_s: 14.4
+    source: "synthesized via macOS `say` command, public-domain pangram text"
+    notes: "clean single-speaker, pangram content (5 classic pangrams)"
+  - name: short-names
+    duration_s: 18.1
+    source: "synthesized via macOS `say` command, made-up project and names"
+    notes: "proper nouns and tech jargon (Atlas, Kafka, GraphQL, MLX, Anurag, Priya, Sam) to exercise glossary"
+  - name: short-numbers
+    duration_s: 17.2
+    source: "synthesized via macOS `say` command"
+    notes: "numbers, dates, version strings, time zones — different acoustic profile"
