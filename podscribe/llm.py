@@ -161,13 +161,19 @@ def build_consolidate_prompt(template: str, summary: str) -> str:
     return prompt
 
 
+def _strip_think_blocks(text: str) -> str:
+    """Remove extended-thinking <think>...</think> blocks from LLM output."""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
 def extract_structured_fields(response: str) -> Optional[dict]:
     """Parse YAML structured fields from LLM response.
 
-    Tries full response first, then fenced code blocks.
+    Strips extended-thinking <think>...</think> blocks, then tries
+    full response and fenced code blocks.
     Returns dict with known fields or None.
     """
-    text = response.strip()
+    text = _strip_think_blocks(response.strip())
     if not text:
         return None
 

@@ -125,6 +125,7 @@ def run_record_session(
     *,
     glossary_prompt: Optional[str] = None,
     wav_writer=None,
+    keep_audio: bool = True,
     on_segment=lambda s: None,
     on_status=lambda d: None,
     on_done=lambda n: None,
@@ -197,7 +198,7 @@ def run_record_session(
                 pass
         meeting.duration_sec = int(time.monotonic() - start_monotonic)
         meeting.ended_at = datetime.now().isoformat(timespec="seconds")
-        finalize_meeting(meeting, keep_audio=(wav_writer is not None))
+        finalize_meeting(meeting, keep_audio=keep_audio)
         on_done(segment_count)
 
 
@@ -277,7 +278,7 @@ def cmd_record(args) -> int:
 
     run_record_session(
         pod, meeting, capture, transcriber,
-        glossary_prompt=glossary_prompt, wav_writer=wav_writer,
+        glossary_prompt=glossary_prompt, wav_writer=wav_writer, keep_audio=args.keep_audio,
         on_segment=_on_segment, on_status=_on_status, on_done=_on_done,
     )
     return 0
@@ -318,7 +319,7 @@ def cmd_list(args) -> int:
 
     # Filter
     if args.since:
-        rows = [r for r in rows if _row_date(r) >= cutoff]
+        rows = [r for r in rows if (d := _row_date(r)) is not None and d >= cutoff]
 
     if valid_type is not None:
         rows = [r for r in rows if r.get("type") == valid_type]
@@ -350,9 +351,15 @@ def cmd_list(args) -> int:
 
 
 def _row_date(row: dict):
-    """Parse a date string from a row's 'date' field (DD-MMM-YYYY)."""
+    """Parse a date string from a row's 'date' field (DD-MMM-YYYY). Returns None on bad data."""
     from datetime import datetime
-    return datetime.strptime(row["date"], "%d-%b-%Y").date()
+    try:
+        raw = row.get("date", "")
+        if not raw:
+            return None
+        return datetime.strptime(raw, "%d-%b-%Y").date()
+    except ValueError:
+        return None
 
 
 def _row_pod_name(row: dict) -> str:

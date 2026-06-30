@@ -13,3 +13,6 @@ pods/
 .superpowers/
 .worktrees/
 leadership_team.yaml
+podscribe.yaml
+docs/fso/
+docs/superpowers/

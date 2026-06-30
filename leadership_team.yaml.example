@@ -1,0 +1,14 @@
+# Global glossary — names and terms injected into Whisper as initial_prompt for all pods.
+# Copy this file to leadership_team.yaml and populate with your own team's names.
+#
+# Entries can be plain strings or dicts with term + category:
+#   Plain:  ["Alice Smith", "Bob Jones"]
+#   Dicts:  [{term: "Alice Smith", category: "person"}, {term: "Project Atlas", category: "project"}]
+#
+# Plain strings are normalised to {term: "...", category: ""} at load time.
+
+glossary:
+  - "Alice Smith"
+  - "Bob Jones"
+  - term: "Project Atlas"
+    category: project

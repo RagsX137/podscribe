@@ -6,6 +6,7 @@ import shlex
 from typing import Any, Callable, Optional
 
 from . import agent_tools
+from . import fs_tools
 from .config import load_god_model
 from .llm import chat_stream
 
@@ -238,6 +239,82 @@ def _build_tool_defs() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_directory",
+                "description": "List files and directories under a path in the project",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Directory path relative to project root (default '.')"},
+                        "recursive": {"type": "boolean", "description": "Recurse into subdirectories"},
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_file_tool",
+                "description": "Read a file in the project, optionally between start_line and end_line (1-based)",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "File path relative to project root"},
+                        "start_line": {"type": "integer", "description": "First line to return (1-based, inclusive)"},
+                        "end_line": {"type": "integer", "description": "Last line to return (1-based, inclusive)"},
+                    },
+                    "required": ["path"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_fs",
+                "description": "Fixed-string search across project files; returns [{file, line, text}]",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search string (fixed, not regex)"},
+                        "path": {"type": "string", "description": "Root path to search (default '.')"},
+                        "include_glob": {"type": "string", "description": "Glob filter, e.g. '*.py' or '*.md'"},
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "find_symbol",
+                "description": "Find Python def/class declarations by name; returns [{file, line, kind, name}]",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Symbol name to find"},
+                        "path": {"type": "string", "description": "Root path to search (default '.')"},
+                    },
+                    "required": ["name"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "find_references",
+                "description": "Find all occurrences of an identifier across project files; returns [{file, line, text}]",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Identifier to find"},
+                        "path": {"type": "string", "description": "Root path to search (default '.')"},
+                    },
+                    "required": ["name"],
+                },
+            },
+        },
     ]
 
 
@@ -297,6 +374,11 @@ TOOL_REGISTRY: dict[str, Callable] = {
     "glossary_add": agent_tools.glossary_add,
     "glossary_remove": agent_tools.glossary_remove,
     "export_data": agent_tools.export_data,
+    "list_directory":   fs_tools.list_directory,
+    "read_file_tool":   fs_tools.read_file_tool,
+    "search_fs":        fs_tools.search_fs,
+    "find_symbol":      fs_tools.find_symbol,
+    "find_references":  fs_tools.find_references,
 }
 
 

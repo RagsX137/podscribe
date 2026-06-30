@@ -1198,6 +1198,75 @@ def test_cmd_list_type_filter_works(tmp_path, monkeypatch, capsys):
     assert "150000" not in captured.out
 
 
+# ---------------------------------------------------------------------------
+# Fix 1: _row_date robustness
+# ---------------------------------------------------------------------------
+
+def test_cmd_list_since_skips_rows_with_missing_date(tmp_path, monkeypatch, capsys):
+    """Rows with a missing 'date' key are silently skipped, not crashed on."""
+    from podscribe.storage import append_log_row, init_pod
+    from podscribe.cli import cmd_list, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    # Row with a valid date
+    append_log_row(pod, {
+        "date": "22-JUN-2026",
+        "person": "Sam",
+        "meeting_id": "2026-06-22-143000-sam-chen",
+        "type": "1on1",
+        "quick_summary": "good row",
+        "key_topics": "", "action_items": "", "blockers": "", "next_steps": "",
+    })
+    # Manually append a row with a blank date directly to the CSV
+    csv_path = tmp_path / "pods" / "sam-chen" / "meetings.csv"
+    with csv_path.open("a") as f:
+        f.write(",,2026-06-22-150000-sam-chen,1on1,bad row,,,,\n")
+
+    args = build_parser().parse_args(["list", "--all", "--since", "7d"])
+    rc = cmd_list(args)
+    assert rc == 0  # must not crash
+
+
+def test_cmd_list_since_skips_rows_with_malformed_date(tmp_path, monkeypatch, capsys):
+    """Rows whose date doesn't match DD-MMM-YYYY are silently skipped."""
+    from podscribe.storage import append_log_row, init_pod
+    from podscribe.cli import cmd_list, build_parser
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    append_log_row(pod, {
+        "date": "2026-06-22",   # ISO format, wrong for this field
+        "person": "Sam",
+        "meeting_id": "2026-06-22-143000-sam-chen",
+        "type": "1on1",
+        "quick_summary": "bad date format",
+        "key_topics": "", "action_items": "", "blockers": "", "next_steps": "",
+    })
+
+    args = build_parser().parse_args(["list", "--all", "--since", "7d"])
+    rc = cmd_list(args)
+    assert rc == 0  # must not crash
+
+
+def test_row_date_returns_none_for_blank_and_missing():
+    """_row_date returns None rather than raising for blank or absent date."""
+    from podscribe.cli import _row_date
+
+    assert _row_date({"date": ""}) is None
+    assert _row_date({}) is None
+    assert _row_date({"date": "not-a-date"}) is None
+
+
+def test_row_date_parses_valid_date():
+    """_row_date round-trips a well-formed DD-MMM-YYYY date."""
+    from podscribe.cli import _row_date
+    from datetime import date
+
+    result = _row_date({"date": "22-JUN-2026"})
+    assert result == date(2026, 6, 22)
+
+
 class FakeCapture:
     def __init__(self, segments):
         self._segments = iter(segments)
@@ -1241,6 +1310,7 @@ def test_run_record_session_drives_callbacks_and_writes_transcript(tmp_path, mon
 
     run_record_session(
         pod, meeting, capture, transcriber,
+        keep_audio=False,
         on_segment=segments_seen.append,
         on_status=statuses.append,
         on_done=done_counts.append,
@@ -1278,10 +1348,43 @@ def test_run_record_session_keeps_audio_when_wav_writer_provided(tmp_path, monke
     wav.setframerate(16000)
 
     run_record_session(
-        pod, meeting, capture, transcriber, wav_writer=wav,
+        pod, meeting, capture, transcriber, wav_writer=wav, keep_audio=True,
         on_segment=lambda s: None, on_status=lambda d: None, on_done=lambda n: None,
     )
     assert meeting.audio_path.exists()
+
+
+def test_run_record_session_deletes_audio_when_keep_audio_false(tmp_path, monkeypatch):
+    """keep_audio=False causes the .raw file to be deleted after finalize.
+
+    This is the regression path for the 'keep_audio inverted' bug: the old code
+    used keep_audio=(wav_writer is not None), so it was impossible to write audio
+    AND delete it afterwards.  The new code passes keep_audio directly.
+    """
+    monkeypatch.chdir(tmp_path)
+    import wave as wave_mod
+    pod = Pod(
+        name="sam-chen", display_name="Sam", role="", cadence="weekly",
+        notes="", created_at="2026-06-23", glossary=None, llm=None,
+        base_path=tmp_path / "pods" / "sam-chen",
+    )
+    (pod.base_path / "transcripts").mkdir(parents=True)
+    meeting = start_meeting(pod)
+
+    capture = FakeCapture([np.zeros(16000, dtype=np.float32)])
+    transcriber = FakeTranscriber()
+    # Open a wav_writer so audio IS written to disk during the session…
+    wav = wave_mod.open(str(meeting.audio_path), "wb")
+    wav.setnchannels(1)
+    wav.setsampwidth(2)
+    wav.setframerate(16000)
+
+    # …but pass keep_audio=False so it gets deleted on finalize.
+    run_record_session(
+        pod, meeting, capture, transcriber, wav_writer=wav, keep_audio=False,
+        on_segment=lambda s: None, on_status=lambda d: None, on_done=lambda n: None,
+    )
+    assert not meeting.audio_path.exists()
 
 
 def test_main_no_args_non_tty_prints_help_and_exits_2(monkeypatch):

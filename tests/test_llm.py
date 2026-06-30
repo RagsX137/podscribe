@@ -10,6 +10,7 @@ from podscribe.llm import (
     chat_stream,
     enhance_transcript,
     extract_structured_fields,
+    _strip_think_blocks,
 )
 
 
@@ -139,6 +140,69 @@ def test_extract_structured_fields_invalid():
 
 def test_extract_structured_fields_empty():
     result = extract_structured_fields("")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: <think> block stripping
+# ---------------------------------------------------------------------------
+
+def test_strip_think_blocks_removes_single_block():
+    """A single <think>…</think> block is removed entirely."""
+    raw = "<think>internal reasoning here</think>useful output"
+    assert _strip_think_blocks(raw) == "useful output"
+
+
+def test_strip_think_blocks_removes_multiline_block():
+    """Multi-line think blocks (the common Qwen case) are removed with re.DOTALL."""
+    raw = "<think>\nline one\nline two\n</think>\nactual answer"
+    assert _strip_think_blocks(raw) == "actual answer"
+
+
+def test_strip_think_blocks_removes_multiple_blocks():
+    """Multiple separate <think> blocks are all stripped."""
+    raw = "<think>first</think>middle<think>second</think>end"
+    assert _strip_think_blocks(raw) == "middleend"
+
+
+def test_strip_think_blocks_is_noop_when_no_blocks():
+    """Plain text without any think blocks passes through unchanged."""
+    raw = "quick_summary: hello\nkey_topics: []\n"
+    assert _strip_think_blocks(raw) == raw.strip()
+
+
+def test_extract_structured_fields_strips_think_before_parsing():
+    """Qwen-style <think> preamble does not prevent YAML extraction."""
+    response = (
+        "<think>\nLet me reason about this…\n</think>\n"
+        "quick_summary: Synced on Q3 roadmap\n"
+        "key_topics:\n  - roadmap\n"
+        "action_items: []\nblockers: []\nnext_steps: []\n"
+    )
+    result = extract_structured_fields(response)
+    assert result is not None
+    assert result["quick_summary"] == "Synced on Q3 roadmap"
+    assert "roadmap" in result["key_topics"]
+
+
+def test_extract_structured_fields_think_before_fenced_yaml():
+    """<think> block before a fenced YAML block is handled correctly."""
+    response = (
+        "<think>reasoning</think>\n"
+        "Some prose.\n"
+        "```yaml\n"
+        "quick_summary: Fenced result\n"
+        "key_topics: []\n"
+        "```\n"
+    )
+    result = extract_structured_fields(response)
+    assert result is not None
+    assert result["quick_summary"] == "Fenced result"
+
+
+def test_extract_structured_fields_only_think_block_returns_none():
+    """A response that is only a <think> block (nothing else) returns None."""
+    result = extract_structured_fields("<think>pure reasoning, no answer</think>")
     assert result is None
 
 

@@ -35,6 +35,9 @@ def test_build_tool_defs_has_all_tools():
         "get_recording_status", "enhance_meeting", "consolidate_meeting",
         "search_transcripts", "glossary_list", "glossary_add", "glossary_remove",
         "export_data",
+        # filesystem tools
+        "list_directory", "read_file_tool", "search_fs",
+        "find_symbol", "find_references",
     }
     assert names == expected
 
@@ -229,6 +232,9 @@ def test_tool_registry_has_all_tools():
         "get_recording_status", "enhance_meeting", "consolidate_meeting",
         "search_transcripts", "glossary_list", "glossary_add", "glossary_remove",
         "export_data",
+        # filesystem tools
+        "list_directory", "read_file_tool", "search_fs",
+        "find_symbol", "find_references",
     }
     assert set(TOOL_REGISTRY.keys()) == expected
 
