@@ -196,3 +196,198 @@ def render_markdown_table(aggregated: dict) -> str:
             f"{a['mean_wil']:.3f} | {a['mean_wip']:.3f} |"
         )
     return "\n".join(lines)
+
+
+# --- child worker + parent orchestrator ------------------------------------ #
+
+def _run_child(model: str, clip_names: Optional[list[str]], asr_dir: Path,
+               runs: int) -> None:
+    """Child process body: load one model and print one JSON line per (clip, run).
+
+    Stdout is reserved strictly for JSON output; all progress goes to stderr.
+    Exits 0 on success; on error prints {"error": ...} and exits 1.
+    """
+    try:
+        import resource
+        import time
+
+        import numpy as np
+
+        from podscribe.transcriber import Transcriber
+
+        clips = load_manifest(asr_dir)
+        if clip_names:
+            wanted = set(clip_names)
+            clips = [c for c in clips if c["name"] in wanted]
+            if not clips:
+                raise ValueError(
+                    f"no clips in manifest match --clips {clip_names!r}"
+                )
+
+        t = Transcriber(model=model)
+        # warm the model on the first clip so subsequent runs are post-load
+        if clips and runs >= 1:
+            warm_audio = np.fromfile(clips[0]["f32_path"], dtype=np.float32)
+            t.transcribe(warm_audio, sample_rate=16000)
+
+        for clip in clips:
+            audio = np.fromfile(clip["f32_path"], dtype=np.float32)
+            reference = Path(clip["txt_path"]).read_text(encoding="utf-8").strip()
+            duration = float(clip.get("duration_s", len(audio) / 16000.0))
+            for run_idx in range(runs):
+                sys.stderr.write(
+                    f"  [{model}] {clip['name']} run {run_idx + 1}/{runs}...\n"
+                )
+                sys.stderr.flush()
+                t0 = time.perf_counter()
+                segments = t.transcribe(audio, sample_rate=16000)
+                wall_s = time.perf_counter() - t0
+                hypothesis = " ".join(s["text"] for s in segments).strip()
+                metrics = normalize_pair_and_compute(reference, hypothesis)
+                peak_rss_mb = resource.getrusage(
+                    resource.RUSAGE_SELF
+                ).ru_maxrss / 1024.0  # macOS reports bytes; Linux reports KB
+                record = {
+                    "model": model,
+                    "clip": clip["name"],
+                    "run": run_idx,
+                    "duration_s": duration,
+                    "wall_s": wall_s,
+                    "rtf": wall_s / duration if duration else 0.0,
+                    "hypothesis": hypothesis,
+                    "peak_rss_mb": peak_rss_mb,
+                    **metrics,
+                }
+                sys.stdout.write(_json.dumps(record) + "\n")
+                sys.stdout.flush()
+        sys.exit(0)
+    except Exception as e:  # surface to parent as a structured line
+        sys.stdout.write(_json.dumps({"error": str(e), "model": model}) + "\n")
+        sys.stdout.flush()
+        sys.exit(1)
+
+
+def _run_parent(models: list[str], clip_names: Optional[list[str]],
+                asr_dir: Path, runs: int, out_path: Optional[Path]) -> int:
+    """Spawn one child per model, aggregate JSON lines, render, optionally save."""
+    import subprocess
+
+    records: list[dict] = []
+    errors: list[dict] = []
+
+    for model in models:
+        cmd = [
+            sys.executable, "-m", "benchmarks.bench_transcribe",
+            "--child", "--model", model,
+            "--runs", str(runs),
+        ]
+        if clip_names:
+            cmd += ["--clips", ",".join(clip_names)]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            rec = parse_clip_line(line)
+            if "error" in rec:
+                errors.append(rec)
+            else:
+                records.append(rec)
+        if proc.returncode != 0 and proc.stderr:
+            sys.stderr.write(proc.stderr)
+
+    if errors:
+        for e in errors:
+            sys.stderr.write(f"ERROR ({e.get('model', '?')}): {e['error']}\n")
+        return 1
+
+    if not records:
+        sys.stderr.write("no records produced (no matching clips?)\n")
+        return 1
+
+    aggregated = aggregate_results(records)
+    md = render_markdown_table(aggregated)
+    sys.stdout.write("\n" + md + "\n\n")
+
+    snapshot = {
+        "meta": {
+            "models": models,
+            "clips": sorted({r["clip"] for r in records}),
+            "runs": runs,
+            "timestamp": _results_timestamp(),
+        },
+        "records": records,
+        "aggregated": aggregated,
+        "markdown": md,
+    }
+    if out_path is not None:
+        out_path.write_text(_json.dumps(snapshot, indent=2), encoding="utf-8")
+        sys.stderr.write(f"\nwrote results: {out_path}\n")
+    return 0
+
+
+def _results_timestamp() -> str:
+    from datetime import datetime
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    import argparse
+
+    # repo root = parent of benchmarks/
+    repo_root = Path(__file__).resolve().parent.parent
+    default_asr = repo_root / "fixtures" / "asr"
+    default_results = repo_root / "benchmarks" / "results"
+
+    p = argparse.ArgumentParser(
+        description="Benchmark bundled Whisper models on fixture audio.",
+    )
+    p.add_argument("--models", default="base,large-v3-turbo",
+                   help="Comma-separated model names (default: base,large-v3-turbo)")
+    p.add_argument("--clips", default=None,
+                   help="Comma-separated clip names from manifest (default: all)")
+    p.add_argument("--runs", type=int, default=1,
+                   help="Repeats per clip (default: 1)")
+    p.add_argument("--asr-dir", type=Path, default=default_asr,
+                   help=f"Fixtures dir (default: {default_asr})")
+    p.add_argument("--regen", action="store_true",
+                   help="Write a results JSON snapshot to benchmarks/results/")
+    p.add_argument("--list-clips", action="store_true",
+                   help="Print manifest contents and exit")
+    # internal: child mode
+    p.add_argument("--child", action="store_true",
+                   help=argparse.SUPPRESS)
+    args = p.parse_args(argv)
+
+    if args.list_clips:
+        try:
+            clips = load_manifest(args.asr_dir)
+        except FileNotFoundError as e:
+            sys.stderr.write(str(e) + "\n")
+            return 1
+        for c in clips:
+            print(f"{c['name']:20s} {c.get('duration_s', 0):6.1f}s  "
+                  f"{c.get('source', '')}")
+        return 0
+
+    models = [m.strip() for m in args.models.split(",") if m.strip()]
+    clip_names = None
+    if args.clips:
+        clip_names = [c.strip() for c in args.clips.split(",") if c.strip()]
+
+    if args.child:
+        _run_child(args.models, clip_names, args.asr_dir, args.runs)
+        return 0  # _run_child exits, but be defensive
+
+    out_path = None
+    if args.regen:
+        default_results.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        out_path = default_results / f"bench-transcribe-{stamp}.json"
+
+    return _run_parent(models, clip_names, args.asr_dir, args.runs, out_path)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
