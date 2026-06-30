@@ -17,6 +17,7 @@ Usage:
 """
 from __future__ import annotations
 
+import json as _json
 import sys
 from pathlib import Path
 from typing import Optional
@@ -61,17 +62,76 @@ def load_manifest(asr_dir: Path) -> list[dict]:
     return clips
 
 
-# --- stubs (replaced by Tasks 4-5) ----------------------------------------- #
+# --- normalization + metrics ----------------------------------------------- #
+
+def _build_transform():
+    """jiwer.Compose of the standard normalization pipeline applied identically
+    to reference and hypothesis."""
+    import jiwer  # local import — keeps module importable without jiwer installed
+    # jiwer 4.x moved individual transform classes from `jiwer.transformations`
+    # (a *module* of prebuilt Compositions) to `jiwer.transforms` (the classes).
+    # Older jiwer kept them in `jiwer.transformations`; fall back if so.
+    try:
+        from jiwer.transforms import (  # jiwer >= 4.0
+            ToLowerCase, RemovePunctuation, RemoveMultipleSpaces, Strip,
+            RemoveWhiteSpace, Compose,
+        )
+    except ImportError:
+        from jiwer.transformations import (  # jiwer < 4.0
+            ToLowerCase, RemovePunctuation, StripMultipleSpaces, Strip,
+        )
+        try:
+            from jiwer.transformations import Compose
+        except ImportError:
+            from jiwer import Compose
+        # Older jiwer used StripMultipleSpaces; we still need tab-to-space
+        # conversion to make the whitespace-collapse tests pass.
+        return Compose([
+            ToLowerCase(),
+            RemovePunctuation(),
+            RemoveWhiteSpace(replace_by_space=True),
+            StripMultipleSpaces(),
+            Strip(),
+        ])
+    return Compose([
+        ToLowerCase(),
+        RemovePunctuation(),
+        RemoveWhiteSpace(replace_by_space=True),  # tabs/newlines -> spaces
+        RemoveMultipleSpaces(),
+        Strip(),
+    ])
+
+
+_TRANSFORM = None  # built lazily so the module imports without jiwer present
+
 
 def normalize_pair(reference: str, hypothesis: str) -> tuple[str, str]:
-    """STUB: replaced in Task 4."""
-    raise NotImplementedError("normalize_pair: implemented in Task 4")
+    """Apply the standard normalization to (reference, hypothesis)."""
+    global _TRANSFORM
+    if _TRANSFORM is None:
+        _TRANSFORM = _build_transform()
+    return _TRANSFORM(reference), _TRANSFORM(hypothesis)
+
+
+def normalize_pair_and_compute(reference: str, hypothesis: str) -> dict:
+    """Compute all 5 jiwer metrics on a normalized (reference, hypothesis) pair."""
+    import jiwer
+    ref_n, hyp_n = normalize_pair(reference, hypothesis)
+    return {
+        "wer": float(jiwer.wer(ref_n, hyp_n)),
+        "cer": float(jiwer.cer(ref_n, hyp_n)),
+        "mer": float(jiwer.mer(ref_n, hyp_n)),
+        "wil": float(jiwer.wil(ref_n, hyp_n)),
+        "wip": float(jiwer.wip(ref_n, hyp_n)),
+    }
 
 
 def parse_clip_line(line: str) -> dict:
-    """STUB: replaced in Task 4."""
-    raise NotImplementedError("parse_clip_line: implemented in Task 4")
+    """Decode one child's JSON stdout line. Raises json.JSONDecodeError on bad input."""
+    return _json.loads(line)
 
+
+# --- stubs (replaced by Task 5) -------------------------------------------- #
 
 def aggregate_results(records: list[dict]) -> dict:
     """STUB: replaced in Task 5."""
