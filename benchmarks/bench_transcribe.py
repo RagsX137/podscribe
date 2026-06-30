@@ -20,6 +20,7 @@ from __future__ import annotations
 import json as _json
 import sys
 from pathlib import Path
+from statistics import mean as _mean
 from typing import Optional
 
 import yaml
@@ -131,13 +132,67 @@ def parse_clip_line(line: str) -> dict:
     return _json.loads(line)
 
 
-# --- stubs (replaced by Task 5) -------------------------------------------- #
+# --- aggregation + rendering ----------------------------------------------- #
+
+# Param counts (rough) used only for the table's Params column.
+# Source: OpenAI Whisper model card + mlx-community model repos.
+_MODEL_PARAMS_M = {
+    "base": "~74 M",
+    "turbo": "~809 M",
+    "large-v3-turbo": "~809 M",
+}
+
 
 def aggregate_results(records: list[dict]) -> dict:
-    """STUB: replaced in Task 5."""
-    raise NotImplementedError("aggregate_results: implemented in Task 5")
+    """Group per-clip records by model and compute per-model means + peak RSS.
+
+    Returns {model: {clips, mean_wall_s, mean_rtf, peak_rss_mb, mean_wer, ...}}.
+    """
+    by_model: dict[str, list[dict]] = {}
+    for r in records:
+        by_model.setdefault(r["model"], []).append(r)
+
+    out: dict[str, dict] = {}
+    for model, recs in by_model.items():
+        peak = max(r["peak_rss_mb"] for r in recs) if recs else 0
+        out[model] = {
+            "clips": len(recs),
+            "mean_wall_s": _mean(r["wall_s"] for r in recs),
+            "mean_rtf": _mean(r["rtf"] for r in recs),
+            "peak_rss_mb": peak,
+            "mean_wer": _mean(r["wer"] for r in recs),
+            "mean_cer": _mean(r["cer"] for r in recs),
+            "mean_mer": _mean(r["mer"] for r in recs),
+            "mean_wil": _mean(r["wil"] for r in recs),
+            "mean_wip": _mean(r["wip"] for r in recs),
+        }
+    return out
 
 
 def render_markdown_table(aggregated: dict) -> str:
-    """STUB: replaced in Task 5."""
-    raise NotImplementedError("render_markdown_table: implemented in Task 5")
+    """Render the per-model summary as a markdown table.
+
+    Models ordered by param count ascending (base first). 'turbo' is omitted
+    because it is an alias of 'large-v3-turbo' (see transcriber.MODEL_MAP).
+    """
+    aliases = {"turbo"}  # not shown as its own row
+    order = ["base", "large-v3-turbo"]
+    # include any unknown models at the end, alphabetically
+    extras = sorted(m for m in aggregated if m not in order and m not in aliases)
+    rows = [m for m in order if m in aggregated] + extras
+
+    header = (
+        "| Model | Params | Mean RTF (↓) | Peak RSS (MB) | "
+        "Mean WER (↓) | Mean CER (↓) | Mean MER (↓) | Mean WIL (↓) | Mean WIP (↑) |\n"
+        "|---|---|---|---|---|---|---|---|---|"
+    )
+    lines = [header]
+    for m in rows:
+        a = aggregated[m]
+        lines.append(
+            f"| `{m}` | {_MODEL_PARAMS_M.get(m, '?')} | "
+            f"{a['mean_rtf']:.3f} | {int(a['peak_rss_mb'])} | "
+            f"{a['mean_wer']:.3f} | {a['mean_cer']:.3f} | {a['mean_mer']:.3f} | "
+            f"{a['mean_wil']:.3f} | {a['mean_wip']:.3f} |"
+        )
+    return "\n".join(lines)

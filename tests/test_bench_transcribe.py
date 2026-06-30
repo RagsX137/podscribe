@@ -119,3 +119,68 @@ def test_metrics_on_known_pair():
     assert 0.0 < metrics["mer"] < 1.0
     assert 0.0 < metrics["wil"] < 1.0
     assert 0.0 < metrics["wip"] < 1.0
+
+
+def _clip_record(model, clip, wer=0.1, cer=0.05, mer=0.08, wil=0.15, wip=0.85,
+                 wall_s=3.0, rtf=0.1, duration_s=30.0, peak_rss_mb=900):
+    return {
+        "model": model, "clip": clip, "duration_s": duration_s,
+        "wall_s": wall_s, "rtf": rtf,
+        "wer": wer, "cer": cer, "mer": mer, "wil": wil, "wip": wip,
+        "hypothesis": "x", "peak_rss_mb": peak_rss_mb,
+    }
+
+
+def test_aggregate_results_groups_by_model():
+    records = [
+        _clip_record("base", "a", wer=0.1, peak_rss_mb=900),
+        _clip_record("base", "b", wer=0.2, peak_rss_mb=900),  # peak is constant per model
+        _clip_record("large-v3-turbo", "a", wer=0.05, peak_rss_mb=4200),
+        _clip_record("large-v3-turbo", "b", wer=0.07, peak_rss_mb=4200),
+    ]
+    agg = aggregate_results(records)
+    assert set(agg.keys()) == {"base", "large-v3-turbo"}
+    assert agg["base"]["clips"] == 2
+    assert agg["base"]["mean_wer"] == pytest.approx(0.15)
+    assert agg["base"]["peak_rss_mb"] == 900
+    assert agg["large-v3-turbo"]["mean_wer"] == pytest.approx(0.06)
+
+
+def test_aggregate_results_computes_mean_for_all_metrics():
+    records = [_clip_record("base", "a", wer=0.1, cer=0.02, mer=0.04, wil=0.08, wip=0.92)]
+    agg = aggregate_results(records)
+    assert agg["base"]["mean_wer"] == pytest.approx(0.1)
+    assert agg["base"]["mean_cer"] == pytest.approx(0.02)
+    assert agg["base"]["mean_mer"] == pytest.approx(0.04)
+    assert agg["base"]["mean_wil"] == pytest.approx(0.08)
+    assert agg["base"]["mean_wip"] == pytest.approx(0.92)
+    assert agg["base"]["mean_rtf"] == pytest.approx(0.1)
+    assert agg["base"]["mean_wall_s"] == pytest.approx(3.0)
+
+
+def test_render_markdown_table_has_all_columns_and_rows():
+    records = [
+        _clip_record("base", "a", wer=0.10, cer=0.06, mer=0.09, wil=0.17, wip=0.83),
+        _clip_record("large-v3-turbo", "a", wer=0.05, cer=0.03, mer=0.04, wil=0.07, wip=0.93),
+    ]
+    agg = aggregate_results(records)
+    md = render_markdown_table(agg)
+    # header has every column
+    for col in ("Model", "Params", "Mean RTF", "Peak RSS (MB)",
+                "Mean WER", "Mean CER", "Mean MER", "Mean WIL", "Mean WIP"):
+        assert col in md
+    # one row per model
+    assert "| `base`" in md
+    assert "| `large-v3-turbo`" in md
+
+
+def test_render_markdown_table_orders_models_by_param_count():
+    records = [
+        _clip_record("large-v3-turbo", "a"),
+        _clip_record("base", "a"),
+    ]
+    agg = aggregate_results(records)
+    md = render_markdown_table(agg)
+    base_pos = md.find("`base`")
+    turbo_pos = md.find("`large-v3-turbo`")
+    assert base_pos < turbo_pos, "base should be listed before large-v3-turbo"
