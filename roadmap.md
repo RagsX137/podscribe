@@ -8,7 +8,9 @@ Split into **priority — active remaining items** (next up, ordered by value-fo
 
 Ordered by value-for-effort (highest first). `P-` items are the original showcase
 work; `F-` items are ported from `Recommended_fixes.md` (numeration preserved for
-traceability). Completed items are listed at the bottom for reference.
+traceability), and `R-` items are fixes added after a codebase review (rejected
+review claims are noted in the watchlist so they aren't re-flagged). Completed
+items are listed at the bottom for reference.
 
 ### Tier 1 — Quick wins (high value · low effort)
 
@@ -18,6 +20,25 @@ traceability). Completed items are listed at the bottom for reference.
 - **F-3.5 VAD 10s soft boundary** — when `MAX_SEGMENT_SEC` triggers, look one
   frame ahead: silence → yield cleanly, speech → extend to 12s then yield. Stops
   mid-word splits; ~1 hr. (Promoted from Future #2.)
+- **R-1 Validate `--device` in `AudioCapture.__init__`** (`audio.py:35-51`) —
+  probe the device index up front and raise a clear error ("no input device at
+  index N; run `podscribe list-devices`") instead of letting
+  `sd.InputStream.start()` surface a raw PortAudio traceback. Cheap, removes the
+  single most likely first-run failure mode. ~30 min.
+- **R-2 Handle `sounddevice.PortAudioError`** around the capture start in
+  `AudioCapture.segments()` (`audio.py:83-91`) and around `cmd_record`'s WAV open
+  (`cli.py:256-263`). Translate mic-permission / device-busy into a one-line
+  stderr message; crash-silently today. ~30 min.
+- **R-3 `--include-audio` flag for `export`** (`export.py:12,16-34`) — `.raw`
+  files are excluded by default (correct for most backups), but there's no way to
+  bundle the diarization source for migration. Add the inverse flag (default off)
+  that drops `.raw` from `_EXCLUDED_SUFFIXES` for that run. ~45 min.
+- **R-4 `--version`** flag on the top-level parser (`cli.py:798`) — currently
+  missing; trivial `action="version"`. ~10 min.
+- **R-5 Move `numpy` imports to function scope** (`cli.py:13`, `audio.py:15`) —
+  both modules import numpy at top level, slowing `podscribe --help` / `list` /
+  `init` (paths that never touch audio). `sounddevice`/`webrtcvad`/`mlx_whisper`
+  are already lazy; finish the sweep. ~30 min, mostly mechanical.
 
 ### Tier 2 — Core workflow transformations (high value · medium effort)
 
@@ -29,6 +50,20 @@ traceability). Completed items are listed at the bottom for reference.
   `next_steps` from the last 2 consolidate runs, with auto-injected
   cross-references ("Project Helios was also discussed with Priya on
   2026-06-21"). Eliminates the 20-minute pre-1:1 re-read. No LLM call needed.
+- **R-6 Rogue-thread cleanup in `stop_recording`** (`agent_tools.py:239-257`) —
+  `thread.join(timeout=10)` returns with the thread still alive, the session is
+  set to `None`, and the recorder keeps writing silently (orphaned capture
+  stream + open `.raw`). On timeout: re-call `capture.stop()`, leave `_recording_session`
+  in a `draining` state until the thread actually exits, and surface a "stopping
+  lingering recorder" warning. The error path today leaks an audio stream.
+  Medium effort — touches the module-global state and needs the god REPL to
+  poll for completion. ~half-day.
+- **R-7 VAD silence threshold as a CLI flag** (`audio.py:125`) — the
+  hardcoded `5` (150 ms) is baked in. Expose `--vad-silence-frames` on
+  `record`/god `start_recording`, matching the existing `--vad-aggressiveness`
+  pattern. Pairs with the broader VAD-tuning agenda in Future #2; do this one
+  first since it's the only knob a lead can *use today* for a noisy room.
+  ~1 hr.
 
 ### Tier 3 — The manager's real job (high value · medium-high effort)
 
@@ -76,6 +111,22 @@ traceability). Completed items are listed at the bottom for reference.
   `m` insert timestamped marker, `a` abort-without-save. Medium-high risk
   (threading + signals + audio hardware); current Ctrl+C-to-stop works and is
   well-tested, so worth doing but not bundled with other TUI work.
+- **R-8 TTL cache for `ollama_model_info`** (`llm.py`) — called on every
+  `enhance`/`consolidate`/`god` invocation; the `/api/show` round-trip is ~50–150
+  ms. 5-min `lru_cache`-style TTL (model metadata rarely changes). Low value
+  but trivially safe. ~20 min.
+- **R-9 Threaded WAV writer** in `run_record_session` (`cli.py:160-164`) —
+  `wav_writer.writeframes(pcm.tobytes())` runs inline with the transcribe loop and
+  blocks Whisper on slow disks. Move to a bounded-queue pusher thread (same
+  shape as the audio-capture callback); join on finalize. Net win on the long
+  meetings where buffer-overflow warnings (R-2's domain) currently show up.
+  ~half-day.
+- **R-10 `mlx_whisper.transcribe` timeout** (`transcriber.py:61`) — no abort; a
+  pathological segment can hang the recorder silently. mlx-whisper exposes no
+  cancellation API, so a real fix needs either a subprocess isolate or a
+  watchdog that tears down `AudioCapture` on a stalled transcribe. Deferred
+  until a real hang is observed; document the absence here so a future reviewer
+  doesn't read it as overlooked.
 
 ### Tier 6 — Watchlist (deferred decisions)
 
@@ -87,6 +138,47 @@ traceability). Completed items are listed at the bottom for reference.
   transcript (10-25 min for a 30-min meeting). Deferred per user decision
   ("gemma4 is garbage, Qwen is worth the wait"). Revisit if the wait becomes
   blocking in practice.
+- **R-11 Pod-config mtime in glossary cache key** (`config.py:195`) —
+  `get_effective_glossary` keys on leadership-team mtime + `id(pod.glossary)` +
+  `len(pod.glossary)`. A long-lived process holding a stale `Pod` object won't see
+  external edits to `pods/<name>/config.yaml`. In practice each CLI invocation
+  reloads `Pod` from disk, so cross-invocation staleness is impossible — the
+  only window is `god` REPL sessions where the `Pod` is held live in the
+  `_recording_session` dict. Add `pod.config_path.stat().st_mtime` to the key
+  when bridging that; cheap, ~15 min. Defer until god REPL is used against
+  externally-edited glossaries in the wild.
+- **R-12 `rewrite_argv` nested subcommands** (`cli.py:975-993`) —
+  `podscribe sam-chen config llm show` rewrites to `config sam-chen llm show`
+  and fails argparse. Note: `config` is project-scoped, not pod-scoped, so the
+  pod-first syntax structurally doesn't apply — no realistic caller is hit. Not
+  worth fixing until a *pod-scoped* nested command needs the same rewrite.
+  Document as a known limitation.
+- **R-13 Meeting-ID disambiguation suffix** (`models.py:25-28`) — seconds
+  only; two same-second recordings would collide. The review flagged this P0
+  but the CLI imposes multi-second recording length by construction (Ctrl+C +
+  audio write) and `is_recording_active()` guards against sub-second tear-down.
+  Cheap insurance anyway: add a `-(%04d)` counter when a path already exists.
+  Low priority; contradicts the review's P0 framing.
+
+### Review claims rejected (do not implement — keep here as a paper trail)
+
+- **"had_overflow never reset"** — `audio.py:81` resets `self._overflow = False`
+  at the start of every `segments()`; the review cited the reset line as the fix
+  location while asserting the reset didn't exist.
+- **"Global `pods/meetings.csv` not re-imported"** — `_safe_extract` in
+  `export.py:121-163` extracts every member except `podscribe.yaml`; the
+  `pods/meetings.csv` file *is* restored. The review confused the
+  conflict-detection loop for the extract list.
+- **"Search fails for typed meetings (3-level layout)"** — `search.py:61-81`
+  parses `stem[:10]` from the filename (always `YYYY-MM-DD…`), and lines 78-80
+  fall back to mtime when date parsing fails. The review's own prose conceded
+  "`[:10]` works".
+- **"Pipeline enhance + consolidate"** — `run_consolidate` (`cli.py:686-693`)
+  hard-errors without the enhanced summary file on disk; consolidate is a strict
+  downstream stage of enhance, not an independent parallelizable call. Would
+  break the documented flow.
+- **"Batch CSV writes"** — `append_log_row` is called once per `consolidate`;
+  `import` uses file extraction, not the row API. There is nothing to batch.
 
 ---
 
