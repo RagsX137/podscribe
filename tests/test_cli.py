@@ -1501,3 +1501,47 @@ def test_cmd_god_oneshot_valid_response_returns_0(tmp_path, monkeypatch, capsys)
     with patch("podscribe.agent.GodSession", return_value=_StubSession()):
         rc = main(["god", "list pods"])
     assert rc == 0
+
+
+def test_version_flag_prints_version_and_exits_zero(capsys):
+    """`podscribe --version` prints 'podscribe <version>' and returns 0."""
+    from podscribe.cli import main
+    rc = main(["--version"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "podscribe" in captured.out
+    # pyproject.toml declares version 0.1.0
+    assert "0.1.0" in captured.out
+
+
+def test_cli_top_level_does_not_import_numpy():
+    """Importing podscribe.cli must not pull numpy into sys.modules.
+
+    Paths like `podscribe --help`, `list`, `init` never touch audio and
+    should start fast. numpy is heavy and only needed in run_record_session.
+    """
+    import subprocess
+    import sys
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; import podscribe.cli; "
+         "sys.exit(0 if 'numpy' not in sys.modules else 1)"],
+        capture_output=True,
+    )
+    assert result.returncode == 0, (
+        f"numpy was imported at cli import time.\n"
+        f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+    )
+
+
+def test_export_include_audio_flag_parses():
+    from podscribe.cli import build_parser
+    args = build_parser().parse_args(["export", "--include-audio", "--out", "x.tar.gz"])
+    assert args.include_audio is True
+    assert args.out == "x.tar.gz"
+
+
+def test_export_include_audio_default_false():
+    from podscribe.cli import build_parser
+    args = build_parser().parse_args(["export"])
+    assert args.include_audio is False

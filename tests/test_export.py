@@ -265,3 +265,25 @@ def test_cmd_import_malformed_tarball_clean_error(tmp_path, monkeypatch, capsys)
     assert "Cannot read tarball" in captured.err
     assert "Traceback" not in captured.err
 
+
+def test_export_includes_raw_when_include_audio(tmp_path, monkeypatch):
+    """create_export(out, include_audio=True) bundles .raw files."""
+    monkeypatch.chdir(tmp_path)
+    _make_pod_with_content(tmp_path, "sam-chen")
+    out = tmp_path / "out.tar.gz"
+    create_export(out, include_audio=True)
+    with tarfile.open(out, "r:gz") as tar:
+        names = tar.getnames()
+    assert any(n.endswith(".raw") for n in names), "expected .raw in tarball"
+
+
+def test_export_include_audio_default_excludes(tmp_path, monkeypatch):
+    """create_export(out, include_audio=False) (default) still excludes .raw."""
+    monkeypatch.chdir(tmp_path)
+    _make_pod_with_content(tmp_path, "sam-chen")
+    out = tmp_path / "out2.tar.gz"
+    create_export(out, include_audio=False)
+    with tarfile.open(out, "r:gz") as tar:
+        names = tar.getnames()
+    assert not any(n.endswith(".raw") for n in names)
+

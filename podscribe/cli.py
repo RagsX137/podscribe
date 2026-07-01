@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import signal
 import sys
 import time
@@ -9,8 +10,6 @@ import wave
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-
-import numpy as np
 
 from .config import get_effective_glossary, load_consolidate_prompt, load_god_model, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_god_model, save_project_config
 from rich.console import Console
@@ -135,6 +134,7 @@ def run_record_session(
     Headless: callers (plain wrapper or rich view) decide what to render.
     Owns SIGINT (stop capture), the .raw cleanup, and finalize_meeting.
     """
+    import numpy as np
     with meeting.transcript_path.open("w") as f:
         f.write(f"# Meeting: {meeting.id}\n\n")
         f.write(f"- pod: {pod.name} ({pod.display_name})\n")
@@ -581,7 +581,7 @@ def cmd_export(args) -> int:
     """Export all pod data to a tarball."""
     from .export import create_export
     out = Path(args.out) if args.out else None
-    result = create_export(out)
+    result = create_export(out, include_audio=args.include_audio)
     if str(result) == "-":
         return 0
     print(f"Exported to {result}")
@@ -799,6 +799,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="podscribe",
         description="Local-first live transcription for 1:1s and team meetings.",
     )
+    try:
+        _version = importlib.metadata.version("podscribe")
+    except importlib.metadata.PackageNotFoundError:
+        _version = "unknown"
+    p.add_argument("--version", action="version", version=f"podscribe {_version}")
     sub = p.add_subparsers(dest="command", required=True)
 
     # init
@@ -925,6 +930,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.add_argument(
         "--out", metavar="PATH",
         help="Output path (default: stdout). Example: pods-2026-06-22.tar.gz",
+    )
+    p_export.add_argument(
+        "--include-audio", action="store_true", default=False,
+        help="Bundle .raw audio files (excluded by default).",
     )
     p_export.set_defaults(func=cmd_export)
 

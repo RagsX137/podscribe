@@ -13,13 +13,14 @@ _EXCLUDED_SUFFIXES = {".raw"}
 _EXCLUDED_TOP_LEVEL = {".env"}
 
 
-def create_export(out_path: Optional[Path] = None) -> Path:
+def create_export(out_path: Optional[Path] = None, *, include_audio: bool = False) -> Path:
     """Bundle pods/, leadership_team.yaml, and podscribe.yaml into a tar.gz.
 
-    Excludes .raw files, .env, __pycache__/, .pytest_cache/, .venv/.
+    Excludes .raw files, .env, __pycache__/, .pytest_cache/, .venv/ by default.
+    Set include_audio=True to bundle .raw (diarization source) for migration.
     If out_path is None or "-", write to sys.stdout.buffer.
     """
-    members = list(_iter_export_members())
+    members = list(_iter_export_members(include_audio=include_audio))
 
     if out_path is None or str(out_path) == "-":
         with tarfile.open(fileobj=sys.stdout.buffer, mode="w:gz") as tar:
@@ -34,7 +35,7 @@ def create_export(out_path: Optional[Path] = None) -> Path:
     return out_path
 
 
-def _iter_export_members() -> Iterator[Path]:
+def _iter_export_members(*, include_audio: bool = False) -> Iterator[Path]:
     """Walk pods/, leadership_team.yaml, podscribe.yaml; yield paths to include."""
     cwd = Path.cwd()
     pods_dir = cwd / "pods"
@@ -45,7 +46,7 @@ def _iter_export_members() -> Iterator[Path]:
             rel_parts = path.relative_to(cwd).parts
             if any(part in _EXCLUDED_DIR_NAMES for part in rel_parts):
                 continue
-            if path.suffix in _EXCLUDED_SUFFIXES:
+            if path.suffix in _EXCLUDED_SUFFIXES and not include_audio:
                 continue
             yield path
     for fname in ("leadership_team.yaml", "podscribe.yaml"):
