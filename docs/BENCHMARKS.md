@@ -10,8 +10,8 @@ and is omitted from the table to avoid duplicating its row.
 
 | Model | Params | Mean RTF (↓) | Peak RSS (MB) | Mean WER (↓) | Mean CER (↓) | Mean MER (↓) | Mean WIL (↓) | Mean WIP (↑) |
 |---|---|---|---|---|---|---|---|---|
-| `base` | ~74 M | 0.010 | 490992 | 0.132 | 0.100 | 0.131 | 0.199 | 0.801 |
-| `large-v3-turbo` | ~809 M | 0.048 | 1824400 | 0.098 | 0.096 | 0.098 | 0.142 | 0.858 |
+| `base` | ~74 M | 0.009 | 480 | 0.132 | 0.100 | 0.131 | 0.199 | 0.801 |
+| `large-v3-turbo` | ~809 M | 0.047 | 1783 | 0.098 | 0.096 | 0.098 | 0.142 | 0.858 |
 
 Generated on 2026-06-30 on an Apple M1 Max with 32 GB RAM. Model cache warm
 (`~/.cache/huggingface/`).
@@ -22,9 +22,9 @@ Generated on 2026-06-30 on an Apple M1 Max with 32 GB RAM. Model cache warm
 
 | Clip | `base` | `large-v3-turbo` |
 |---|---|---|
-| short-clear | 0.011 | 0.055 |
-| short-names | 0.010 | 0.044 |
-| short-numbers | 0.009 | 0.046 |
+| short-clear | 0.010 | 0.053 |
+| short-names | 0.009 | 0.043 |
+| short-numbers | 0.009 | 0.045 |
 
 #### WER (word error rate)
 
@@ -106,9 +106,6 @@ float32 `.f32` file paired with a hand-transcribed `.txt` reference.
   while Whisper outputs digit form (`42`, `2026`). jiwer's default normalization
   treats these as different words. The other two clips show the expected gap
   (`large-v3-turbo` reaches WER = 0.0 on `short-clear` and `short-names`).
-- **`peak_rss_mb` column is in KB on macOS**, not MB — a known unit-label bug
-  in the harness. Real values: `base` ≈ 480 MB, `large-v3-turbo` ≈ 1.78 GB.
-  Follow-up will fix the conversion.
 
 ## Metric glossary
 

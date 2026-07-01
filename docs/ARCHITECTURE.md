@@ -90,7 +90,6 @@ flowchart TB
     CLI[CLI argparse] --> capture
     CLI --> llm
     TUI[TUI two-pane] --> CLI
-    AG
   end
   subgraph util["Cross-cutting · search.py · export.py"]
     SRCH[search rg] --> FS

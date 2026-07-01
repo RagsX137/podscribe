@@ -81,8 +81,8 @@ for the full table, per-clip breakdown, methodology, and reproduction instructio
 
 | Model            | Mean RTF | Mean WER |
 |------------------|----------|----------|
-| `base`           | 0.010    | 0.132    |
-| `large-v3-turbo` | 0.048    | 0.098    |
+| `base`           | 0.009    | 0.132    |
+| `large-v3-turbo` | 0.047    | 0.098    |
 
 Apple Silicon · on-device · reproducible via `python benchmarks/bench_transcribe.py`.
 
