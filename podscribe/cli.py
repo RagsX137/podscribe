@@ -8,7 +8,7 @@ import time
 import wave
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 
@@ -34,6 +34,9 @@ from .storage import (
     save_pod_config,
     start_meeting,
 )
+
+if TYPE_CHECKING:
+    from .models import Meeting, Pod
 
 
 def _hms(sec: float) -> str:

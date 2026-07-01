@@ -1,6 +1,20 @@
 # podscribe
 
+[![CI](https://github.com/RagsX137/podscribe/actions/workflows/ci.yml/badge.svg)](https://github.com/RagsX137/podscribe/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![Platform: Apple Silicon](https://img.shields.io/badge/platform-Apple%20Silicon-black.svg)](#)
+
 Podscribe is a Local-first Live Transcription and summarization tool for team meetings and 1:1s to help team leads manage different teams. 
+
+## Highlights
+
+- **100% on-device.** No cloud, no network calls during `record` or `enhance` — audio and transcripts never leave your machine.
+- **Real streaming ASR pipeline.** `mic → WebRTC VAD → mlx-whisper → markdown`, Apple-Silicon-optimized, crash-safe (transcript written incrementally, a crash loses at most one segment).
+- **Agentic "god mode."** A genuine tool-calling agent loop over a local LLM with 20+ tools — record, enhance, search, and consolidate on your behalf.
+- **Grounded LLM enhancement.** Anti-hallucination + speaker-preservation preambles and glossary-as-`initial_prompt` biasing keep names and facts intact.
+- **Measured, not asserted.** A reproducible evaluation harness reports WER/CER/RTF/peak-RSS against hand-labeled fixtures — see [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+- **Tested & documented.** ~357 tests (~1:1 test-to-code ratio), an [architecture doc](docs/ARCHITECTURE.md), an ADR, and a user manual.
 
 Built from the ground up with Apple Silicon in mind.
 

@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4", "jiwer>=3.0"]
+dev = ["pytest>=7.4", "jiwer>=3.0", "ruff>=0.6", "mypy>=1.11"]
 
 [project.scripts]
 podscribe = "podscribe.cli:main"
@@ -31,3 +31,24 @@ podscribe = "podscribe.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["podscribe*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# Blocking CI gate: the pyflakes/pycodestyle *correctness* rules — real bugs
+# (undefined names, invalid syntax, broken f-strings), not style. With
+# target-version = py310 above, this also statically rejects 3.10-incompatible
+# syntax (e.g. backslashes inside f-string expressions).
+#
+# The broader style set (F401 unused imports, F541 empty f-strings, import
+# sorting) is a tracked burn-down, not yet blocking — see production_readiness.md.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true   # mlx_whisper / sounddevice / webrtcvad ship no stubs
+warn_unused_ignores = true
+# Not yet a blocking CI gate; being tightened module-by-module.
+# See production_readiness.md (Phase 0 burn-down).

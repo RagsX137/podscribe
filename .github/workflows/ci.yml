@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: tests (macOS · Apple Silicon)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+      - name: Run offline test suite
+        # -k "not transcriber" skips the one smoke test that downloads a real
+        # Whisper model over the network. Everything else runs offline.
+        run: pytest -k "not transcriber" -v
+
+  lint:
+    name: lint (ruff · py310 target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff (correctness gate)
+        # Config in pyproject.toml pins target-version = py310, so this also
+        # statically catches 3.10-incompatible syntax without a 3.10 runtime.
+        run: ruff check podscribe/

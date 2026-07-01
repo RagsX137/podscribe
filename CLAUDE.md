@@ -16,7 +16,7 @@ The three-stage flow is `record → enhance → consolidate`, each independent.
 
 ```bash
 pip install -e .                          # install with deps (dev extras = pytest)
-pytest tests/ -v                          # all tests (208 collected)
+pytest tests/ -v                          # all tests (~357 collected)
 pytest tests/ -k "not transcriber" -v     # skip the one network smoke test (use offline/CI)
 pytest tests/test_storage.py -v           # single file
 pytest tests/ -k "test_init_pod" -v       # single test by name

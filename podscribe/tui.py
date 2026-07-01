@@ -553,7 +553,8 @@ def _fmt_meeting_label(meeting) -> str:
         from .cli import _hms
         extras.append(_hms(meeting.duration_sec))
     if extras:
-        return f"{date_part}  \u00b7  {'  \u00b7  '.join(extras)}"
+        sep = "  \u00b7  "
+        return f"{date_part}{sep}{sep.join(extras)}"
     return date_part
 
 
