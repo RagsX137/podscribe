@@ -1545,3 +1545,15 @@ def test_export_include_audio_default_false():
     from podscribe.cli import build_parser
     args = build_parser().parse_args(["export"])
     assert args.include_audio is False
+
+
+def test_list_devices_subparser_wired():
+    from podscribe.cli import build_parser, cmd_list_devices
+    args = build_parser().parse_args(["list-devices"])
+    assert args.func is cmd_list_devices
+
+
+def test_list_devices_in_known_commands_no_pod_rewrite():
+    """`podscribe list-devices` must not be misread as pod-first."""
+    from podscribe.cli import rewrite_argv
+    assert rewrite_argv(["list-devices"]) == ["list-devices"]

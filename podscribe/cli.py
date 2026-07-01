@@ -588,6 +588,40 @@ def cmd_export(args) -> int:
     return 0
 
 
+def cmd_list_devices(args) -> int:
+    """List available audio input devices."""
+    try:
+        import sounddevice as sd
+    except Exception as e:
+        print(f"Failed to load PortAudio: {e}", file=sys.stderr)
+        return 1
+    try:
+        devices = sd.query_devices()
+    except Exception as e:
+        print(f"Failed to query devices: {e}", file=sys.stderr)
+        return 1
+    count = 0
+    for i, d in enumerate(devices):
+        max_in = d.get("max_input_channels", 0) or 0
+        if max_in < 1:
+            continue
+        host = ""
+        api_idx = d.get("hostapi")
+        if api_idx is not None:
+            try:
+                apis = sd.query_hostapis()
+                if 0 <= api_idx < len(apis):
+                    host = apis[api_idx]["name"]
+            except Exception:
+                host = f"hostapi {api_idx}"
+        print(f"{i}: {d['name']} ({host})  in={max_in}")
+        count += 1
+    if count == 0:
+        print("No input devices found.", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_import(args) -> int:
     """Import a podscribe export tarball."""
     import tarfile
@@ -950,6 +984,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_import.set_defaults(func=cmd_import)
 
+    # list-devices
+    p_ld = sub.add_parser("list-devices", help="List available audio input devices.")
+    p_ld.set_defaults(func=cmd_list_devices)
+
     # config
     p_cfg = sub.add_parser("config", help="Manage project-level config.")
     cfg_sub = p_cfg.add_subparsers(dest="action", required=True)
@@ -987,7 +1025,7 @@ def rewrite_argv(argv: list[str]) -> list[str]:
     `podscribe <pod> <command> [args]` → `<command> <pod> [args]`
     `start` → `record`, `summarize` → `enhance`
     """
-    known_commands = {"init", "record", "list", "show", "context", "enhance", "config", "consolidate", "search", "god"}
+    known_commands = {"init", "record", "list", "show", "context", "enhance", "config", "consolidate", "search", "god", "list-devices"}
     aliases = {"start": "record", "summarize": "enhance", "cons": "consolidate"}
 
     if not argv:

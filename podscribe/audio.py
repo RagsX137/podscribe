@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import collections
 import queue
+import sys
 import threading
 import time
 from typing import Optional
 
 import numpy as np
-import sounddevice as sd
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
@@ -49,6 +49,29 @@ class AudioCapture:
         self._vad = None
         self._running = False
         self._overflow = False
+        if device is not None:
+            self._probe_device(device)
+
+    def _probe_device(self, device: int) -> None:
+        """Validate the input device index eagerly and raise an actionable error.
+
+        Imported sd lazily so the common (device=None) path pays no cost —
+        see R-5. On a bad index PortAudio would otherwise surface a raw
+        traceback from sd.InputStream.start() during segments().
+        """
+        try:
+            import sounddevice as sd
+            info = sd.query_devices(device, "input")
+        except (ValueError, IndexError, sd.PortAudioError) as e:
+            raise ValueError(
+                f"no input device at index {device}. "
+                f"Run 'podscribe list-devices' to see valid indices. ({e})"
+            ) from e
+        if not info or (info.get("max_input_channels", 0) or 0) < 1:
+            raise ValueError(
+                f"device at index {device} has no input channels. "
+                f"Run 'podscribe list-devices' to see valid input devices."
+            )
 
     def _load_vad(self):
         if self._vad is not None:
@@ -75,20 +98,30 @@ class AudioCapture:
 
     def segments(self):
         """Generator yielding speech segments as float32 numpy arrays at 16kHz."""
+        import sounddevice as sd  # lazy: only loaded when recording starts
         self._load_vad()
         self._running = True
         self._audio_q = queue.Queue()
         self._overflow = False
 
-        self._stream = sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype=DTYPE,
-            blocksize=VAD_FRAME_SAMPLES,
-            callback=self._callback,
-            device=self.device,
-        )
-        self._stream.start()
+        try:
+            self._stream = sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=CHANNELS,
+                dtype=DTYPE,
+                blocksize=VAD_FRAME_SAMPLES,
+                callback=self._callback,
+                device=self.device,
+            )
+            self._stream.start()
+        except sd.PortAudioError as e:
+            sys.stderr.write(
+                f"audio input failed: {e}. "
+                f"Check mic permissions / device availability "
+                f"(run 'podscribe list-devices').\n"
+            )
+            sys.stderr.flush()
+            return
 
         speech_active = False
         speech_samples: list = []
