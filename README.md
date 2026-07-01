@@ -1,18 +1,20 @@
 # podscribe
 
-Podscribe is a Local-first Live Transcription and summarization tool for team meetings and 1:1s to help team leads manage different teams. 
-
-Built from the ground up with Apple Silicon in mind.
-
-Use Podscribe to act as your econd pair of eyes and help manage your pods/teams effectively 
-
-In a nutshell:
+Local-first live transcription for 1:1s and team meetings, built for managers running multiple pods. On-device, private, agentic.
 
 mic → VAD → mlx-whisper → markdown · fully on your machine · no cloud.
 
-VAD (Voice Activity Detection) is a foundational AI technology used in live transcription to determine exactly when a human starts and stops speaking. It acts as an audio "traffic controller," filtering out background noise and only sending actual human speech to the transcription model.
+## Why Podscribe
+
+- 🔒 **Private by design** — all transcription runs on-device, no cloud
+- 🤖 **Agentic god-mode** — 20+ tools; records, enhances, searches on your behalf
+- ⚡ **Apple-Silicon optimized** — mlx-whisper + WebRTC VAD
+- 🧪 **~357 offline tests** — no mic or model needed to run the suite
+- 🗂️ **Pod-isolated storage** — one team, one `pods/<name>/` tree
 
 ## How it works
+
+VAD (Voice Activity Detection) is a foundational AI technology used in live transcription to determine exactly when a human starts and stops speaking. It acts as an audio "traffic controller," filtering out background noise and only sending actual human speech to the transcription model.
 
 ```mermaid
 flowchart LR
@@ -330,10 +332,38 @@ Start at `2`. Garbage/hallucinated segments on pauses → raise to `3`. Words cl
 
 ---
 
+## Project structure
+
+Single-package layout, no nested packages — every module has one job.
+
+```
+podscribe/
+├── cli.py          — argparse + command handlers (entrypoint)
+├── tui.py          — interactive modal TUI (lazy-loaded)
+├── agent.py        — god-mode agentic loop
+├── agent_tools.py  — tool implementations for the agent
+├── audio.py        — sounddevice mic + webrtcvad capture
+├── transcriber.py  — mlx-whisper wrapper
+├── storage.py      — pods/<name>/ transcripts, summaries, CSV
+├── config.py       — pod / project / leadership-team config
+├── glossary.py     — Whisper initial_prompt glossary
+├── llm.py          — Ollama client (enhance/consolidate/chat)
+├── models.py       — Pod / Meeting / Segment dataclasses
+├── search.py       — rg-backed cross-pod search
+├── export.py       — tar.gz backup / restore
+└── fs_tools.py     — filesystem tools for the agent
+tests/              — 357 tests, all offline-safe (monkeypatch + tmp_path)
+benchmarks/         — bench_transcribe.py + bench_enhance.py + results/
+fixtures/asr/       — labeled audio clips for WER benchmarks
+docs/               — ARCHITECTURE.md · BENCHMARKS.md · USER-MANUAL.md · adr/
+```
+
+---
+
 ## Tests
 
 ```bash
-pytest tests/ -v                      # all tests (208 collected)
+pytest tests/ -v                      # all tests (357 collected)
 pytest tests/ -k "not transcriber"    # skip network smoke test (recommended for CI)
 ```
 

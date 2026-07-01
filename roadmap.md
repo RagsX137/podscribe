@@ -1,70 +1,115 @@
 # Podscribe roadmap
 
-Ideas for future exploration, split into **priority showcase items** (next up) and **future exploration** (not yet prioritized).
+Split into **priority — active remaining items** (next up, ordered by value-for-effort) and **future exploration** (not yet prioritized).
 
 ---
 
-## Priority — showcase improvements
+## Priority — active remaining items
 
-Goal: make Podscribe flagship-grade for AI/ML hiring teams. Each item below is sized to be brainstormed + implemented in its own focused session rather than crammed into one. The first two (benchmark, architecture) are being designed now; the rest follow on the roadmap.
+Ordered by value-for-effort (highest first). `P-` items are the original showcase
+work; `F-` items are ported from `Recommended_fixes.md` (numeration preserved for
+traceability). Completed items are listed at the bottom for reference.
 
-### P1. Benchmark table across bundled Whisper models
+### Tier 1 — Quick wins (high value · low effort)
 
-`benchmark` · in progress
+- **F-3.4 Glossary rolling continuity** — keep the last ~2 segments (~30 tokens)
+  and pass as an `initial_prompt` suffix alongside the glossary. Decodes
+  fragmented sentences correctly; ~1 hr. (Promoted from Future #4.)
+- **F-3.5 VAD 10s soft boundary** — when `MAX_SEGMENT_SEC` triggers, look one
+  frame ahead: silence → yield cleanly, speech → extend to 12s then yield. Stops
+  mid-word splits; ~1 hr. (Promoted from Future #2.)
 
-Real, reproducible benchmark comparing `base`, `turbo`, and `large-v3-turbo` on real audio. Metrics: speed (RTF, wall time, tok/s, peak memory) + quality (Word Error Rate vs a small hand-transcribed ground-truth set).
+### Tier 2 — Core workflow transformations (high value · medium effort)
 
-Artifacts:
-- `benchmarks/bench_transcribe.py` — harness mirroring `bench_enhance.py` style; streams audio through the real `audio.py` + `transcriber.py` pipeline
-- `docs/BENCHMARKS.md` — rendered markdown table linked from README
-- `benchmarks/results/*.json` — committed result snapshots
-- WER computation against labeled fixtures (see P7)
+- **F-6a Chain by default** — `record --consolidate` auto-runs enhance +
+  consolidate when recording finishes. Turns "record 4 back-to-back 1:1s, walk
+  away, come back to 4 completed digests" from a 12-command ritual into one. The
+  biggest workflow win for the core 12-reports-weekly use case.
+- **F-5a `podscribe prep <pod>`** — concatenate `quick_summary` + `blockers` +
+  `next_steps` from the last 2 consolidate runs, with auto-injected
+  cross-references ("Project Helios was also discussed with Priya on
+  2026-06-21"). Eliminates the 20-minute pre-1:1 re-read. No LLM call needed.
 
-Decision already made: speed + WER vs a small labeled set (~3-5 short clips, ~30s each, hand-transcribed).
+### Tier 3 — The manager's real job (high value · medium-high effort)
 
-### P2. Architecture diagram
+- **F-5b Agenda generator + open-loops tracker** — mine past meetings for open
+  loops and recurring themes, draft the next 1:1 agenda automatically. "The
+  biggest gap right now." Open-loops: extract action items assigned to the lead
+  across all pods and surface anything never followed up — broken promises
+  erode trust faster than anything.
+- **F-5c `podscribe digest --week N`** — a single-page markdown digest of all
+  pods for one week. The "share with skip-level" artifact managers actually need.
+- **F-5d Performance review draft generator** — synthesise ~6 months of
+  enhanced summaries into a structured review draft. "Most painful, most
+  time-consuming manager task that Podscribe's data is uniquely positioned to
+  solve." Highest leverage, highest effort in this tier.
+- **F-5e Longitudinal insight** — sentiment trend per pod (3-week decline =
+  attrition warning nobody else can give from raw conversation data); topic
+  recurrence map ("on-call load in 9 of last 12 meetings"); cross-pod theme
+  detection (same topic across 4 of 5 reports same week = escalate). The real
+  differentiator.
 
-`docs` · in progress
+### Tier 4 — Showcase & collaboration
 
-Two diagrams, both Mermaid (renders inline on GitHub, version-controlled):
-- **A — high-level pipeline** inline in README.md: mic → VAD → Whisper → store → enhance → consolidate (~7 nodes)
-- **B — module-level** in new `docs/ARCHITECTURE.md`: actual files (`audio.py`, `transcriber.py`, `storage.py`, `llm.py`, `agent.py`, `agent_tools.py`, `search.py`, `export.py`, `config.py`, `glossary.py`) with data formats and the god-mode loop
+- **P4. Demo gif / asciinema** — short recording of `record → show → enhance →
+  consolidate` embedded in README. The TUI is a visual selling point prose can't
+  convey; benefits from the fixtures dataset so the demo runs without a mic.
+- **P8. Contributing / development docs** — `CONTRIBUTING.md` codifying setup,
+  test commands, code style (much already in `AGENTS.md` — promote and reframe
+  for human contributors). Signals the repo is open to collaboration.
+- **P6. CI badge + test summary** — GitHub Actions workflow running
+  `pytest -k 'not transcriber'` + ruff, with a status badge at the top of
+  README. Hiring teams read green CI as a maturity signal. Note:
+  `mlx-whisper` is Apple-Silicon-only and `webrtcvad` needs PortAudio on Linux,
+  so the CI install step needs a test-only extras group or mocked heavy deps.
 
-### P3. README polish
+### Tier 5 — Quality-of-life & scale
 
-`docs`
+- **F-6 Watch mode** — `record --watch` (or `podscribe watch <pod>`) prints a
+  live console: running transcript + last 30s of audio energy + detected topic
+  shifts. No LLM, no waiting — real-time confidence the recording is healthy.
+- **F-6b Two-phase enhance** — `enhance --fast` (gemma4 8B, 13s) vs `enhance
+  --deep` (27B). Default: fast. Opt into deep for "important" meetings.
+- **F-6c Async jobs** — `enhance --async` returns a job ID; `podscribe jobs`
+  shows status. Lets a lead queue Monday's 12 1:1s Friday night.
+- **F-9 TUI pause / resume / markers** — during `record`: `p` pause/resume,
+  `m` insert timestamped marker, `a` abort-without-save. Medium-high risk
+  (threading + signals + audio hardware); current Ctrl+C-to-stop works and is
+  well-tested, so worth doing but not bundled with other TUI work.
 
-Tighten the tagline + add a "Why Podscribe" / Highlights section listing privacy-on-device, agentic god-mode, ~208 offline tests, Apple-Silicon-optimized — the 10-second elevator pitch a recruiter scans. Intended to land after P1 + P2 so the benchmark table and architecture diagram can be linked into the refreshed README rather than added twice.
+### Tier 6 — Watchlist (deferred decisions)
 
-### P4. Demo gif / asciinema
+- **F-2.6 `append_log_row` thread-safety** — no `fcntl.flock` / atomic rename;
+  concurrent `consolidate` + `record` could lose or corrupt CSV rows. User
+  confirmed current usage is sequential — theoretical only. Revisit if
+  multi-process workflows land.
+- **F-3.1 Enhance perf on 27B model** — `qwen3.6:27b` is ~3 min for a short
+  transcript (10-25 min for a 30-min meeting). Deferred per user decision
+  ("gemma4 is garbage, Qwen is worth the wait"). Revisit if the wait becomes
+  blocking in practice.
 
-`docs`
+---
 
-Short screen recording (asciinema or gif) of `record → show → enhance → consolidate` embedded in README. The TUI is a visual selling point that prose can't convey. Benefits from P7's fixtures so the demo runs reproducibly without a mic or real meetings.
+### Completed (for reference; see git history)
 
-### P5. Project structure tree in README
-
-`docs`
-
-A trimmed file tree showing the module layout (`podscribe/*.py`, `tests`, `benchmarks`, `docs`) — quick visual orientation for a reviewer opening the repo. Part of the README polish pass (P3) but called out separately so it's not forgotten.
-
-### P6. CI badge + test summary
-
-`docs` · `ci`
-
-Add a GitHub Actions workflow running `pytest -k 'not transcriber'` + lint, with a status badge at the top of README. Hiring teams look for green CI as a maturity signal. Should also surface the test count (208) somewhere scannable.
-
-### P7. Fixture / seed pod dataset
-
-`data` · prerequisite for P1, P4
-
-Ship a tiny `fixtures/` dataset (a few public-domain or synthesized audio clips + expected transcripts) so benchmarks and demos reproduce out-of-the-box without a mic or real meetings. Note: `pods/` is gitignored, so fixtures live elsewhere and must be referenced explicitly by the bench harness.
-
-### P8. Contributing / development docs
-
-`docs`
-
-`CONTRIBUTING.md` codifying setup, test commands, code style notes (much of this already lives in `AGENTS.md` — promote and reframe for human contributors). Signals the repo is set up for collaboration, not just solo use.
+- **P1** Benchmark table across bundled Whisper models
+- **P2** Architecture diagram (README + `docs/ARCHITECTURE.md`)
+- **P3** README polish — tagline + Why Podscribe highlights
+- **P5** Project structure tree in README
+- **P7** Fixture / seed pod dataset (`fixtures/asr/`)
+- **F-4.1** Shared `_run_enhance` helper extracted (cli.py)
+- **F-4.2** `list --since` / `--all` / `--recent N` filters
+- **F-4.3** Global `pods/meetings.csv` rollup
+- **F-4.4** Glossary cached per process (`config.get_effective_glossary`)
+- **F-4.5** Meeting `--type` flag + type/ subdirs
+- **F-4.6** `podscribe search` (rg-backed, Python fallback)
+- **F-4.7** `podscribe export` / `import` (path-traversal safe)
+- **F-2.1-2.5, 2.7** Ambiguous-prefix resolution, empty-transcript guard,
+  consolidate-needs-enhance check, dead `--latest` flag removed, glossary
+  dedup, smoke-test model fix
+- **F-1.1-1.4, 3.2, 3.3, 3.6** Audio-keep fix, second-precision meeting IDs,
+  `preserve_speakers`, label fix, streaming + retry, README refreshes
+- **F-3.7** `.env` HF_TOKEN removed (token was invalid/unused)
 
 ---
 
@@ -96,25 +141,19 @@ Ideas to explore:
 
 ## 3. LLM enhance (Ollama)
 
-Current `enhance` command sends transcript to Ollama for cleanup. It works but is basic:
-- single-shot, no streaming
-- no progress feedback for long transcripts
-- prompt template is hand-edited in config.yaml
+Current `enhance` command sends transcript to Ollama for cleanup. Streaming and
+retry landed (F-3.2/3.3). Remaining ideas:
 
-Ideas to explore:
-- streaming token-by-token display during enhance
 - built-in prompt templates (fix-hallucinations, summarize, extract-actions)
 - diff view: show original vs enhanced side by side
-- auto-run enhance after record completes
+- auto-run enhance after record completes (see F-6a chain by default)
 
 ## 4. Segment merging & continuity
 
-Current VAD segments speech into 1-3s chunks, each independently transcribed by Whisper. This causes fragmented sentences and filler word bloat (~87% more words than reference).
+Current VAD segments speech into 1-3s chunks, each independently transcribed by Whisper. This causes fragmented sentences and filler word bloat (~87% more words than reference). Rolling `last_n_text` continuity is in Tier 1 (F-3.4). Remaining ideas:
 
-Ideas to explore:
 - increase `MAX_SEGMENT_SEC` from 10s to 30s to yield longer utterances
 - lower default `VAD_AGGRESSIVENESS` from 2 to 1 to avoid mid-sentence splits
-- pass previous segment text as `initial_prompt` to subsequent segments for continuity
 - post-hoc merge: rejoin adjacent segments that form grammatical sentences
 
 ## 5. LLM de-fragmentation pass
