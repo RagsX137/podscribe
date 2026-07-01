@@ -1,6 +1,76 @@
 # Podscribe roadmap
 
-Ideas for future exploration, not yet prioritized.
+Ideas for future exploration, split into **priority showcase items** (next up) and **future exploration** (not yet prioritized).
+
+---
+
+## Priority — showcase improvements
+
+Goal: make Podscribe flagship-grade for AI/ML hiring teams. Each item below is sized to be brainstormed + implemented in its own focused session rather than crammed into one. The first two (benchmark, architecture) are being designed now; the rest follow on the roadmap.
+
+### P1. Benchmark table across bundled Whisper models
+
+`benchmark` · in progress
+
+Real, reproducible benchmark comparing `base`, `turbo`, and `large-v3-turbo` on real audio. Metrics: speed (RTF, wall time, tok/s, peak memory) + quality (Word Error Rate vs a small hand-transcribed ground-truth set).
+
+Artifacts:
+- `benchmarks/bench_transcribe.py` — harness mirroring `bench_enhance.py` style; streams audio through the real `audio.py` + `transcriber.py` pipeline
+- `docs/BENCHMARKS.md` — rendered markdown table linked from README
+- `benchmarks/results/*.json` — committed result snapshots
+- WER computation against labeled fixtures (see P7)
+
+Decision already made: speed + WER vs a small labeled set (~3-5 short clips, ~30s each, hand-transcribed).
+
+### P2. Architecture diagram
+
+`docs` · in progress
+
+Two diagrams, both Mermaid (renders inline on GitHub, version-controlled):
+- **A — high-level pipeline** inline in README.md: mic → VAD → Whisper → store → enhance → consolidate (~7 nodes)
+- **B — module-level** in new `docs/ARCHITECTURE.md`: actual files (`audio.py`, `transcriber.py`, `storage.py`, `llm.py`, `agent.py`, `agent_tools.py`, `search.py`, `export.py`, `config.py`, `glossary.py`) with data formats and the god-mode loop
+
+### P3. README polish
+
+`docs`
+
+Tighten the tagline + add a "Why Podscribe" / Highlights section listing privacy-on-device, agentic god-mode, ~208 offline tests, Apple-Silicon-optimized — the 10-second elevator pitch a recruiter scans. Intended to land after P1 + P2 so the benchmark table and architecture diagram can be linked into the refreshed README rather than added twice.
+
+### P4. Demo gif / asciinema
+
+`docs`
+
+Short screen recording (asciinema or gif) of `record → show → enhance → consolidate` embedded in README. The TUI is a visual selling point that prose can't convey. Benefits from P7's fixtures so the demo runs reproducibly without a mic or real meetings.
+
+### P5. Project structure tree in README
+
+`docs`
+
+A trimmed file tree showing the module layout (`podscribe/*.py`, `tests`, `benchmarks`, `docs`) — quick visual orientation for a reviewer opening the repo. Part of the README polish pass (P3) but called out separately so it's not forgotten.
+
+### P6. CI badge + test summary
+
+`docs` · `ci`
+
+Add a GitHub Actions workflow running `pytest -k 'not transcriber'` + lint, with a status badge at the top of README. Hiring teams look for green CI as a maturity signal. Should also surface the test count (208) somewhere scannable.
+
+### P7. Fixture / seed pod dataset
+
+`data` · prerequisite for P1, P4
+
+Ship a tiny `fixtures/` dataset (a few public-domain or synthesized audio clips + expected transcripts) so benchmarks and demos reproduce out-of-the-box without a mic or real meetings. Note: `pods/` is gitignored, so fixtures live elsewhere and must be referenced explicitly by the bench harness.
+
+### P8. Contributing / development docs
+
+`docs`
+
+`CONTRIBUTING.md` codifying setup, test commands, code style notes (much of this already lives in `AGENTS.md` — promote and reframe for human contributors). Signals the repo is set up for collaboration, not just solo use.
+
+---
+
+## Future exploration
+
+Not yet prioritized.
 
 ## 1. Glossary improvements
 
