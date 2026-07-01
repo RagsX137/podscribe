@@ -174,13 +174,33 @@ def test_render_markdown_table_has_all_columns_and_rows():
     assert "| `large-v3-turbo`" in md
 
 
+def test_render_markdown_table_includes_large():
+    records = [
+        _clip_record("base", "a"),
+        _clip_record("large", "a"),
+        _clip_record("large-v3-turbo", "a"),
+    ]
+    agg = aggregate_results(records)
+    md = render_markdown_table(agg)
+    assert "| `base`" in md
+    assert "| `large`" in md
+    assert "| `large-v3-turbo`" in md
+    # `large` should carry its param label and appear after large-v3-turbo
+    assert "~1550 M" in md
+    assert md.find("`large-v3-turbo`") < md.find("`large\n") or \
+           md.find("`large-v3-turbo`") < md.rfind("`large`")
+
+
 def test_render_markdown_table_orders_models_by_param_count():
     records = [
         _clip_record("large-v3-turbo", "a"),
         _clip_record("base", "a"),
+        _clip_record("large", "a"),
     ]
     agg = aggregate_results(records)
     md = render_markdown_table(agg)
     base_pos = md.find("`base`")
     turbo_pos = md.find("`large-v3-turbo`")
+    large_pos = md.find("`large`")
     assert base_pos < turbo_pos, "base should be listed before large-v3-turbo"
+    assert turbo_pos < large_pos, "large-v3-turbo should be listed before large"

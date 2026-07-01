@@ -8,7 +8,7 @@ snapshot to benchmarks/results/.
 
 Usage:
     python benchmarks/bench_transcribe.py                       # default: all 3 models, all fixtures
-    python benchmarks/bench_transcribe.py --models base,large-v3-turbo
+    python benchmarks/bench_transcribe.py --models base,large,large-v3-turbo
     python benchmarks/bench_transcribe.py --clips short-clear,short-noisy
     python benchmarks/bench_transcribe.py --runs 3
     python benchmarks/bench_transcribe.py --regen               # write results JSON + render table
@@ -140,6 +140,7 @@ _MODEL_PARAMS_M = {
     "base": "~74 M",
     "turbo": "~809 M",
     "large-v3-turbo": "~809 M",
+    "large": "~1550 M",
 }
 
 
@@ -176,7 +177,7 @@ def render_markdown_table(aggregated: dict) -> str:
     because it is an alias of 'large-v3-turbo' (see transcriber.MODEL_MAP).
     """
     aliases = {"turbo"}  # not shown as its own row
-    order = ["base", "large-v3-turbo"]
+    order = ["base", "large-v3-turbo", "large"]
     # include any unknown models at the end, alphabetically
     extras = sorted(m for m in aggregated if m not in order and m not in aliases)
     rows = [m for m in order if m in aggregated] + extras
@@ -244,9 +245,9 @@ def _run_child(model: str, clip_names: Optional[list[str]], asr_dir: Path,
                 wall_s = time.perf_counter() - t0
                 hypothesis = " ".join(s["text"] for s in segments).strip()
                 metrics = normalize_pair_and_compute(reference, hypothesis)
-                peak_rss_mb = resource.getrusage(
-                    resource.RUSAGE_SELF
-                ).ru_maxrss / 1024.0  # macOS reports bytes; Linux reports KB
+                # macOS ru_maxrss is in bytes; Linux is in KB. Convert to MB.
+                _rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                peak_rss_mb = _rss / (1024.0 * 1024.0) if sys.platform == "darwin" else _rss / 1024.0
                 record = {
                     "model": model,
                     "clip": clip["name"],
@@ -342,8 +343,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     p = argparse.ArgumentParser(
         description="Benchmark bundled Whisper models on fixture audio.",
     )
-    p.add_argument("--models", default="base,large-v3-turbo",
-                   help="Comma-separated model names (default: base,large-v3-turbo)")
+    p.add_argument("--models", default="base,large,large-v3-turbo",
+                   help="Comma-separated model names (default: base,large,large-v3-turbo)")
     p.add_argument("--clips", default=None,
                    help="Comma-separated clip names from manifest (default: all)")
     p.add_argument("--runs", type=int, default=1,
