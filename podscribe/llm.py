@@ -12,6 +12,9 @@ import yaml
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_SHOW_URL = "http://localhost:11434/api/show"
 
+OLLAMA_INFO_TTL_SEC = 300  # model metadata rarely changes; 5 min is plenty
+_info_cache: dict = {}  # {model_name: (fetched_at, info_dict)}
+
 ANTI_HALLUCINATION_PREAMBLE = (
     "Strict grounding rules — read carefully:\n"
     "1. Every claim must come from the transcript. Do NOT use outside "
@@ -61,14 +64,22 @@ def build_enhance_prompt(
 def ollama_model_info(model: str) -> dict:
     """Fetch model details (num_ctx etc.) from /api/show. Best-effort.
 
+    Cached per model for OLLAMA_INFO_TTL_SEC seconds: the /api/show round-trip
+    is ~50–150 ms and model metadata rarely changes.
     Public (no underscore) so the TUI/CLI can call it for header rendering.
     """
+    now = time.time()
+    cached = _info_cache.get(model)
+    if cached is not None and (now - cached[0]) < OLLAMA_INFO_TTL_SEC:
+        return cached[1]
     try:
         r = requests.post(OLLAMA_SHOW_URL, json={"name": model}, timeout=5)
         r.raise_for_status()
-        return r.json()
+        info = r.json()
     except requests.RequestException:
-        return {}
+        info = {}
+    _info_cache[model] = (now, info)
+    return info
 
 
 def enhance_transcript(

@@ -182,6 +182,8 @@ def get_effective_glossary(pod: Pod) -> list:
 
     The cache key includes:
     - mtime of leadership_team.yaml (so manual edits invalidate)
+    - mtime of pods/<name>/config.yaml (so external edits invalidate even when
+      a long-lived process holds a stale Pod object — god-REPL scenario)
     - id(pod.glossary) (so list replacement invalidates)
     - len(pod.glossary) (so in-place mutation that grows/shrinks invalidates)
 
@@ -192,7 +194,11 @@ def get_effective_glossary(pod: Pod) -> list:
         mtime = _leadership_yaml_path().stat().st_mtime
     except FileNotFoundError:
         mtime = 0
-    key = (mtime, id(pod.glossary), len(pod.glossary))
+    try:
+        pod_mtime = pod.config_path.stat().st_mtime
+    except (FileNotFoundError, AttributeError, ValueError):
+        pod_mtime = 0
+    key = (mtime, pod_mtime, id(pod.glossary), len(pod.glossary))
     if _glossary_cache["key"] != key:
         _glossary_cache["key"] = key
         _glossary_cache["value"] = _read_effective_glossary(pod)

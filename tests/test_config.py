@@ -427,3 +427,47 @@ def test_save_god_model_rejects_empty(tmp_path, monkeypatch):
     from podscribe.config import save_god_model
     with pytest.raises(ValueError, match="non-empty string"):
         save_god_model("")
+
+
+def test_glossary_cache_invalidates_on_pod_config_mtime(tmp_path, monkeypatch):
+    """Editing pods/<name>/config.yaml's mtime invalidates the in-process
+    glossary cache so _read_effective_glossary is re-invoked on the next call.
+
+    R-11's scope is the cache *key*: it adds the pod-config mtime so a
+    long-lived process (god-REPL) re-runs the read when the file is touched
+    externally. It does NOT change the read source — `pod.glossary`
+    (in-memory) remains the source of truth; callers that want disk-fresh
+    glossary content must reload the Pod themselves. This test pins the
+    cache-invalidation behaviour by wrapping `_read_effective_glossary`.
+    """
+    import os
+    from unittest.mock import patch
+    import podscribe.config as cfg
+    from podscribe.storage import init_pod, save_pod_config
+
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    pod.glossary = [{"term": "Anurag", "category": "person"}]
+    save_pod_config(pod)
+
+    cfg._glossary_cache["key"] = None
+
+    with patch(
+        "podscribe.config._read_effective_glossary",
+        wraps=cfg._read_effective_glossary,
+    ) as m_read:
+        cfg.get_effective_glossary(pod)
+        assert m_read.call_count == 1
+
+        # Second call, same mtime — served from cache, no re-read
+        cfg.get_effective_glossary(pod)
+        assert m_read.call_count == 1
+
+        # Bump the pod-config mtime (simulating an external edit)
+        st = pod.config_path.stat().st_mtime
+        os.utime(pod.config_path, (st + 5.0, st + 5.0))
+
+        cfg.get_effective_glossary(pod)
+        assert m_read.call_count == 2, (
+            "pod-config mtime change must invalidate the glossary cache"
+        )

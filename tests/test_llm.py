@@ -525,3 +525,57 @@ def test_chat_stream_cleans_up_on_stream_error():
     assert result is None
     assert tokens == []
     assert msgs == []
+
+
+def test_ollama_model_info_caches_within_ttl(monkeypatch):
+    """Within the TTL, ollama_model_info returns the cached dict without HTTP."""
+    from podscribe import llm
+
+    calls = {"n": 0}
+
+    def fake_post(url, json=None, timeout=None):
+        calls["n"] += 1
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = MagicMock(return_value={"model_info": {"llama.context_length": 8192}})
+        return resp
+
+    monkeypatch.setattr(llm.requests, "post", fake_post)
+    monkeypatch.setattr(llm, "_info_cache", {})
+    monkeypatch.setattr(llm.time, "time", lambda: 1000.0)
+
+    info1 = llm.ollama_model_info("qwen3.6:27b")
+    assert info1 == {"model_info": {"llama.context_length": 8192}}
+    assert calls["n"] == 1
+
+    # Same model within TTL — must NOT hit the network
+    info2 = llm.ollama_model_info("qwen3.6:27b")
+    assert info2 == info1
+    assert calls["n"] == 1, "second call should be served from cache"
+
+
+def test_ollama_model_info_refetches_after_ttl_expiry(monkeypatch):
+    """After the TTL elapses, ollama_model_info refetches."""
+    from podscribe import llm
+
+    clock = {"t": 1000.0}
+    calls = {"n": 0}
+
+    def fake_post(url, json=None, timeout=None):
+        calls["n"] += 1
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json = MagicMock(return_value={"model_info": {"llama.context_length": 8192}})
+        return resp
+
+    monkeypatch.setattr(llm.requests, "post", fake_post)
+    monkeypatch.setattr(llm, "_info_cache", {})
+    monkeypatch.setattr(llm.time, "time", lambda: clock["t"])
+
+    llm.ollama_model_info("qwen3.6:27b")
+    assert calls["n"] == 1
+
+    # Advance past the 5-minute TTL
+    clock["t"] += 301
+    llm.ollama_model_info("qwen3.6:27b")
+    assert calls["n"] == 2, "expired entry should be refetched"
