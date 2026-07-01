@@ -130,3 +130,53 @@ distracts from the eval story (Phase 2) that actually differentiates the repo.
 Phase 0 removes disqualifiers → Phase 1 gets the repo read → Phase 2 is the thing worth
 remembering → Phase 3 is finish. **Phase 0 + Phase 2 alone** already put this ahead of most
 candidate repos.
+
+---
+
+## Appendix — Cross-platform / NVIDIA support (deferred, not planned)
+
+**Status: not being implemented.** Captured so the analysis isn't lost. Mirrored in
+`roadmap.md` §7.
+
+Podscribe is *not* truly Apple-Silicon-exclusive — only the ASR layer (`transcriber.py`,
+via `mlx-whisper`/MLX/Metal) is. Everything else already ports:
+
+| Layer | Apple-locked? | On Windows/NVIDIA |
+|---|---|---|
+| ASR (`transcriber.py`) | 🔴 yes | `mlx-whisper` → the entire port |
+| LLM (`llm.py`, `agent.py`) via Ollama | 🟢 no | native on Windows+CUDA; *faster* on a 32 GB GPU |
+| Audio + VAD (`audio.py`) | 🟢 no | `sounddevice`/PortAudio + `webrtcvad` run on Windows |
+| Storage / CLI / TUI / search / export | 🟢 no | pure Python + `pathlib` + `os.replace` |
+
+**The whole port = one pluggable ASR backend.** Refactor `transcriber.py` into a
+`TranscriberBackend` protocol selected by hardware auto-detection:
+
+```
+Transcriber (protocol: transcribe(audio, initial_prompt) -> list[Segment])
+├── MLXBackend            # mlx-whisper      — Apple Silicon (existing)
+├── FasterWhisperBackend  # CTranslate2/CUDA — NVIDIA
+└── CPUBackend            # faster-whisper int8 — universal fallback / CI
+```
+
+Package as extras: `pip install podscribe[mlx]` / `podscribe[cuda]`; auto-select MLX on
+Darwin/arm64 → CUDA if `torch.cuda.is_available()` → CPU.
+
+**NVIDIA ASR options (ranked):** faster-whisper (CTranslate2) — recommended, keeps
+BENCHMARKS.md apples-to-apples; HF Transformers + PyTorch/CUDA — best bleeding-edge GPU
+support; whisperX — adds diarization (roadmap goal; `.raw` already kept for it); NVIDIA
+NeMo Parakeet/Canary — SOTA on NVIDIA, heavier.
+
+⚠️ **RTX 5090 = Blackwell (sm_120), bleeding edge.** Needs CUDA 12.8+, recent cuDNN,
+PyTorch 2.7+/nightly; CTranslate2 may lack sm_120 wheels. **Do a 1-hour engine spike first** —
+this driver/wheel matrix is the port's only real risk, not the code.
+
+**Windows edges (all small):** `msvcrt.locking`/temp-rename instead of POSIX `fcntl.flock`
+(Recommended_fixes §2.6); `webrtcvad-wheels` or MSVC build tools, or upgrade to silero-VAD
+(GPU, cross-platform); `colorama`/VT enablement for older consoles.
+
+**Effort:** ~2–3 focused days of code, gated by the Blackwell spike.
+
+**Why it's worth revisiting (ties into this doc's goal):** it converts the Apple-only
+liability into two showcase assets — a broader hiring audience (any NVIDIA box can run it,
+CI can run real ASR on Linux) and a **cross-accelerator benchmark** (M-series RTF vs RTX 5090
+RTF) that upgrades the Phase 2 evaluation story.

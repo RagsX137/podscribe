@@ -124,3 +124,46 @@ After recording, run an Ollama pass specifically to merge fragments and fix segm
 ## 6. Model accuracy tuning
 
 Compare `large-v3-turbo` vs full `large-v3` on the same audio for accuracy-latency trade-off. Consider smaller models (`base.en`) for test/iteration speed.
+
+## 7. Cross-platform / NVIDIA support (not planned — captured for later)
+
+**Status: deferred. Not being implemented.** Captured here so the analysis isn't lost.
+
+Podscribe is *not* truly Apple-Silicon-exclusive — only the ASR layer
+([`transcriber.py`](podscribe/transcriber.py)) is, via `mlx-whisper` (Apple MLX/Metal).
+Everything else is already portable:
+
+- **Ollama** (`enhance`/`consolidate`/`god`) runs natively on Windows+CUDA — works as-is,
+  and *faster* on a 32 GB GPU (the 27B-model latency pain in `Recommended_fixes.md` §3.1
+  goes away).
+- **Audio + VAD** (`sounddevice`/PortAudio + `webrtcvad`) build and run on Windows.
+- **Storage / CLI / TUI / search / export** are pure Python + `pathlib` + `os.replace`.
+
+**The whole port = one pluggable ASR backend.** Refactor `transcriber.py` into a
+`TranscriberBackend` protocol with hardware auto-detection:
+
+```
+Transcriber (protocol)
+├── MLXBackend            # mlx-whisper      — Apple Silicon (existing)
+├── FasterWhisperBackend  # CTranslate2/CUDA — NVIDIA
+└── CPUBackend            # faster-whisper int8 — universal fallback / CI
+```
+
+NVIDIA ASR options (ranked): **faster-whisper (CTranslate2)** — same Whisper families,
+INT8/FP16, keeps BENCHMARKS.md apples-to-apples; **HF Transformers + PyTorch/CUDA** —
+best bleeding-edge GPU support; **whisperX** — adds diarization (already a roadmap goal,
+`.raw` audio is kept for it); **NVIDIA NeMo Parakeet/Canary** — SOTA on NVIDIA, heavier.
+
+⚠️ **RTX 5090 is Blackwell (sm_120) — bleeding edge.** Needs CUDA 12.8+, recent cuDNN,
+PyTorch 2.7+/nightly; CTranslate2 may not ship sm_120 wheels yet. **Spike first** to confirm
+which engine actually runs on the card before committing. This is the port's only real risk.
+
+Windows edges (all small): `msvcrt.locking` or temp-rename instead of POSIX `fcntl.flock`
+(`Recommended_fixes.md` §2.6); `webrtcvad-wheels` or MSVC build tools (or upgrade to
+silero-VAD, GPU-based + cross-platform); `colorama`/VT enablement for older consoles.
+
+**Why it's worth capturing:** the port converts a portfolio liability (Apple-only, no
+reviewer can run it) into two assets — a broader hiring audience (any NVIDIA box) and a
+**cross-accelerator benchmark table** (M-series RTF vs RTX 5090 RTF) that turns the existing
+benchmark harness into a strong AI/ML-engineer artifact. See the matching section in
+`production_readiness.md`. Effort: ~2–3 focused days of code, gated by the Blackwell spike.
