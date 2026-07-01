@@ -25,8 +25,97 @@ BLOCK_SIZE = 480  # 30ms at 16kHz — required by webrtcvad (10/20/30 ms frames)
 VAD_FRAME_MS = 30
 VAD_FRAME_SAMPLES = int(SAMPLE_RATE * VAD_FRAME_MS / 1000)
 
-MAX_SEGMENT_SEC = 10.0  # force-yield a segment after this much continuous speech
-MIN_SEGMENT_SEC = 0.5   # discard segments shorter than this (blips/coughs)
+MAX_SEGMENT_SEC = 10.0       # force-yield a segment after this much continuous speech
+SOFT_MAX_SEGMENT_SEC = 12.0  # hard floor: even with speech continuing, yield here
+MIN_SEGMENT_SEC = 0.5        # discard segments shorter than this (blips/coughs)
+VAD_SILENCE_FRAMES = 5       # ~150ms of silence ends a segment
+
+
+def _segment_frames(
+    is_speech_seq,
+    *,
+    silence_frames: int = VAD_SILENCE_FRAMES,
+    max_sec: float = MAX_SEGMENT_SEC,
+    soft_max_sec: float = SOFT_MAX_SEGMENT_SEC,
+    frame_ms: int = VAD_FRAME_MS,
+):
+    """Pure VAD segmentation state machine. Testable without audio hardware.
+
+    Consumes a sequence (list or iterable) of per-frame is_speech booleans
+    and yields one list of booleans per emitted segment — the membership of
+    each frame in that segment, including trailing-silence frames that the
+    caller trims before producing audio.
+
+    Boundary rules:
+      - A segment ends after `silence_frames` consecutive silent frames.
+      - When `max_sec` of continuous speech is reached, look one frame ahead:
+          silence → yield at max_sec cleanly;
+          speech  → enter "extending" and yield at the hard `soft_max_sec`
+                    cap regardless of subsequent frames (bounds worst-case).
+      - On iterator exhaustion, any in-progress segment is yielded.
+    """
+    max_frames = int(round(max_sec * 1000 / frame_ms))
+    soft_max_frames = int(round(soft_max_sec * 1000 / frame_ms))
+
+    it = iter(is_speech_seq)
+    try:
+        nxt = next(it)
+    except StopIteration:
+        return
+
+    speech_active = False
+    current: list = []
+    silence_count = 0
+    extending = False
+
+    while True:
+        is_speech = nxt
+        try:
+            nxt = next(it)            # one-frame lookahead for cap decision
+            has_next = True
+        except StopIteration:
+            has_next = False
+
+        if extending:
+            current.append(is_speech)
+            if len(current) >= soft_max_frames:
+                yield current
+                current = []
+                extending = False
+                speech_active = False
+                silence_count = 0
+        elif is_speech and not speech_active:
+            speech_active = True
+            current = [True]
+            silence_count = 0
+        elif is_speech and speech_active:
+            current.append(True)
+            silence_count = 0
+            if len(current) >= max_frames:
+                # look ahead: nxt is the next frame (already prefetched)
+                if has_next and nxt:
+                    extending = True
+                else:
+                    yield current
+                    current = []
+                    speech_active = False
+                    silence_count = 0
+        elif not is_speech and speech_active:
+            current.append(False)
+            silence_count += 1
+            if silence_count >= silence_frames:
+                yield current
+                current = []
+                speech_active = False
+                silence_count = 0
+        else:
+            silence_count = 0
+
+        if not has_next:
+            break
+
+    if current and speech_active:
+        yield current
 
 
 class AudioCapture:
@@ -123,56 +212,42 @@ class AudioCapture:
             sys.stderr.flush()
             return
 
-        speech_active = False
-        speech_samples: list = []
-        silence_count = 0
+        buffered_chunks: list = []
 
-        try:
+        def _is_speech_stream():
             while self._running:
                 try:
                     chunk = self._audio_q.get(timeout=0.1)
                 except queue.Empty:
                     continue
-
-                # Convert to int16 for VAD
+                buffered_chunks.append(chunk)
                 pcm = np.clip(chunk * 32767, -32768, 32767).astype(np.int16)
-                is_speech = self._is_speech(pcm)
+                yield self._is_speech(pcm)
 
-                if is_speech and not speech_active:
-                    speech_active = True
-                    speech_samples = [chunk]
-                    silence_count = 0
-                elif is_speech and speech_active:
-                    speech_samples.append(chunk)
-                    silence_count = 0
-                    dur = len(speech_samples) * VAD_FRAME_MS / 1000.0
-                    if dur >= MAX_SEGMENT_SEC:
-                        seg = np.concatenate(speech_samples)
-                        if len(seg) / SAMPLE_RATE >= MIN_SEGMENT_SEC:
-                            yield seg
-                        speech_samples = []
-                        speech_active = False
-                elif not is_speech and speech_active:
-                    speech_samples.append(chunk)
-                    silence_count += 1
-                    if silence_count >= 5:
-                        trim = min(silence_count, len(speech_samples))
-                        seg = np.concatenate(speech_samples[:len(speech_samples)-trim]) if trim < len(speech_samples) else np.array([], dtype=np.float32)
-                        if len(seg) / SAMPLE_RATE >= MIN_SEGMENT_SEC:
-                            yield seg
-                        speech_samples = []
-                        speech_active = False
-                        silence_count = 0
-                else:
-                    silence_count = 0
+        try:
+            for frame_flags in _segment_frames(_is_speech_stream()):
+                n = len(frame_flags)
+                seg_chunks = buffered_chunks[:n]
+                del buffered_chunks[:n]
+                # Trim trailing silence frames (matching legacy contract)
+                trim = 0
+                for f in reversed(frame_flags):
+                    if not f:
+                        trim += 1
+                    else:
+                        break
+                if trim:
+                    seg_chunks = seg_chunks[: len(seg_chunks) - trim]
+                seg = (
+                    np.concatenate(seg_chunks)
+                    if seg_chunks
+                    else np.array([], dtype=np.float32)
+                )
+                if len(seg) / SAMPLE_RATE >= MIN_SEGMENT_SEC:
+                    yield seg
         finally:
             self._stream.stop()
             self._stream.close()
-            if speech_samples and speech_active:
-                trim = min(silence_count, len(speech_samples))
-                seg = np.concatenate(speech_samples[:len(speech_samples)-trim]) if trim < len(speech_samples) else np.array([], dtype=np.float32)
-                if len(seg) / SAMPLE_RATE >= MIN_SEGMENT_SEC:
-                    yield seg
 
     def stop(self):
         self._running = False

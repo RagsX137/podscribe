@@ -66,3 +66,40 @@ def test_segments_translates_portaudio_error_to_stderr(capsys, monkeypatch):
     assert segments == []
     err = capsys.readouterr().err
     assert "audio input failed" in err
+
+
+def test_segment_frames_yields_at_max_on_silence():
+    """Reaching MAX_SEGMENT_SEC where the next frame is silence yields cleanly
+    at ~10s (333 frames at 30ms) — no extension.
+    """
+    from podscribe.audio import _segment_frames, MAX_SEGMENT_SEC
+    # 333 speech frames (10s) then 5 silence frames (will trigger boundary)
+    seq = [True] * 333 + [False] * 5
+    out = list(_segment_frames(seq))
+    assert len(out) == 1
+    # The yielded segment's frame count is 333 → ~9.99s
+    assert len(out[0]) == 333
+
+
+def test_segment_frames_extends_to_soft_max_on_speech():
+    """Reaching MAX_SEGMENT_SEC where the next frame is speech extends to
+    SOFT_MAX_SEGMENT_SEC (12s = 400 frames at 30ms), then yields.
+    """
+    from podscribe.audio import _segment_frames
+    seq = [True] * 400  # continuous speech well past both caps
+    out = list(_segment_frames(seq))
+    assert len(out) == 1
+    assert len(out[0]) == 400, "first segment must hit soft cap (12s)"
+
+
+def test_segment_frames_continuous_speech_yields_exactly_at_soft_max():
+    """With speech running well past 12s, the first yield is at exactly 12s
+    and a new segment begins afterwards.
+    """
+    from podscribe.audio import _segment_frames
+    seq = [True] * 500
+    out = list(_segment_frames(seq))
+    assert len(out[0]) == 400, "hard floor at 12s"
+    # The remaining 100 frames form a new in-progress segment (yielded on EOF)
+    assert len(out) == 2
+    assert sum(len(s) for s in out) == 500
