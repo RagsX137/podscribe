@@ -1,0 +1,1 @@
+Welcome to the Project Atlas sync. Anurag and Priya are leading the rollout. We'll discuss the Kafka migration and the new GraphQL gateway. Sam, can you share the status on the MLX evaluation? Please flag any blockers in the shared channel before end of day.

@@ -9,6 +9,7 @@ DEFAULT_MODEL = "large-v3-turbo"
 
 MODEL_MAP = {
     "base": "mlx-community/whisper-base-mlx",
+    "large": "mlx-community/whisper-large-v3-mlx",
     "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
     "turbo": "mlx-community/whisper-large-v3-turbo",
 }

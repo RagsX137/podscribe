@@ -10,7 +10,22 @@ In a nutshell:
 
 mic → VAD → mlx-whisper → markdown · fully on your machine · no cloud.
 
-VAD (Voice Activity Detection) is a foundational AI technology used in live transcription to determine exactly when a human starts and stops speaking. It acts as an audio "traffic controller," filtering out background noise and only sending actual human speech to the transcription model
+VAD (Voice Activity Detection) is a foundational AI technology used in live transcription to determine exactly when a human starts and stops speaking. It acts as an audio "traffic controller," filtering out background noise and only sending actual human speech to the transcription model.
+
+## How it works
+
+```mermaid
+flowchart LR
+  MIC[Mic 16kHz] --> VAD[WebRTC VAD]
+  VAD --> WHIS[mlx-whisper]
+  WHIS --> STORE[storage .md .json .raw]
+  STORE --> ENH[enhance Ollama]
+  ENH --> CONS[consolidate meetings.csv]
+  CLI[CLI / TUI] -.controls.-> VAD
+  CLI -.controls.-> ENH
+```
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full module-level diagram.
 
 ---
 
@@ -55,6 +70,21 @@ record  →  enhance  →  consolidate
 | `consolidate` | extract structured fields → row in `meetings.csv` | Ollama, enhanced summary |
 
 Each step is independent. Run only what you need.
+
+---
+
+## Benchmarks
+
+The bundled Whisper models are benchmarked on real audio for speed (RTF) and
+quality (WER, CER, MER, WIL, WIP). See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)
+for the full table, per-clip breakdown, methodology, and reproduction instructions.
+
+| Model            | Mean RTF | Mean WER |
+|------------------|----------|----------|
+| `base`           | 0.009    | 0.132    |
+| `large-v3-turbo` | 0.047    | 0.098    |
+
+Apple Silicon · on-device · reproducible via `python benchmarks/bench_transcribe.py`.
 
 ---
 

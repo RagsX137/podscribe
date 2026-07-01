@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4"]
+dev = ["pytest>=7.4", "jiwer>=3.0"]
 
 [project.scripts]
 podscribe = "podscribe.cli:main"
