@@ -1,18 +1,72 @@
-# podscribe
+<h1 align="center">🎙️ podscribe</h1>
 
-Podscribe is a Local-first Live Transcription and summarization tool for team meetings and 1:1s to help team leads manage different teams. 
+<p align="center">
+  <strong>Local-first live transcription for 1:1s and team meetings.</strong><br>
+  <em>Built for managers running multiple pods. On-device, private, agentic.</em>
+</p>
 
-Built from the ground up with Apple Silicon in mind.
+<p align="center">
+  <code>mic → VAD → mlx-whisper → markdown · fully on your machine · no cloud</code>
+</p>
 
-Use Podscribe to act as your econd pair of eyes and help manage your pods/teams effectively 
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white">
+  <img alt="Platform" src="https://img.shields.io/badge/Platform-Apple_Silicon-silver?logo=apple&logoColor=white">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
+  <img alt="Tests" src="https://img.shields.io/badge/Tests-357_offline-success">
+  <img alt="Whisper" src="https://img.shields.io/badge/Whisper-mlx--v3--turbo-purple">
+  <img alt="Ollama" src="https://img.shields.io/badge/LLM-Ollama-orange">
+  <img alt="VAD" src="https://img.shields.io/badge/VAD-WebRTC-teal">
+</p>
 
-In a nutshell:
+---
 
-mic → VAD → mlx-whisper → markdown · fully on your machine · no cloud.
+> **You manage 12 reports across 4 teams.** Every 1:1 starts with "how are you," runs through 10 minutes of project updates, and ends with the three action items you're *supposed* to remember.
 
-VAD (Voice Activity Detection) is a foundational AI technology used in live transcription to determine exactly when a human starts and stops speaking. It acts as an audio "traffic controller," filtering out background noise and only sending actual human speech to the transcription model.
+> Podscribe sits in the middle of that loop: it captures the conversation locally, cleans up the transcript with an LLM, extracts structured fields into a CSV, and — when you ask — runs an agentic loop over everything it knows. No SaaS. No audio leaving your laptop. No transcripts committed to git.
 
-## How it works
+> **Privacy by design. Agentic by default. Apple-Silicon fast.**
+
+---
+
+## ✨ Highlights
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🔒 Private by design</h3>
+      <p>All transcription runs on-device. <strong>No cloud, no network calls</strong> during record or enhance. <code>pods/</code> is gitignored — transcripts never leave your machine.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>🤖 Agentic god-mode</h3>
+      <p>An agent with <strong>20+ tools</strong> records, enhances, consolidates, and searches on your behalf. Ask <em>"what did Sam say about the API last week?"</em> and it does the work.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>⚡ Apple-Silicon optimized</h3>
+      <p>Backed by <code>mlx-whisper</code> (MLX) and WebRTC VAD. Runs in real time on a MacBook, no GPU rig required.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>🧪 Battle-tested</h3>
+      <p><strong>357 offline tests</strong> — no mic, no model download, no network. <code>pip install -e . && pytest</code> just works out of the box.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🗂️ Pod-isolated storage</h3>
+      <p>One team, one <code>pods/&lt;name&gt;/</code> tree. Per-pod glossaries, configs, rollups, and raw audio (kept for future diarization).</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>📝 Incremental & crash-safe</h3>
+      <p>Transcript is written one segment at a time. A crash loses <strong>at most one segment</strong> — the meeting in flight is still readable.</p>
+    </td>
+  </tr>
+</table>
+
+---
+
+## 📊 How it works
 
 ```mermaid
 flowchart LR
@@ -25,11 +79,13 @@ flowchart LR
   CLI -.controls.-> ENH
 ```
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full module-level diagram.
+> VAD (Voice Activity Detection) acts as an audio *"traffic controller"*, filtering background noise and only sending actual human speech to the transcription model.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the module-level diagram.
 
 ---
 
-## Quick start
+## 🚀 Quick start
 
 Requires Python 3.10+, Xcode Command Line Tools, and a working microphone.
 
@@ -57,7 +113,7 @@ podscribe show sam-chen latest
 
 ---
 
-## The flow
+## 🛤️ The flow
 
 ```
 record  →  enhance  →  consolidate
@@ -73,7 +129,7 @@ Each step is independent. Run only what you need.
 
 ---
 
-## Benchmarks
+## 📈 Benchmarks
 
 The bundled Whisper models are benchmarked on real audio for speed (RTF) and
 quality (WER, CER, MER, WIL, WIP). See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)
@@ -88,7 +144,7 @@ Apple Silicon · on-device · reproducible via `python benchmarks/bench_transcri
 
 ---
 
-## Commands
+## ⌨️ Commands
 
 ```
 podscribe                              # TUI launcher (TTY only)
@@ -187,7 +243,7 @@ podscribe import --dry-run pods-backup.tar.gz     # show, don't write
 
 ---
 
-## TUI
+## 🖥️ TUI
 
 Running `podscribe` at a TTY opens the two-pane modal interface:
 
@@ -222,7 +278,7 @@ Status bar colour: **lilac** = NORMAL · **pink** = recording/streaming · **pea
 
 ---
 
-## God mode
+## 🧠 God mode
 
 ```
 podscribe god                          # interactive REPL (TUI)
@@ -234,7 +290,7 @@ Two-pane view: left = conversation, right = tool call log. The agent has access 
 
 ---
 
-## Storage layout
+## 📂 Storage layout
 
 ```
 leadership_team.yaml                       — global glossary (gitignored)
@@ -260,7 +316,7 @@ Meeting ID format: `YYYY-MM-DD-HHMMSS-<pod-name>` (e.g. `2026-06-27-143012-sam-c
 
 ---
 
-## Models
+## 🧩 Models
 
 Default: `large-v3-turbo` (~500 MB, cached in `~/.cache/huggingface/` after first use).
 
@@ -274,7 +330,7 @@ Any other value passes through to `mlx-whisper` unchanged — full HF paths work
 
 ---
 
-## LLM config
+## 🔧 LLM config
 
 Lives in `podscribe.yaml` (project-level) or per-pod `config.yaml`. Pod-level takes precedence.
 
@@ -293,7 +349,7 @@ llm:
 
 ---
 
-## VAD tuning
+## 🎚️ VAD tuning
 
 `--vad-aggressiveness` controls the silence detector:
 
@@ -308,7 +364,7 @@ Start at `2`. Garbage/hallucinated segments on pauses → raise to `3`. Words cl
 
 ---
 
-## Privacy
+## 🔐 Privacy
 
 - **All processing local.** No network calls during `record` or `enhance`.
 - **Raw audio kept by default** for future diarization. Use `--no-keep-audio` to delete.
@@ -317,7 +373,7 @@ Start at `2`. Garbage/hallucinated segments on pauses → raise to `3`. Words cl
 
 ---
 
-## Troubleshooting
+## 🩺 Troubleshooting
 
 **`No module named webrtcvad`** — `xcode-select --install` then `pip install webrtcvad`.  
 **`No module named sounddevice`** — `pip install sounddevice`. Linux may need `portaudio19-dev`.  
@@ -330,10 +386,38 @@ Start at `2`. Garbage/hallucinated segments on pauses → raise to `3`. Words cl
 
 ---
 
-## Tests
+## 🗺️ Project structure
+
+Single-package layout, no nested packages — every module has one job.
+
+```
+podscribe/
+├── cli.py          — argparse + command handlers (entrypoint)
+├── tui.py          — interactive modal TUI (lazy-loaded)
+├── agent.py        — god-mode agentic loop
+├── agent_tools.py  — tool implementations for the agent
+├── audio.py        — sounddevice mic + webrtcvad capture
+├── transcriber.py  — mlx-whisper wrapper
+├── storage.py      — pods/<name>/ transcripts, summaries, CSV
+├── config.py       — pod / project / leadership-team config
+├── glossary.py     — Whisper initial_prompt glossary
+├── llm.py          — Ollama client (enhance/consolidate/chat)
+├── models.py       — Pod / Meeting / Segment dataclasses
+├── search.py       — rg-backed cross-pod search
+├── export.py       — tar.gz backup / restore
+└── fs_tools.py     — filesystem tools for the agent
+tests/              — 357 tests, all offline-safe (monkeypatch + tmp_path)
+benchmarks/         — bench_transcribe.py + bench_enhance.py + results/
+fixtures/asr/       — labeled audio clips for WER benchmarks
+docs/               — ARCHITECTURE.md · BENCHMARKS.md · USER-MANUAL.md · adr/
+```
+
+---
+
+## 🧪 Tests
 
 ```bash
-pytest tests/ -v                      # all tests (208 collected)
+pytest tests/ -v                      # all tests (357 collected)
 pytest tests/ -k "not transcriber"    # skip network smoke test (recommended for CI)
 ```
 
@@ -341,6 +425,7 @@ Offline tests need no mic or model. The single smoke test (`test_transcriber_acc
 
 ---
 
-## License
-
-MIT
+<p align="center">
+  <em>Built for the 12-reports-weekly grind. Local-first, agentic, Apple-Silicon fast.</em><br>
+  <sub>MIT License</sub>
+</p>
