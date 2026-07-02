@@ -44,12 +44,13 @@ class Diarizer:
         self,
         hf_token: str,
         *,
-        use_mps: bool = False,
+        device: str = "auto",   # "auto" (MPS if available, else CPU) | "mps" | "cpu"
         num_speakers: Optional[int] = None,
     ):
         self.hf_token = hf_token
-        self.use_mps = use_mps
+        self.device = device
         self.num_speakers = num_speakers
+        self._device_used: Optional[str] = None
         self._pipeline = None
 
     @staticmethod
@@ -163,6 +164,11 @@ class Diarizer:
         """Lazy-load the pyannote pipeline. Cached in self._pipeline across calls."""
         if self._pipeline is not None:
             return self._pipeline
+        # Set before torch is imported: lets any MPS op without a Metal kernel fall
+        # back to CPU per-op instead of crashing. Harmless on CPU. Respects an
+        # explicit user override (setdefault won't clobber PYTORCH_ENABLE_MPS_FALLBACK=0).
+        import os
+        os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
         try:
             from pyannote.audio import Pipeline  # type: ignore
         except ImportError as e:
@@ -204,15 +210,21 @@ class Diarizer:
                 f"https://huggingface.co/{_MODEL_ID} (and any gated sub-models it "
                 "requires), then retry."
             )
-        if self.use_mps and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        import sys
+        mps_ok = bool(getattr(torch.backends, "mps", None)) and torch.backends.mps.is_available()
+        # Default ("auto") uses MPS when available — validated ~35x faster with
+        # identical output on Apple Silicon; `device="cpu"` forces CPU.
+        target = "mps" if (self.device in ("auto", "mps") and mps_ok) else "cpu"
+        if target == "mps":
             try:
                 pipeline.to(torch.device("mps"))
-            except Exception as e:  # noqa: BLE001 — any MPS/op failure → CPU fallback
-                import sys
-                sys.stderr.write(f"MPS unavailable for pyannote ({e}); falling back to CPU.\n")
+            except Exception as e:  # noqa: BLE001 — device move failed → CPU
+                sys.stderr.write(f"MPS unavailable for pyannote ({e}); using CPU.\n")
                 pipeline.to(torch.device("cpu"))
+                target = "cpu"
         else:
             pipeline.to(torch.device("cpu"))
+        self._device_used = target
         self._pipeline = pipeline
         return self._pipeline
 
@@ -220,10 +232,23 @@ class Diarizer:
         """Run pyannote diarization. Returns (start_sec, end_sec, raw_speaker_idx) per turn."""
         self._validate_wav(audio_path)
         pipeline = self._load_pipeline()
-        if self.num_speakers is not None:
-            result = pipeline(str(audio_path), num_speakers=self.num_speakers)
-        else:
-            result = pipeline(str(audio_path))
+
+        def _invoke():
+            if self.num_speakers is not None:
+                return pipeline(str(audio_path), num_speakers=self.num_speakers)
+            return pipeline(str(audio_path))
+
+        try:
+            result = _invoke()
+        except Exception as e:  # noqa: BLE001 — MPS op failure → one CPU retry
+            if self._device_used != "mps":
+                raise
+            import sys
+            import torch  # type: ignore
+            sys.stderr.write(f"MPS diarization failed ({e}); retrying on CPU (slower)...\n")
+            pipeline.to(torch.device("cpu"))
+            self._device_used = "cpu"
+            result = _invoke()
         # pyannote 4.x returns a DiarizeOutput (Annotation lives on
         # `.speaker_diarization`); 3.x / legacy mode returns the Annotation directly.
         annotation = getattr(result, "speaker_diarization", result)

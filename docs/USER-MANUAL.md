@@ -337,7 +337,7 @@ prompts and caches to `~/.config/podscribe/hf_token`, or set `$HF_TOKEN`).
 - `podscribe diarize <pod>` — latest meeting
 - `podscribe diarize <pod> <meeting-id-prefix>` — a specific meeting
 - `--num-speakers N` — pin count (default: auto)
-- `--mps` — Apple MPS backend (default CPU, falls back to CPU on error)
+- `--cpu` — force CPU (default: Apple MPS/Metal when available, else CPU; falls back to CPU on error)
 - `--relogin` — re-prompt for the token
 
 **Output:** `<meeting-id>.diarized.md`; `show`/`enhance` prefer it. Labels: generic

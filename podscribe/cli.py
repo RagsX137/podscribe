@@ -869,7 +869,7 @@ def cmd_diarize(args) -> int:
         return 1
 
     sys.stderr.write("Loading pyannote pipeline...\n"); sys.stderr.flush()
-    dia = Diarizer(hf_token=token, use_mps=args.mps, num_speakers=args.num_speakers)
+    dia = Diarizer(hf_token=token, device=("cpu" if args.cpu else "auto"), num_speakers=args.num_speakers)
     sys.stderr.write("Diarizing...\n"); sys.stderr.flush()
     try:
         utterances = dia.diarize(meeting.audio_path, meeting.transcript_path)
@@ -996,7 +996,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_dia.add_argument("pod", help="Pod name")
     p_dia.add_argument("meeting", nargs="?", default="latest", help="Meeting ID prefix (default: latest)")
     p_dia.add_argument("--num-speakers", type=int, default=None, help="Hint speaker count (default: auto-detect)")
-    p_dia.add_argument("--mps", action="store_true", help="Use Apple MPS backend (default: CPU; falls back to CPU on error)")
+    p_dia.add_argument("--cpu", action="store_true", help="Force CPU (default: Apple MPS/Metal when available, else CPU; falls back to CPU on error)")
     p_dia.add_argument("--relogin", action="store_true", help="Re-prompt for HF token even if cached")
     p_dia.set_defaults(func=cmd_diarize)
 

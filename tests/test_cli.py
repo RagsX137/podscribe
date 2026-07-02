@@ -1720,7 +1720,7 @@ def test_parser_diarize_defaults():
     assert args.pod == "sam-chen"
     assert args.meeting == "latest"
     assert args.num_speakers is None
-    assert args.mps is False
+    assert args.cpu is False
     assert args.relogin is False
 
 

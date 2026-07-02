@@ -221,7 +221,7 @@ Post-hoc speaker diarization for a recorded meeting. Requires `pyannote.audio` a
 pip install -e ".[diarize]"            # opt-in extra (torch, pyannote.audio)
 podscribe diarize <pod> [meeting]      # meeting ID prefix or "latest" (default)
 podscribe diarize <pod> --num-speakers 2   # pin a speaker count
-podscribe diarize <pod> --mps               # use Apple MPS (default: CPU)
+podscribe diarize <pod> --cpu               # force CPU (default: Apple MPS/Metal when available)
 podscribe diarize <pod> --relogin           # re-prompt for HF token
 ```
 
