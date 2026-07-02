@@ -173,10 +173,33 @@ class Diarizer:
                 "Install with: pip install -e '.[diarize]'"
             ) from e
 
-        pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=self.hf_token,
-        )
+        # pyannote 4.x renamed the auth kwarg from `use_auth_token` to `token`;
+        # the [diarize] extra allows >=3.1, so support both.
+        def _load(**auth):
+            return Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", **auth)
+
+        try:
+            try:
+                pipeline = _load(token=self.hf_token)
+            except TypeError:
+                pipeline = _load(use_auth_token=self.hf_token)
+        except Exception as e:  # noqa: BLE001 — gated/auth/network → clear, not a traceback
+            raise ValueError(
+                "Could not load the pyannote pipeline — your HuggingFace token likely "
+                "lacks access to a gated model (or auth/network failed). Accept the "
+                "license for the gated repo named in the error below, then retry "
+                "(use `--relogin` if your token changed). Note: `speaker-diarization-3.1` "
+                "pulls several gated dependencies — you must accept EACH one "
+                "(segmentation-3.0 and, on pyannote 4.x, speaker-diarization-community-1).\n"
+                f"Underlying error: {e}"
+            ) from e
+        if pipeline is None:
+            raise ValueError(
+                "pyannote returned no pipeline — your HuggingFace token likely lacks "
+                "access to the gated models. Accept the licenses at "
+                "https://huggingface.co/pyannote/speaker-diarization-3.1 and "
+                "https://huggingface.co/pyannote/segmentation-3.0, then retry."
+            )
         if self.use_mps and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
             try:
                 pipeline.to(torch.device("mps"))
@@ -194,9 +217,12 @@ class Diarizer:
         self._validate_wav(audio_path)
         pipeline = self._load_pipeline()
         if self.num_speakers is not None:
-            annotation = pipeline(str(audio_path), num_speakers=self.num_speakers)
+            result = pipeline(str(audio_path), num_speakers=self.num_speakers)
         else:
-            annotation = pipeline(str(audio_path))
+            result = pipeline(str(audio_path))
+        # pyannote 4.x returns a DiarizeOutput (Annotation lives on
+        # `.speaker_diarization`); 3.x / legacy mode returns the Annotation directly.
+        annotation = getattr(result, "speaker_diarization", result)
         out: List[Tuple[float, float, int]] = []
         for turn, _, label in annotation.itertracks(yield_label=True):
             idx = int(label.rsplit("_", 1)[-1])  # "SPEAKER_00" → 0
