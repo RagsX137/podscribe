@@ -256,3 +256,21 @@ After recording, run an Ollama pass specifically to merge fragments and fix segm
 ## 6. Model accuracy tuning
 
 Compare `large-v3-turbo` vs full `large-v3` on the same audio for accuracy-latency trade-off. Consider smaller models (`base.en`) for test/iteration speed.
+
+## 7. Diarization accuracy & speaker naming
+
+`diarize` validated at **85.8%** line-level speaker agreement on a real 22-min,
+4-speaker meeting (pyannote community-1, MPS default). ~90% of errors are the two
+dominant speakers confused with each other at turn boundaries / overlaps / short
+backchannels — a good result for conversational audio, but there's headroom. Ideas
+to explore (deferred):
+
+- pass `--num-speakers N` to constrain clustering (most likely quick win vs the
+  cluster-splitting seen in the benchmark)
+- use pyannote's `exclusive_speaker_diarization` output (built for transcript
+  alignment; no overlapping turns)
+- finer-than-second timestamps in the transcript so snap-to-turn isn't
+  resolution-limited (currently `[HH:MM:SS]`, ~7% of lines collide in a second)
+- map generic `Speaker N` → real names (currently out of scope)
+- build a repeatable diarization accuracy harness (the fso benchmark used a
+  VTT reference; keep it out of the repo — real meeting data)
