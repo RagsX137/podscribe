@@ -99,6 +99,27 @@ def _run_enhance(
     return result, None
 
 
+ROLLING_SUFFIX_MAX_TOKENS = 30
+
+
+def _rolling_prompt_suffix(recent_texts: list, glossary_prompt: Optional[str]) -> str:
+    """Build the per-segment Whisper initial_prompt: glossary + last ~2 segments.
+
+    `recent_texts` is the trailing slice of segment texts (caller keeps a
+    deque(maxlen=2)). The suffix after the glossary is whitespace-tokenised
+    and capped at ROLLING_SUFFIX_MAX_TOKENS so the glossary keeps room inside
+    Whisper's soft ~224-token initial_prompt window.
+    """
+    base = glossary_prompt or ""
+    if not recent_texts:
+        return base
+    suffix = " ".join(recent_texts)
+    tokens = suffix.split()
+    if len(tokens) > ROLLING_SUFFIX_MAX_TOKENS:
+        suffix = " ".join(tokens[:ROLLING_SUFFIX_MAX_TOKENS])
+    return f"{base} {suffix}".strip()
+
+
 def cmd_init(args) -> int:
     """Initialize a new pod."""
     if pod_exists(args.name):
@@ -148,6 +169,8 @@ def run_record_session(
     start_monotonic = time.monotonic()
     segment_count = 0
     write_error: Optional[str] = None
+    import collections
+    recent_texts: "collections.deque[str]" = collections.deque(maxlen=2)
 
     def handle_sigint(sig, frame):
         capture.stop()
@@ -164,9 +187,8 @@ def run_record_session(
                     write_error = None
                 except OSError as e:
                     write_error = f"audio write failed: {e}"
-            kwargs = {}
-            if glossary_prompt:
-                kwargs["initial_prompt"] = glossary_prompt
+            initial_prompt = _rolling_prompt_suffix(list(recent_texts), glossary_prompt)
+            kwargs = {"initial_prompt": initial_prompt} if initial_prompt else {}
             results = transcriber.transcribe(audio_segment, **kwargs)
             for r in results:
                 elapsed = time.monotonic() - start_monotonic
@@ -180,6 +202,7 @@ def run_record_session(
                 append_segment(meeting, seg)
                 on_segment(seg)
                 segment_count += 1
+                recent_texts.append(r["text"])
             on_status({
                 "elapsed": time.monotonic() - start_monotonic,
                 "segment_count": segment_count,

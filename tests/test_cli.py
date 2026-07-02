@@ -1557,3 +1557,33 @@ def test_list_devices_in_known_commands_no_pod_rewrite():
     """`podscribe list-devices` must not be misread as pod-first."""
     from podscribe.cli import rewrite_argv
     assert rewrite_argv(["list-devices"]) == ["list-devices"]
+
+
+# ── Rolling initial_prompt suffix (F-3.4) ──────────────────────────
+
+
+def test_rolling_prompt_suffix_empty():
+    from podscribe.cli import _rolling_prompt_suffix
+    assert _rolling_prompt_suffix([], None) == ""
+    assert _rolling_prompt_suffix([], "gloss") == "gloss"
+
+
+def test_rolling_prompt_suffix_appends_recent():
+    from podscribe.cli import _rolling_prompt_suffix
+    out = _rolling_prompt_suffix(["one", "two"], "gloss")
+    assert out == "gloss one two"
+
+
+def test_rolling_prompt_suffix_caps_token_count():
+    """Beyond ~30 tokens the suffix is truncated so the glossary keeps room
+    inside Whisper's effective initial_prompt window.
+    """
+    from podscribe.cli import _rolling_prompt_suffix
+    long_texts = ["word " * 50] * 5
+    out = _rolling_prompt_suffix(long_texts, "gloss")
+    # Count whitespace-separated tokens AFTER the glossary portion
+    suffix_tokens = out.split()
+    gloss_tokens = "gloss".split()
+    appended = suffix_tokens[len(gloss_tokens):]
+    assert len(appended) <= 30, f"suffix must cap at ~30 tokens, got {len(appended)}"
+    assert out.startswith("gloss")
