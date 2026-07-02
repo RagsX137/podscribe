@@ -184,6 +184,7 @@ items are listed at the bottom for reference.
 
 ### Completed (for reference; see git history)
 
+- **F-Diarize-v1** `podscribe diarize`: continuous-audio capture + post-hoc pyannote.audio diarization, `.diarized.md` sidecar, `audio_layout` provenance guard, `~/.config/podscribe/hf_token`, generic `Speaker N`, `show`/`enhance` prefer diarized. Forward-only; TUI progress + name-mapping deferred.
 - **P1** Benchmark table across bundled Whisper models
 - **P2** Architecture diagram (README + `docs/ARCHITECTURE.md`)
 - **P3** README polish — tagline + Why Podscribe highlights

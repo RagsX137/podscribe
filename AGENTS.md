@@ -16,6 +16,8 @@ podscribe/
 ├── tui.py          — interactive TUI: launcher + live views (lazy-imported)
 ├── audio.py        — sounddevice InputStream + webrtcvad, 16kHz mono float32
 ├── transcriber.py  — mlx_whisper.transcribe wrapper (Apple MLX)
+├── diarizer.py     — pyannote.audio speaker diarization (lazy-imported; [diarize] extra)
+├── hf_auth.py      — HuggingFace token resolution (~/.config/podscribe/hf_token, mode 0o600)
 ├── storage.py      — pods/<name>/ per pod, transcripts .md/.json, raw .raw (kept by default)
 ├── models.py       — Pod, Meeting, Segment dataclasses + ID/name/type helpers
 ├── config.py       — load/save pod config.yaml + project podscribe.yaml + leadership_team.yaml
@@ -29,6 +31,11 @@ podscribe/
 benchmarks/bench_enhance.py — Ollama model benchmarking harness (separate script, not installed)
 ```
 
+`.raw` is now CONTINUOUS (all frames, silence included), owned by `AudioCapture`
+(`raw_audio_path`) via the `_segments_from_chunks` seam — required for diarization
+and for a clock that matches transcript timestamps. `audio_layout: "continuous"`
+in the meeting JSON gates `diarize`.
+
 ## Commands
 
 | Command | Notes |
@@ -40,6 +47,7 @@ benchmarks/bench_enhance.py — Ollama model benchmarking harness (separate scri
 | `context` | Subcommands: `add`, `remove`, `list`; glossary merged from `leadership_team.yaml` + per-pod `config.yaml` |
 | `enhance` | Requires Ollama at localhost:11434 + `llm` section in pod or project config |
 | `consolidate` (alias `cons`) | Requires Ollama; extracts structured YAML from enhanced summary and appends/rewrites a row in `meetings.csv`. `--no-log`/`-n` skips the CSV update. Prompts on existing row before rewriting. |
+| `diarize` | Post-hoc diarization via pyannote.audio (`pip install -e '.[diarize]'` + HF token). Writes `.diarized.md`; `show`/`enhance` prefer it. Refuses non-continuous recordings. Flags: `--num-speakers`, `--mps`, `--relogin`. |
 | `search <query>` | Fixed-string match across transcripts. Flags: `--pod`, `--since`, `--type`, `--color`. Uses `rg` if on PATH, else Python fallback. |
 | `god [prompt]` | Agentic mode: no prompt → TUI REPL; `--model` override stored as `god.model` in `podscribe.yaml` |
 | `export` | Bundles `pods/`, `leadership_team.yaml`, `podscribe.yaml` into tar.gz. `--out -` → stdout. Excludes `.raw`, `.env`, `__pycache__/`, `.pytest_cache/`, `.venv/`. |

@@ -325,6 +325,26 @@ podscribe sam-chen consolidate --no-log # extract only, don't touch the CSV
 
 ---
 
+### `podscribe diarize`
+
+Post-hoc speaker diarization. Requires a meeting recorded with continuous audio
+(this version onward) — older meetings are refused with a clear message.
+
+**Prerequisites:** `pip install -e ".[diarize]"`; a HuggingFace token (first TTY run
+prompts and caches to `~/.config/podscribe/hf_token`, or set `$HF_TOKEN`).
+
+**Usage:**
+- `podscribe diarize <pod>` — latest meeting
+- `podscribe diarize <pod> <meeting-id-prefix>` — a specific meeting
+- `--num-speakers N` — pin count (default: auto)
+- `--mps` — Apple MPS backend (default CPU, falls back to CPU on error)
+- `--relogin` — re-prompt for the token
+
+**Output:** `<meeting-id>.diarized.md`; `show`/`enhance` prefer it. Labels: generic
+`Speaker 0..N-1` by first appearance. Name mapping is a future feature.
+
+---
+
 ### `podscribe config consolidate`
 Manage the consolidate prompt template (stored under the `consolidate:` key in `podscribe.yaml`).
 

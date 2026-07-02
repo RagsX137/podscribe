@@ -27,6 +27,12 @@
 
 > **Privacy by design. Agentic by default. Apple-Silicon fast.**
 
+> **Upgrade note (continuous audio):** recordings now keep *continuous* `.raw`
+> audio (silence included) to enable diarization. Disk grows most for
+> **silence-heavy meetings** (long sessions with lots of dead air, up to ~5–10×);
+> **talkative meetings are barely affected** (≈1×). Use `--no-keep-audio` to skip
+> saving audio entirely.
+
 ---
 
 ## ✨ Highlights
@@ -206,6 +212,28 @@ podscribe consolidate <pod> <id-prefix> --no-log   # skip CSV update
 ```
 
 Requires `ollama serve` at `http://localhost:11434`.
+
+### `diarize`
+
+Post-hoc speaker diarization for a recorded meeting. Requires `pyannote.audio` and a HuggingFace token.
+
+```bash
+pip install -e ".[diarize]"            # opt-in extra (torch, pyannote.audio)
+podscribe diarize <pod> [meeting]      # meeting ID prefix or "latest" (default)
+podscribe diarize <pod> --num-speakers 2   # pin a speaker count
+podscribe diarize <pod> --mps               # use Apple MPS (default: CPU)
+podscribe diarize <pod> --relogin           # re-prompt for HF token
+```
+
+**First-run HF token.** Accept the licenses at
+`huggingface.co/pyannote/speaker-diarization-3.1` and
+`huggingface.co/pyannote/segmentation-3.0`, then create a read token at
+`huggingface.co/settings/tokens`. First `diarize` run in a TTY prompts for it,
+saved to `~/.config/podscribe/hf_token` (mode 0o600). `$HF_TOKEN` overrides.
+
+**Output.** Writes a `.diarized.md` sidecar; `show`/`enhance` prefer it. Labels are
+generic (`Speaker 0`, `Speaker 1`, …). Only meetings recorded with continuous
+audio (this version onward) can be diarized — older recordings are refused.
 
 ### context (glossary)
 
