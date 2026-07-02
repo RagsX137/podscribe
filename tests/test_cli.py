@@ -1709,3 +1709,97 @@ def test_rolling_prompt_suffix_caps_token_count():
     appended = suffix_tokens[len(gloss_tokens):]
     assert len(appended) <= 30, f"suffix must cap at ~30 tokens, got {len(appended)}"
     assert out.startswith("gloss")
+
+
+# ── Task 10: diarize command (parser + rewrite_argv) ──────────────
+
+
+def test_parser_diarize_defaults():
+    args = build_parser().parse_args(["diarize", "sam-chen"])
+    assert args.command == "diarize"
+    assert args.pod == "sam-chen"
+    assert args.meeting == "latest"
+    assert args.num_speakers is None
+    assert args.mps is False
+    assert args.relogin is False
+
+
+def test_rewrite_argv_pod_first_diarize():
+    assert rewrite_argv(["sam-chen", "diarize"]) == ["diarize", "sam-chen"]
+    assert rewrite_argv(["sam-chen", "diarize", "2026-07-01"]) == ["diarize", "sam-chen", "2026-07-01"]
+
+
+# ── Task 10: cmd_diarize (happy path + guard chain) ────────────────
+
+
+def _make_recorded_meeting(tmp_path, keep_audio=True, audio_layout="continuous"):
+    """Helper: create a finalized meeting with transcript + (optionally) a real WAV .raw."""
+    import wave, json
+    from podscribe.storage import init_pod, start_meeting, finalize_meeting
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod)
+    meeting.transcript_path.write_text(
+        "# Meeting: x\n\n## Transcript\n\n[00:00:03] Hello.\n[00:00:09] Hi there.\n"
+    )
+    if keep_audio:
+        with wave.open(str(meeting.audio_path), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+            w.writeframes(b"\x00" * 32000)
+    finalize_meeting(meeting, keep_audio=keep_audio)
+    # Force the audio_layout the test wants (finalize writes "continuous" when kept).
+    data = json.loads(meeting.metadata_path.read_text())
+    data["audio_layout"] = audio_layout
+    meeting.metadata_path.write_text(json.dumps(data))
+    return meeting
+
+
+def test_cmd_diarize_writes_sidecar(tmp_path, monkeypatch):
+    from podscribe import cli
+    from podscribe.diarizer import Utterance, Diarizer
+    monkeypatch.chdir(tmp_path)
+    meeting = _make_recorded_meeting(tmp_path)
+
+    class _FakeDiarizer:
+        def __init__(self, *a, **kw): pass
+        def diarize(self, audio_path, md_path):
+            return [Utterance(3.0, 8.0, 0, "Hello."), Utterance(9.0, 14.0, 1, "Hi there.")]
+        write_diarized_transcript = staticmethod(Diarizer.write_diarized_transcript)
+
+    monkeypatch.setattr("podscribe.diarizer.Diarizer", _FakeDiarizer)
+    monkeypatch.setattr("podscribe.hf_auth.get_hf_token", lambda **kw: "fake-token")
+
+    args = build_parser().parse_args(["diarize", "sam-chen", "latest"])
+    assert cli.cmd_diarize(args) == 0
+    body = meeting.transcript_path.with_suffix(".diarized.md").read_text()
+    assert "[00:00:03] Speaker 0: Hello." in body
+    assert "[00:00:09] Speaker 1: Hi there." in body
+
+
+def test_cmd_diarize_exits_when_raw_missing(tmp_path, monkeypatch, capsys):
+    from podscribe import cli
+    monkeypatch.chdir(tmp_path)
+    _make_recorded_meeting(tmp_path, keep_audio=False, audio_layout=None)
+    args = build_parser().parse_args(["diarize", "sam-chen", "latest"])
+    assert cli.cmd_diarize(args) == 1
+    assert "No .raw audio" in capsys.readouterr().err
+
+
+def test_cmd_diarize_refuses_non_continuous_recording(tmp_path, monkeypatch, capsys):
+    from podscribe import cli
+    monkeypatch.chdir(tmp_path)
+    _make_recorded_meeting(tmp_path, keep_audio=True, audio_layout=None)  # old-style
+    args = build_parser().parse_args(["diarize", "sam-chen", "latest"])
+    assert cli.cmd_diarize(args) == 1
+    assert "continuous-audio support" in capsys.readouterr().err
+
+
+def test_cmd_diarize_exits_when_no_token_and_not_tty(tmp_path, monkeypatch, capsys):
+    from podscribe import cli
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setattr("podscribe.hf_auth.get_hf_token", lambda **kw: None)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    _make_recorded_meeting(tmp_path)
+    args = build_parser().parse_args(["diarize", "sam-chen", "latest"])
+    assert cli.cmd_diarize(args) == 1
+    assert "HuggingFace token" in capsys.readouterr().err

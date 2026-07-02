@@ -28,6 +28,7 @@ from .storage import (
     pod_exists,
     read_global_log,
     read_transcript,
+    read_transcript_diarized,
     rewrite_log_row,
     save_pod_config,
     start_meeting,
@@ -826,6 +827,65 @@ def cmd_consolidate(args) -> int:
     )
 
 
+def cmd_diarize(args) -> int:
+    """Diarize a recorded meeting's continuous audio via pyannote.audio; write .diarized.md."""
+    if not pod_exists(args.pod):
+        print(f"No pod '{args.pod}'.", file=sys.stderr)
+        return 1
+    pod = load_pod(args.pod)
+    meetings = list_meetings(pod)
+    if not meetings:
+        print(f"No meetings for pod '{args.pod}'.", file=sys.stderr)
+        return 1
+    meeting, err = _resolve_meeting(meetings, args.meeting, args.pod)
+    if err is not None:
+        print(err, file=sys.stderr)
+        return 1
+
+    if not meeting.audio_path or not meeting.audio_path.exists():
+        print("No .raw audio for this meeting. Record with --keep-audio (default).", file=sys.stderr)
+        return 1
+    if meeting.audio_layout != "continuous":
+        print(
+            "This meeting was recorded before continuous-audio support; its .raw is "
+            "voiced-only and cannot be diarized accurately. Re-record to diarize.",
+            file=sys.stderr,
+        )
+        return 1
+
+    from .hf_auth import get_hf_token, prompt_for_hf_token, DIARIZE_NO_TOKEN_MSG
+    token = None if args.relogin else get_hf_token(interactive=False)
+    if token is None:
+        if sys.stdin.isatty():
+            token = prompt_for_hf_token()
+        if token is None:
+            print(DIARIZE_NO_TOKEN_MSG, file=sys.stderr)
+            return 1
+
+    try:
+        from .diarizer import Diarizer
+    except ImportError as e:
+        print(f"{e}. Install with: pip install -e '.[diarize]'", file=sys.stderr)
+        return 1
+
+    sys.stderr.write("Loading pyannote pipeline...\n"); sys.stderr.flush()
+    dia = Diarizer(hf_token=token, use_mps=args.mps, num_speakers=args.num_speakers)
+    sys.stderr.write("Diarizing...\n"); sys.stderr.flush()
+    try:
+        utterances = dia.diarize(meeting.audio_path, meeting.transcript_path)
+    except (ValueError, ImportError) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    if not utterances:
+        print("No utterances produced (transcript may be empty).", file=sys.stderr)
+        return 1
+    out_path = meeting.transcript_path.with_suffix(".diarized.md")
+    Diarizer.write_diarized_transcript(meeting.transcript_path, utterances, out_path)
+    speaker_count = max(u.speaker for u in utterances) + 1
+    print(f"Wrote {out_path} ({speaker_count} speakers)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="podscribe",
@@ -931,6 +991,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_cons.add_argument("--no-log", "-n", action="store_true", help="Skip CSV log update")
     p_cons.set_defaults(func=cmd_consolidate)
 
+    # diarize
+    p_dia = sub.add_parser("diarize", help="Diarize a recorded meeting's audio (pyannote.audio).")
+    p_dia.add_argument("pod", help="Pod name")
+    p_dia.add_argument("meeting", nargs="?", default="latest", help="Meeting ID prefix (default: latest)")
+    p_dia.add_argument("--num-speakers", type=int, default=None, help="Hint speaker count (default: auto-detect)")
+    p_dia.add_argument("--mps", action="store_true", help="Use Apple MPS backend (default: CPU; falls back to CPU on error)")
+    p_dia.add_argument("--relogin", action="store_true", help="Re-prompt for HF token even if cached")
+    p_dia.set_defaults(func=cmd_diarize)
+
     # search
     p_search = sub.add_parser("search", help="Search across all transcripts.")
     p_search.add_argument("query", help="Search query (fixed-string match)")
@@ -1023,7 +1092,7 @@ def rewrite_argv(argv: list[str]) -> list[str]:
     `podscribe <pod> <command> [args]` → `<command> <pod> [args]`
     `start` → `record`, `summarize` → `enhance`
     """
-    known_commands = {"init", "record", "list", "show", "context", "enhance", "config", "consolidate", "search", "god", "list-devices"}
+    known_commands = {"init", "record", "list", "show", "context", "enhance", "config", "consolidate", "diarize", "search", "god", "list-devices"}
     aliases = {"start": "record", "summarize": "enhance", "cons": "consolidate"}
 
     if not argv:
