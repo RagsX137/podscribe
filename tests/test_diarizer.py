@@ -94,3 +94,31 @@ def test_diarize_end_to_end_with_stubbed_pipeline(tmp_path, monkeypatch):
     assert [u.speaker for u in utt] == [0, 1, 0]
     assert [u.text for u in utt] == ["Hello, welcome.", "How are you doing?", "Good, let's get started."]
     assert [u.start_sec for u in utt] == [3.0, 9.0, 14.0]
+
+
+def test_validate_wav_raises_on_missing_riff_header(tmp_path):
+    bad = tmp_path / "corrupt.raw"
+    bad.write_bytes(b"not a wav header at all")
+    dia = Diarizer(hf_token="fake")
+    with pytest.raises(ValueError, match="not a valid WAV"):
+        dia._validate_wav(bad)
+
+
+def test_run_pipeline_raises_clear_import_error_when_pyannote_missing(tmp_path, monkeypatch):
+    import wave
+    audio = tmp_path / "m.raw"
+    with wave.open(str(audio), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+        w.writeframes(b"\x00" * 3200)
+    dia = Diarizer(hf_token="fake")
+
+    import builtins
+    real_import = builtins.__import__
+    def fake_import(name, *args, **kwargs):
+        if name == "pyannote.audio":
+            raise ImportError("simulated: not installed")
+        return real_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(ImportError, match="pyannote.audio is required"):
+        dia._run_pipeline(audio)

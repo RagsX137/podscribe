@@ -143,6 +143,62 @@ class Diarizer:
             for (start, text), spk in zip(lines, speakers)
         ]
 
+    @staticmethod
+    def _validate_wav(audio_path: Path) -> None:
+        """Cheap RIFF-header probe so a truncated .raw fails clearly, not cryptically."""
+        import wave
+        try:
+            with wave.open(str(audio_path), "rb") as w:
+                if w.getnframes() == 0:
+                    raise ValueError(f"{audio_path} is empty (0 frames).")
+        except wave.Error as e:
+            raise ValueError(f"{audio_path} is not a valid WAV: {e}") from e
+
+    def _load_pipeline(self):
+        """Lazy-load the pyannote pipeline. Cached in self._pipeline across calls."""
+        if self._pipeline is not None:
+            return self._pipeline
+        try:
+            from pyannote.audio import Pipeline  # type: ignore
+        except ImportError as e:
+            raise ImportError(
+                "pyannote.audio is required for diarization. "
+                "Install with: pip install -e '.[diarize]'"
+            ) from e
+        try:
+            import torch  # type: ignore
+        except ImportError as e:
+            raise ImportError(
+                "torch is required for diarization. "
+                "Install with: pip install -e '.[diarize]'"
+            ) from e
+
+        pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            use_auth_token=self.hf_token,
+        )
+        if self.use_mps and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            try:
+                pipeline.to(torch.device("mps"))
+            except Exception as e:  # noqa: BLE001 — any MPS/op failure → CPU fallback
+                import sys
+                sys.stderr.write(f"MPS unavailable for pyannote ({e}); falling back to CPU.\n")
+                pipeline.to(torch.device("cpu"))
+        else:
+            pipeline.to(torch.device("cpu"))
+        self._pipeline = pipeline
+        return self._pipeline
+
     def _run_pipeline(self, audio_path: Path) -> List[Tuple[float, float, int]]:
-        """Real impl in Task 8. Stubbed by tests here."""
-        raise NotImplementedError("pyannote pipeline integration is implemented in Task 8")
+        """Run pyannote diarization. Returns (start_sec, end_sec, raw_speaker_idx) per turn."""
+        self._validate_wav(audio_path)
+        pipeline = self._load_pipeline()
+        if self.num_speakers is not None:
+            annotation = pipeline(str(audio_path), num_speakers=self.num_speakers)
+        else:
+            annotation = pipeline(str(audio_path))
+        out: List[Tuple[float, float, int]] = []
+        for turn, _, label in annotation.itertracks(yield_label=True):
+            idx = int(label.rsplit("_", 1)[-1])  # "SPEAKER_00" → 0
+            out.append((float(turn.start), float(turn.end), idx))
+        return out
