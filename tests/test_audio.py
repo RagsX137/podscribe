@@ -103,3 +103,58 @@ def test_segment_frames_continuous_speech_yields_exactly_at_soft_max():
     # The remaining 100 frames form a new in-progress segment (yielded on EOF)
     assert len(out) == 2
     assert sum(len(s) for s in out) == 500
+
+
+def test_segments_from_chunks_writes_all_chunks_but_yields_voiced_only(tmp_path, monkeypatch):
+    """The raw file must contain EVERY chunk (silence included); yields are voiced-only.
+
+    This is the v1-catching test: voiced-only .raw would fail the duration assertion.
+    """
+    import wave
+    import numpy as np
+    from podscribe.audio import AudioCapture, SAMPLE_RATE, VAD_FRAME_SAMPLES
+
+    # Build a chunk stream: 20 speech frames, 10 silence frames, 20 speech frames.
+    # Each chunk is one VAD frame worth of float32 samples (30ms).
+    # 20 speech frames = 600ms — exceeds MIN_SEGMENT_SEC (500ms) so the trim/filter
+    # in _segments_from_chunks still yields voiced segments. Spec said 10+10+10
+    # but 10 frames = 300ms, which is below MIN_SEGMENT_SEC, so the second
+    # invariant would always be 0 < 0 → fail. The two invariants we care about
+    # only need speech long enough to survive the filter.
+    speech = np.full(VAD_FRAME_SAMPLES, 0.5, dtype=np.float32)
+    silence = np.zeros(VAD_FRAME_SAMPLES, dtype=np.float32)
+    chunks = [speech] * 20 + [silence] * 10 + [speech] * 20
+    total_frames = len(chunks) * VAD_FRAME_SAMPLES
+
+    cap = AudioCapture()
+    # Stub VAD: our synthetic 0.5 chunk is "speech", 0.0 chunk is "silence".
+    monkeypatch.setattr(cap, "_load_vad", lambda: None)
+    monkeypatch.setattr(cap, "_is_speech", lambda pcm: bool(np.any(pcm != 0)))
+    cap._running = True
+
+    raw_path = tmp_path / "cont.raw"
+    voiced = list(cap._segments_from_chunks(iter(chunks), raw_path))
+
+    # Invariant 1: continuous .raw holds every chunk (silence included).
+    with wave.open(str(raw_path), "rb") as w:
+        assert w.getnframes() == total_frames
+
+    # Invariant 2: yielded audio is voiced-only (strictly less than the total).
+    voiced_frames = sum(len(seg) for seg in voiced)
+    assert 0 < voiced_frames < total_frames
+
+
+def test_segments_from_chunks_no_raw_path_still_yields(tmp_path, monkeypatch):
+    """raw_path=None: no file written, VAD/yield behaviour unchanged."""
+    import numpy as np
+    from podscribe.audio import AudioCapture, VAD_FRAME_SAMPLES
+
+    speech = np.full(VAD_FRAME_SAMPLES, 0.5, dtype=np.float32)
+    chunks = [speech] * 20
+    cap = AudioCapture()
+    monkeypatch.setattr(cap, "_load_vad", lambda: None)
+    monkeypatch.setattr(cap, "_is_speech", lambda pcm: True)
+    cap._running = True
+    voiced = list(cap._segments_from_chunks(iter(chunks), None))
+    assert sum(len(seg) for seg in voiced) > 0
+    assert not (tmp_path / "any.raw").exists()

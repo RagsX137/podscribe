@@ -11,6 +11,7 @@ import queue
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -126,13 +127,18 @@ class AudioCapture:
         vad_aggressiveness: int = 2,
         device: Optional[int] = None,
         on_level=lambda f: None,
+        raw_audio_path: Optional[Path] = None,
     ):
         """vad_aggressiveness: 0-3, higher = more aggressive (filters more).
         on_level: called with float RMS in [0.0, 1.0] for each audio chunk.
+        raw_audio_path: when set, every captured chunk is written to this .raw
+            (16kHz mono int16), continuously, before VAD gating.
         """
         self.vad_aggressiveness = vad_aggressiveness
         self.device = device
         self._on_level = on_level
+        self.raw_audio_path = raw_audio_path
+        self._write_error = False
         self._audio_q: "queue.Queue[np.ndarray]" = queue.Queue()
         self._stream: Optional[sd.InputStream] = None
         self._vad = None
@@ -212,16 +218,50 @@ class AudioCapture:
             sys.stderr.flush()
             return
 
+        def _chunk_stream():
+            while self._running:
+                try:
+                    yield self._audio_q.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+        try:
+            yield from self._segments_from_chunks(_chunk_stream(), self.raw_audio_path)
+        finally:
+            self._stream.stop()
+            self._stream.close()
+
+    def _segments_from_chunks(self, chunks, raw_path):
+        """Pure seam: write ALL chunks to raw_path (continuous), VAD-gate, yield voiced.
+
+        `chunks` is an iterable of float32 numpy arrays (one VAD frame each).
+        Testable without audio hardware. Writing happens BEFORE the VAD verdict,
+        so raw_path captures silence too — this is the clock fix.
+        """
+        import wave
+        self._load_vad()
+        wav_writer = None
+        if raw_path is not None:
+            try:
+                wav_writer = wave.open(str(raw_path), "wb")
+                wav_writer.setnchannels(1)
+                wav_writer.setsampwidth(2)
+                wav_writer.setframerate(SAMPLE_RATE)
+            except OSError:
+                self._write_error = True
+                wav_writer = None
+
         buffered_chunks: list = []
 
         def _is_speech_stream():
-            while self._running:
-                try:
-                    chunk = self._audio_q.get(timeout=0.1)
-                except queue.Empty:
-                    continue
+            for chunk in chunks:
                 buffered_chunks.append(chunk)
                 pcm = np.clip(chunk * 32767, -32768, 32767).astype(np.int16)
+                if wav_writer is not None:
+                    try:
+                        wav_writer.writeframes(pcm.tobytes())
+                    except OSError:
+                        self._write_error = True
                 yield self._is_speech(pcm)
 
         try:
@@ -246,8 +286,8 @@ class AudioCapture:
                 if len(seg) / SAMPLE_RATE >= MIN_SEGMENT_SEC:
                     yield seg
         finally:
-            self._stream.stop()
-            self._stream.close()
+            if wav_writer is not None:
+                wav_writer.close()
 
     def stop(self):
         self._running = False
@@ -255,3 +295,7 @@ class AudioCapture:
     @property
     def had_overflow(self) -> bool:
         return self._overflow
+
+    @property
+    def had_write_error(self) -> bool:
+        return self._write_error
