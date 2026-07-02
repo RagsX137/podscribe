@@ -16,6 +16,11 @@ from typing import List, Optional, Tuple
 
 _TRANSCRIPT_LINE_RE = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})\]\s*(.*)$")
 
+# Pinned pipeline. `speaker-diarization-community-1` is the native pyannote 4.x
+# pipeline; the older `speaker-diarization-3.1` is a 4.x shim that pulls it in
+# anyway (extra gated hop). Requires pyannote.audio>=4.0 (see pyproject [diarize]).
+_MODEL_ID = "pyannote/speaker-diarization-community-1"
+
 
 @dataclass
 class Utterance:
@@ -33,7 +38,7 @@ def _fmt_time(sec: float) -> str:
 
 
 class Diarizer:
-    """pyannote.audio speaker-diarization-3.1 wrapper. Pipeline cached on the instance."""
+    """pyannote.audio speaker-diarization-community-1 wrapper. Pipeline cached on the instance."""
 
     def __init__(
         self,
@@ -176,7 +181,7 @@ class Diarizer:
         # pyannote 4.x renamed the auth kwarg from `use_auth_token` to `token`;
         # the [diarize] extra allows >=3.1, so support both.
         def _load(**auth):
-            return Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", **auth)
+            return Pipeline.from_pretrained(_MODEL_ID, **auth)
 
         try:
             try:
@@ -185,20 +190,19 @@ class Diarizer:
                 pipeline = _load(use_auth_token=self.hf_token)
         except Exception as e:  # noqa: BLE001 — gated/auth/network → clear, not a traceback
             raise ValueError(
-                "Could not load the pyannote pipeline — your HuggingFace token likely "
-                "lacks access to a gated model (or auth/network failed). Accept the "
-                "license for the gated repo named in the error below, then retry "
-                "(use `--relogin` if your token changed). Note: `speaker-diarization-3.1` "
-                "pulls several gated dependencies — you must accept EACH one "
-                "(segmentation-3.0 and, on pyannote 4.x, speaker-diarization-community-1).\n"
-                f"Underlying error: {e}"
+                f"Could not load the pyannote pipeline ({_MODEL_ID}) — your HuggingFace "
+                "token likely lacks access to a gated model (or auth/network failed). "
+                "Accept the license for EACH gated repo named in the error below "
+                "(the pipeline may pull several: the model itself plus segmentation/"
+                "embedding sub-models), then retry (use `--relogin` if your token "
+                f"changed).\nUnderlying error: {e}"
             ) from e
         if pipeline is None:
             raise ValueError(
-                "pyannote returned no pipeline — your HuggingFace token likely lacks "
-                "access to the gated models. Accept the licenses at "
-                "https://huggingface.co/pyannote/speaker-diarization-3.1 and "
-                "https://huggingface.co/pyannote/segmentation-3.0, then retry."
+                f"pyannote returned no pipeline for {_MODEL_ID} — your HuggingFace token "
+                "likely lacks access to a gated model. Accept the license at "
+                f"https://huggingface.co/{_MODEL_ID} (and any gated sub-models it "
+                "requires), then retry."
             )
         if self.use_mps and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
             try:

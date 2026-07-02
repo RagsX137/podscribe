@@ -225,11 +225,11 @@ podscribe diarize <pod> --mps               # use Apple MPS (default: CPU)
 podscribe diarize <pod> --relogin           # re-prompt for HF token
 ```
 
-**First-run HF token.** Accept the licenses at
-`huggingface.co/pyannote/speaker-diarization-3.1` and
-`huggingface.co/pyannote/segmentation-3.0`, then create a read token at
-`huggingface.co/settings/tokens`. First `diarize` run in a TTY prompts for it,
-saved to `~/.config/podscribe/hf_token` (mode 0o600). `$HF_TOKEN` overrides.
+**First-run HF token.** Accept the model license at
+`huggingface.co/pyannote/speaker-diarization-community-1` (the pipeline may prompt
+for a few gated sub-models on first download — accept each), then create a read
+token at `huggingface.co/settings/tokens`. First `diarize` run in a TTY prompts
+for it, saved to `~/.config/podscribe/hf_token` (mode 0o600). `$HF_TOKEN` overrides.
 
 **Output.** Writes a `.diarized.md` sidecar; `show`/`enhance` prefer it. Labels are
 generic (`Speaker 0`, `Speaker 1`, …). Only meetings recorded with continuous

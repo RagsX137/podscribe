@@ -17,9 +17,9 @@ HF_TOKEN_URL = "https://huggingface.co/settings/tokens"
 
 HF_LOGIN_INSTRUCTIONS = (
     "pyannote.audio requires a HuggingFace token.\n"
-    "  1. Accept the model licenses at:\n"
-    "     https://huggingface.co/pyannote/speaker-diarization-3.1\n"
-    "     https://huggingface.co/pyannote/segmentation-3.0\n"
+    "  1. Accept the model license at:\n"
+    "     https://huggingface.co/pyannote/speaker-diarization-community-1\n"
+    "     (and any gated sub-models it prompts for on first run)\n"
     "  2. Create a read token at:\n"
     "     " + HF_TOKEN_URL + "\n"
     "  3. Paste the token below (input is masked):\n"
