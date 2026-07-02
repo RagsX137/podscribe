@@ -1803,3 +1803,37 @@ def test_cmd_diarize_exits_when_no_token_and_not_tty(tmp_path, monkeypatch, caps
     args = build_parser().parse_args(["diarize", "sam-chen", "latest"])
     assert cli.cmd_diarize(args) == 1
     assert "HuggingFace token" in capsys.readouterr().err
+
+
+# ── Task 11: cmd_show prefers .diarized.md when present ─────────────
+
+
+def test_cmd_show_prefers_diarized(tmp_path, monkeypatch, capsys):
+    from podscribe import cli
+    from podscribe.storage import init_pod, start_meeting, finalize_meeting
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod)
+    meeting.transcript_path.write_text("# original\n\n## Transcript\n\n[00:00:03] Hi.\n")
+    meeting.transcript_path.with_suffix(".diarized.md").write_text(
+        "# diarized\n\n## Transcript\n\n[00:00:03] Speaker 0: Hi.\n"
+    )
+    finalize_meeting(meeting, keep_audio=False)
+    args = build_parser().parse_args(["show", "sam-chen", "latest"])
+    assert cli.cmd_show(args) == 0
+    out = capsys.readouterr().out
+    assert "Speaker 0: Hi." in out
+    assert "# original" not in out
+
+
+def test_cmd_show_falls_back_to_original(tmp_path, monkeypatch, capsys):
+    from podscribe import cli
+    from podscribe.storage import init_pod, start_meeting, finalize_meeting
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod)
+    meeting.transcript_path.write_text("# original\n\n## Transcript\n\n[00:00:03] Hi.\n")
+    finalize_meeting(meeting, keep_audio=False)
+    args = build_parser().parse_args(["show", "sam-chen", "latest"])
+    assert cli.cmd_show(args) == 0
+    assert "# original" in capsys.readouterr().out

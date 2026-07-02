@@ -401,7 +401,7 @@ def cmd_show(args) -> int:
     if err is not None:
         print(err, file=sys.stderr)
         return 1
-    print(read_transcript(meeting))
+    print(read_transcript_diarized(meeting))
     return 0
 
 
@@ -482,7 +482,7 @@ def cmd_enhance(args) -> int:
         from .tui import enhance_view
         return enhance_view(pod, meeting)
 
-    transcript = read_transcript(meeting)
+    transcript = read_transcript_diarized(meeting)
     stripped_len = len(transcript.strip())
     if stripped_len < 50:
         print(
