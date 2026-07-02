@@ -28,7 +28,9 @@ podscribe/
 ├── search.py       — cross-pod keyword search (rg backend, Python fallback)
 └── export.py       — tar.gz export/import of pods/ + root YAMLs (path-traversal safe)
 
-benchmarks/bench_enhance.py — Ollama model benchmarking harness (separate script, not installed)
+benchmarks/bench_enhance.py    — Ollama model benchmarking harness (separate script, not installed)
+benchmarks/bench_transcribe.py — Whisper model bench on fixtures/asr (--asr-dir selects a clip set)
+benchmarks/bench_meeting.py    — bench all models on a real (media + .vtt) pair in a benchmark_data/ folder
 ```
 
 `.raw` is now CONTINUOUS (all frames, silence included), owned by `AudioCapture`

@@ -117,52 +117,43 @@ float32 `.f32` file paired with a hand-transcribed `.txt` reference.
 
 ### Adding a real-meeting clip
 
-The harness is manifest-driven and takes an arbitrary `--asr-dir`, so any
-`(media file, reference transcript)` pair can be benchmarked. Keep private
-recordings under a gitignored path. Requires `ffmpeg` (`brew install ffmpeg`).
+One command. Requires `ffmpeg` (`brew install ffmpeg`).
+
+1. Drop **one** media file (`.mp4`, `.mov`, `.wav`, ...) and **one** `.vtt`
+   reference transcript into a folder under any pod's `benchmark_data/`, e.g.
+   `pods/fso/benchmark_data/`. (Anything under `pods/` is gitignored, so private
+   recordings stay out of git.)
+2. Run:
 
 ```bash
-DIR=pods/<pod>/benchmark_data/asr          # gitignored
-mkdir -p "$DIR"
-
-# 1. Decode media -> 16kHz mono float32 (the format the harness reads)
-ffmpeg -y -i meeting.mp4 -vn -ac 1 -ar 16000 -f f32le "$DIR/meeting.f32"
-
-# 2. Turn a .vtt reference into plain text (strip cue ids, timestamps, <v> tags)
-python -c "import re,sys; t=open('meeting.vtt').read().splitlines(); \
-print(' '.join(re.sub(r'</?v[^>]*>','',l).strip() for l in t \
-if l.strip() and l.strip()!='WEBVTT' and '-->' not in l \
-and not re.match(r'^[0-9a-f-]{8,}.*[0-9]+-[0-9]+$', l.strip())))" > "$DIR/meeting.txt"
-
-# 3. Write $DIR/manifest.yaml:
-#    clips:
-#      - name: meeting
-#        duration_s: <seconds>
-#        source: "real recording; reference = <commercial ASR>"
-
-# 4. Run (aggregate metrics only; --regen writes transcript text, so skip it
-#    for private audio unless benchmarks/results/ is gitignored)
-python benchmarks/bench_transcribe.py --models base,large-v3-turbo --asr-dir "$DIR"
+python benchmarks/bench_meeting.py pods/fso/benchmark_data
+python benchmarks/bench_meeting.py pods/fso/benchmark_data --models base,large-v3-turbo
+python benchmarks/bench_meeting.py pods/fso/benchmark_data --runs 3 --name standup
 ```
 
-Steps 1–2 are currently manual; a small `ingest` helper could fold them into the
-harness (see [Robustness](#robustness--adding-more-real-clips)).
+`bench_meeting.py` auto-discovers the media + `.vtt`, decodes the audio to 16kHz
+mono float32, strips the `.vtt` down to plain reference text (cue ids,
+timestamps, and `<v Name>` speaker tags removed), writes an `asr/` manifest, and
+reuses `bench_transcribe`'s runner to score every model. With no `--models` it
+runs **all available models** (derived from `transcriber.MODEL_MAP`, aliases
+deduped). Aggregate metrics print as a table; a `bench-meeting-*.json` snapshot
+(with transcript text) is written next to the media — inside the gitignored pod,
+so it never lands in git.
 
 ### Robustness / adding more real clips
 
-The suite scales to more real recordings today: the manifest holds a list of
-clips, `--asr-dir` isolates a run, and subprocess-per-model keeps RSS honest.
-Gaps to smooth before running this routinely at volume:
+The suite scales to more real recordings today: drop another `(media, .vtt)`
+pair into its own `benchmark_data/` folder and run `bench_meeting.py`. The
+manifest is list-based, `--asr-dir` isolates each run, and subprocess-per-model
+keeps RSS honest. Remaining sharp edge:
 
-- **Decode + `.vtt` parsing are manual** (steps 1–2). Worth extracting into a
-  `benchmarks/ingest.py` that takes `(media, reference, name)` and emits the
-  `.f32` + `.txt` + manifest entry.
-- **`.vtt` cleanup is minimal.** The one-liner drops speaker tags and timestamps
-  but does not normalize numbers/dates (see the digit-form caveat below), which
-  inflates WER whenever the reference and Whisper disagree on `42` vs `forty-two`.
-- **`--regen` snapshots contain transcript text** and land in the tracked
-  `benchmarks/results/`; gitignore it (or redirect) before using `--regen` with
-  private audio.
+- **`.vtt` cleanup does not normalize numbers/dates**, so WER is inflated
+  whenever the reference and Whisper disagree on `42` vs `forty-two` (see the
+  digit-form caveat below). This affects both models roughly equally.
+
+Note: plain `bench_transcribe.py --regen` writes transcript text to
+`benchmarks/results/` (now gitignored) — `bench_meeting.py` sidesteps this by
+writing its snapshot into the gitignored pod folder instead.
 
 ## Methodology
 
