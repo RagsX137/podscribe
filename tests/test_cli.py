@@ -1805,9 +1805,6 @@ def test_cmd_diarize_exits_when_no_token_and_not_tty(tmp_path, monkeypatch, caps
     assert "HuggingFace token" in capsys.readouterr().err
 
 
-# ── Task 11: cmd_show prefers .diarized.md when present ─────────────
-
-
 def test_cmd_show_prefers_diarized(tmp_path, monkeypatch, capsys):
     from podscribe import cli
     from podscribe.storage import init_pod, start_meeting, finalize_meeting
