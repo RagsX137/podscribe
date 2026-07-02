@@ -488,3 +488,38 @@ def test_csv_columns_include_type(tmp_path, monkeypatch):
     rows = read_global_log()
     assert len(rows) == 1
     assert rows[0]["type"] == "1on1"
+
+
+def test_finalize_meeting_stamps_continuous_audio_layout(tmp_path, monkeypatch):
+    import json
+    from podscribe.storage import init_pod, start_meeting, finalize_meeting
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod)
+    meeting.transcript_path.write_text("# Meeting\n\n## Transcript\n\n[00:00:01] Hi\n")
+    finalize_meeting(meeting, keep_audio=True)
+    data = json.loads(meeting.metadata_path.read_text())
+    assert data["audio_layout"] == "continuous"
+
+
+def test_finalize_meeting_no_audio_layout_when_audio_dropped(tmp_path, monkeypatch):
+    import json
+    from podscribe.storage import init_pod, start_meeting, finalize_meeting
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod)
+    meeting.transcript_path.write_text("# Meeting\n\n## Transcript\n\n[00:00:01] Hi\n")
+    finalize_meeting(meeting, keep_audio=False)
+    data = json.loads(meeting.metadata_path.read_text())
+    assert data.get("audio_layout") is None
+
+
+def test_list_meetings_reads_audio_layout(tmp_path, monkeypatch):
+    from podscribe.storage import init_pod, start_meeting, finalize_meeting, list_meetings, load_pod
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    meeting = start_meeting(pod)
+    meeting.transcript_path.write_text("# Meeting\n\n## Transcript\n\n[00:00:01] Hi\n")
+    finalize_meeting(meeting, keep_audio=True)
+    listed = list_meetings(load_pod("sam-chen"))
+    assert listed[0].audio_layout == "continuous"

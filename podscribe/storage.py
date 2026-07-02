@@ -208,6 +208,7 @@ def finalize_meeting(meeting: Meeting, *, keep_audio: bool = False) -> None:
         "model": meeting.model,
         "vad_enabled": meeting.vad_enabled,
         "type": meeting.type,
+        "audio_layout": "continuous" if keep_audio else None,
     }
     with meeting.metadata_path.open("w") as f:
         json.dump(metadata, f, indent=2)
@@ -248,6 +249,7 @@ def list_meetings(pod: Pod) -> List[Meeting]:
                 model=data.get("model", ""),
                 vad_enabled=data.get("vad_enabled", True),
                 type=data.get("type"),
+                audio_layout=data.get("audio_layout"),
             ))
         except (json.JSONDecodeError, KeyError, ValueError):
             continue

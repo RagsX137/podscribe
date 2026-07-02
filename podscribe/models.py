@@ -135,3 +135,4 @@ class Meeting:
     model: str = "large-v3-turbo"
     vad_enabled: bool = True
     type: Optional[str] = None
+    audio_layout: Optional[str] = None  # "continuous" once continuous-audio capture ships
