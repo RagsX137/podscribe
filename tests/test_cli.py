@@ -713,6 +713,12 @@ def test_cmd_record_survives_wav_open_failure(tmp_path, monkeypatch, capsys):
                     rc = cmd_record(args)
                     assert rc == 0
 
+    captured = capsys.readouterr()
+    assert "audio write failed" in captured.err, (
+        "cmd_record must surface AudioCapture.had_write_error to stderr via the "
+        "on_status callback chain. Got stderr: %r" % captured.err
+    )
+
     json_files = list(tmp_path.glob("pods/sam-chen/transcripts/*/*.json"))
     assert len(json_files) == 1, "finalize_meeting must still write metadata"
 
