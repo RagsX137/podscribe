@@ -1,12 +1,50 @@
 # Transcription benchmarks
 
 Benchmarks the bundled Whisper models — `base` and `large-v3-turbo` —
-end-to-end on real audio, fully on-device. Reproducible on any Apple Silicon Mac.
+end-to-end, fully on-device. Two complementary suites:
+
+1. **Real-meeting** — a single ~22-minute real recording, scored against an
+   independent commercial reference (Microsoft Teams' built-in ASR). Measures
+   how the models behave on messy, multi-speaker, real-world audio.
+2. **Synthetic-fixture** — three short `say`-generated clips with hand-written
+   references. Fully deterministic and reproducible on any Apple Silicon Mac,
+   with no private data.
 
 `turbo` is an alias for `large-v3-turbo` (see `podscribe/transcriber.py:MODEL_MAP`)
-and is omitted from the table to avoid duplicating its row.
+and is omitted from the tables to avoid duplicating its row.
 
-## Results
+## Real-meeting results (vs. Microsoft Teams ASR)
+
+A ~22-minute, 4-speaker meeting recording (`.mp4`, 16 kHz mono), transcribed by
+each model and compared against the meeting's Microsoft Teams `.vtt` transcript
+as the reference.
+
+| Model | Params | Mean RTF (↓) | Peak RSS (MB) | Mean WER (↓) | Mean CER (↓) | Mean MER (↓) | Mean WIL (↓) | Mean WIP (↑) |
+|---|---|---|---|---|---|---|---|---|
+| `base` | ~74 M | 0.006 | 730 | 0.139 | 0.091 | 0.132 | 0.176 | 0.824 |
+| `large-v3-turbo` | ~809 M | 0.037 | 2038 | 0.101 | 0.072 | 0.097 | 0.121 | 0.879 |
+
+`large-v3-turbo` transcribes the meeting ~27% more accurately (WER 0.101 vs
+0.139, CER 0.072 vs 0.091) for ~6× the wall time and ~2.8× the peak memory.
+Both models run far faster than realtime (RTF ≪ 1).
+
+Generated on 2026-07-02 on an Apple M1 Max with 32 GB RAM. Model cache warm.
+1 run per model.
+
+> **What "WER" means here.** The reference is itself a commercial ASR output,
+> not a human transcript, so these figures measure *divergence from Microsoft
+> Teams' ASR*, not ground-truth accuracy — the reference can mishear too
+> (proper nouns especially). Read them as a *relative* model-quality signal.
+> The benchmark also runs **without VAD** (by design — it isolates model
+> quality), so both models hallucinate somewhat on silent stretches, which
+> inflates error versus a VAD-gated live session.
+
+The recording, decoded audio, and reference transcript are private and live
+under a gitignored path (`pods/…/benchmark_data/`); only the aggregate metrics
+above are committed. To reproduce with your own media + reference, see
+[Adding a real-meeting clip](#adding-a-real-meeting-clip).
+
+## Synthetic-fixture results
 
 | Model | Params | Mean RTF (↓) | Peak RSS (MB) | Mean WER (↓) | Mean CER (↓) | Mean MER (↓) | Mean WIL (↓) | Mean WIP (↑) |
 |---|---|---|---|---|---|---|---|---|
@@ -76,6 +114,55 @@ python benchmarks/bench_transcribe.py --list-clips
 
 Fixtures live in `fixtures/asr/` (see `manifest.yaml`). Each clip is a 16kHz mono
 float32 `.f32` file paired with a hand-transcribed `.txt` reference.
+
+### Adding a real-meeting clip
+
+The harness is manifest-driven and takes an arbitrary `--asr-dir`, so any
+`(media file, reference transcript)` pair can be benchmarked. Keep private
+recordings under a gitignored path. Requires `ffmpeg` (`brew install ffmpeg`).
+
+```bash
+DIR=pods/<pod>/benchmark_data/asr          # gitignored
+mkdir -p "$DIR"
+
+# 1. Decode media -> 16kHz mono float32 (the format the harness reads)
+ffmpeg -y -i meeting.mp4 -vn -ac 1 -ar 16000 -f f32le "$DIR/meeting.f32"
+
+# 2. Turn a .vtt reference into plain text (strip cue ids, timestamps, <v> tags)
+python -c "import re,sys; t=open('meeting.vtt').read().splitlines(); \
+print(' '.join(re.sub(r'</?v[^>]*>','',l).strip() for l in t \
+if l.strip() and l.strip()!='WEBVTT' and '-->' not in l \
+and not re.match(r'^[0-9a-f-]{8,}.*[0-9]+-[0-9]+$', l.strip())))" > "$DIR/meeting.txt"
+
+# 3. Write $DIR/manifest.yaml:
+#    clips:
+#      - name: meeting
+#        duration_s: <seconds>
+#        source: "real recording; reference = <commercial ASR>"
+
+# 4. Run (aggregate metrics only; --regen writes transcript text, so skip it
+#    for private audio unless benchmarks/results/ is gitignored)
+python benchmarks/bench_transcribe.py --models base,large-v3-turbo --asr-dir "$DIR"
+```
+
+Steps 1–2 are currently manual; a small `ingest` helper could fold them into the
+harness (see [Robustness](#robustness--adding-more-real-clips)).
+
+### Robustness / adding more real clips
+
+The suite scales to more real recordings today: the manifest holds a list of
+clips, `--asr-dir` isolates a run, and subprocess-per-model keeps RSS honest.
+Gaps to smooth before running this routinely at volume:
+
+- **Decode + `.vtt` parsing are manual** (steps 1–2). Worth extracting into a
+  `benchmarks/ingest.py` that takes `(media, reference, name)` and emits the
+  `.f32` + `.txt` + manifest entry.
+- **`.vtt` cleanup is minimal.** The one-liner drops speaker tags and timestamps
+  but does not normalize numbers/dates (see the digit-form caveat below), which
+  inflates WER whenever the reference and Whisper disagree on `42` vs `forty-two`.
+- **`--regen` snapshots contain transcript text** and land in the tracked
+  `benchmarks/results/`; gitignore it (or redirect) before using `--regen` with
+  private audio.
 
 ## Methodology
 

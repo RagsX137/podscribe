@@ -281,6 +281,7 @@ def _run_parent(models: list[str], clip_names: Optional[list[str]],
             sys.executable, "-m", "benchmarks.bench_transcribe",
             "--child", "--model", model,
             "--runs", str(runs),
+            "--asr-dir", str(asr_dir),
         ]
         if clip_names:
             cmd += ["--clips", ",".join(clip_names)]
