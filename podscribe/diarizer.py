@@ -82,4 +82,67 @@ class Diarizer:
                 pass
             raise
 
-    # parsing / snapping / diarize() added in Task 7; _run_pipeline in Task 8.
+    @staticmethod
+    def _parse_transcript_lines(md_path: Path) -> List[Tuple[float, str]]:
+        """Return [(start_sec, text)] per [HH:MM:SS] line; non-matching lines skipped."""
+        out: List[Tuple[float, str]] = []
+        for line in md_path.read_text().splitlines():
+            m = _TRANSCRIPT_LINE_RE.match(line)
+            if not m:
+                continue
+            h, mn, s, text = m.groups()
+            start = int(h) * 3600 + int(mn) * 60 + int(s)
+            out.append((float(start), text))
+        return out
+
+    @staticmethod
+    def _snap_turns_to_lines(
+        turns: List[Tuple[float, float, int]], line_start_secs: List[float],
+    ) -> List[Optional[int]]:
+        """Per line, the covering turn's raw speaker (latest start wins); None if uncovered."""
+        out: List[Optional[int]] = []
+        for t in line_start_secs:
+            best: Optional[int] = None
+            best_start = -1.0
+            for start, end, speaker in turns:
+                if start <= t < end and start > best_start:
+                    best_start = start
+                    best = speaker
+            out.append(best)
+        return out
+
+    @staticmethod
+    def _renumber_speakers(raw_labels: List[Optional[int]]) -> List[int]:
+        """Map raw pyannote indices to 0..N-1 by first appearance; None → nearest preceding (0 first)."""
+        out: List[int] = []
+        mapping: dict = {}
+        next_label = 0
+        last_emitted = 0
+        for raw in raw_labels:
+            if raw is None:
+                out.append(last_emitted)
+                continue
+            if raw not in mapping:
+                mapping[raw] = next_label
+                next_label += 1
+            last_emitted = mapping[raw]
+            out.append(last_emitted)
+        return out
+
+    def diarize(self, audio_path: Path, transcript_md_path: Path) -> List[Utterance]:
+        """Run pyannote on continuous .raw; snap turns to lines; renumber speakers."""
+        lines = self._parse_transcript_lines(transcript_md_path)
+        if not lines:
+            return []
+        line_start_secs = [s for s, _ in lines]
+        turns = self._run_pipeline(audio_path)
+        raw_labels = self._snap_turns_to_lines(turns, line_start_secs)
+        speakers = self._renumber_speakers(raw_labels)
+        return [
+            Utterance(start_sec=start, end_sec=start, speaker=spk, text=text)
+            for (start, text), spk in zip(lines, speakers)
+        ]
+
+    def _run_pipeline(self, audio_path: Path) -> List[Tuple[float, float, int]]:
+        """Real impl in Task 8. Stubbed by tests here."""
+        raise NotImplementedError("pyannote pipeline integration is implemented in Task 8")
