@@ -1,5 +1,8 @@
 """Offline tests for diarizer.py. No model, no torch, no pyannote."""
+import math
 import os
+import struct
+import wave
 
 import pytest
 
@@ -122,3 +125,47 @@ def test_run_pipeline_raises_clear_import_error_when_pyannote_missing(tmp_path, 
 
     with pytest.raises(ImportError, match="pyannote.audio is required"):
         dia._run_pipeline(audio)
+
+
+def _synth_two_speaker_wav(path, duration_sec=8.0, sr=16000):
+    """16kHz mono int16 WAV alternating 220Hz / 660Hz every 2s (two acoustic clusters)."""
+    n = int(duration_sec * sr)
+    samples = bytearray()
+    for i in range(n):
+        t = i / sr
+        freq = 220.0 if (int(t) // 2) % 2 == 0 else 660.0
+        samples += struct.pack("<h", int(32767 * 0.3 * math.sin(2 * math.pi * freq * t)))
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
+        w.writeframes(bytes(samples))
+
+
+def test_diarize_smoke(tmp_path):
+    """Real pyannote.audio run (downloads weights first time). Gated by -k 'not diarize_smoke'.
+
+    Requires: pip install -e '.[diarize]', HF_TOKEN or cached token, network on first run.
+    """
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        from podscribe.hf_auth import get_hf_token
+        token = get_hf_token(interactive=False)
+    if not token:
+        pytest.skip("No HF token; set HF_TOKEN to run diarize_smoke")
+    try:
+        from podscribe.diarizer import Diarizer
+        import pyannote.audio  # noqa: F401
+    except ImportError:
+        pytest.skip("pyannote.audio not installed; pip install -e '.[diarize]'")
+
+    wav = tmp_path / "smoke.raw"
+    _synth_two_speaker_wav(wav)
+    md = tmp_path / "smoke.md"
+    md.write_text(
+        "# Meeting: smoke\n\n## Transcript\n\n"
+        + "\n".join(f"[00:00:{i:02d}] Segment {i}." for i in range(0, 8)) + "\n"
+    )
+    dia = Diarizer(hf_token=token)
+    utterances = dia.diarize(wav, md)
+    assert len(utterances) == 8
+    assert all(u.speaker >= 0 for u in utterances)
+    assert len({u.speaker for u in utterances}) <= 5
