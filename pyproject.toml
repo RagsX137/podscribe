@@ -24,6 +24,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4", "jiwer>=3.0"]
+diarize = [
+    "pyannote.audio>=3.1",
+    "torch>=2.3",
+    "torchaudio>=2.3",
+]
 
 [project.scripts]
 podscribe = "podscribe.cli:main"
