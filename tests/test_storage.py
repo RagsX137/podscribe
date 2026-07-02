@@ -442,6 +442,28 @@ def test_read_global_log_empty_when_no_file(tmp_path, monkeypatch):
     assert read_global_log() == []
 
 
+def test_start_meeting_disambiguates_same_second_collision(tmp_path, monkeypatch):
+    """Two start_meeting calls with the same `when` (same meeting id) must not
+    collide: the second gets a -0001 suffix appended after the pod name.
+    """
+    from podscribe.storage import init_pod, start_meeting
+    monkeypatch.chdir(tmp_path)
+    pod = init_pod("sam-chen")
+    when = datetime(2026, 6, 29, 14, 30, 0)
+
+    m1 = start_meeting(pod, when)
+    assert m1.id == "2026-06-29-143000-sam-chen"
+
+    m2 = start_meeting(pod, when)
+    assert m2.id == "2026-06-29-143000-sam-chen-0001", (
+        f"second collision must get a counter suffix, got {m2.id}"
+    )
+    assert m1.id != m2.id
+    # The two meetings occupy distinct files (start_meeting touches the .raw)
+    assert m1.audio_path != m2.audio_path
+    assert m2.audio_path.exists()
+
+
 def test_csv_columns_include_type(tmp_path, monkeypatch):
     """CSV_COLUMNS includes 'type' and append_log_row populates it."""
     from podscribe.models import Pod

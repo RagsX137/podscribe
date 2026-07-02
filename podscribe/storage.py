@@ -143,13 +143,29 @@ def start_meeting(
     pod: Pod, when: Optional[datetime] = None,
     meeting_type: Optional[str] = None,
 ) -> Meeting:
-    """Create a Meeting record and its file paths. Touches audio file for cleanup."""
+    """Create a Meeting record and its file paths. Touches audio file for cleanup.
+
+    If two recordings start within the same second (same base id), a
+    ``-NNNN`` counter is appended so on-disk paths never collide.
+    """
     when = when or datetime.now()
-    meeting_id = make_meeting_id(pod.name, when)
+    base_id = make_meeting_id(pod.name, when)
     date_str = fmt_date(when)
     base_dir = pod.transcripts_dir_for(date_str)
     transcript_dir = base_dir / meeting_type if meeting_type else base_dir
     transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    # Disambiguate same-second collisions (defensive — Ctrl+C + write latency
+    # normally prevents this, but cheap insurance against path collisions).
+    # We probe the `.raw` (not `.md`) because start_meeting touches the raw
+    # file via audio_path.touch(); the `.md` is only written later by
+    # run_record_session, so checking it would never see a collision.
+    meeting_id = base_id
+    counter = 0
+    while (transcript_dir / f"{meeting_id}.raw").exists():
+        counter += 1
+        meeting_id = f"{base_id}-{counter:04d}"
+
     transcript_path = transcript_dir / f"{meeting_id}.md"
     metadata_path = transcript_dir / f"{meeting_id}.json"
     audio_path = transcript_dir / f"{meeting_id}.raw"
