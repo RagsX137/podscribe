@@ -707,18 +707,9 @@ def record_view(pod: Pod, args) -> int:
         vad_aggressiveness=getattr(args, "vad_aggressiveness", 2),
         device=getattr(args, "device", None),
         on_level=_on_level,
+        raw_audio_path=meeting.audio_path if bool(getattr(args, "keep_audio", True)) else None,
     )
     keep_audio = bool(getattr(args, "keep_audio", True))
-    wav_writer = None
-    if keep_audio:
-        import wave
-        try:
-            wav_writer = wave.open(str(meeting.audio_path), "wb")
-            wav_writer.setnchannels(1)
-            wav_writer.setsampwidth(2)
-            wav_writer.setframerate(16000)
-        except OSError:
-            wav_writer = None
 
     status: dict = {"elapsed": 0, "segment_count": 0, "vad_aggr": capture.vad_aggressiveness, "overflow": False}
     status_line = {"text": ""}
@@ -810,7 +801,7 @@ def record_view(pod: Pod, args) -> int:
             try:
                 run_record_session(
                     pod, meeting, capture, transcriber,
-                    glossary_prompt=glossary_prompt, wav_writer=wav_writer, keep_audio=keep_audio,
+                    glossary_prompt=glossary_prompt, keep_audio=keep_audio,
                     on_segment=_on_segment,
                     on_status=_on_status_live,
                     on_done=_on_done,

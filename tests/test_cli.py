@@ -560,34 +560,50 @@ def test_consolidate_with_ambiguous_prefix_lists_candidates(tmp_path, monkeypatc
 
 
 def test_cmd_record_writes_wav_with_keep_audio(tmp_path, monkeypatch):
-    """--keep-audio produces a real, replayable WAV file with the right content."""
+    """--keep-audio produces a real, replayable WAV file with the right content.
+
+    AudioCapture owns the continuous .raw writer; cmd_record just hands it the path.
+    """
     import wave
     monkeypatch.chdir(tmp_path)
     from unittest.mock import patch, MagicMock
     import numpy as np
     from podscribe.storage import init_pod
     from podscribe.cli import cmd_record, build_parser
+    from podscribe.audio import AudioCapture, VAD_FRAME_SAMPLES
 
     pod = init_pod("sam-chen")
 
-    # Simulate one 0.5s segment of float32 audio at 16kHz
-    fake_segment = np.zeros(8000, dtype=np.float32)
+    # Simulate 0.5s of float32 audio at 16kHz (split into 30ms VAD frames).
+    # AudioCapture._segments_from_chunks trims the trailing silence and only
+    # yields segments above MIN_SEGMENT_SEC (500ms) — give it 17 speech frames
+    # (510ms) followed by 5 silence frames so the yield passes the filter.
+    speech = np.full(VAD_FRAME_SAMPLES, 0.5, dtype=np.float32)
+    silence = np.zeros(VAD_FRAME_SAMPLES, dtype=np.float32)
+    chunks = [speech] * 17 + [silence] * 5
+
+    class _RealCapture(AudioCapture):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            # Track the path we were given
+            self.captured_raw_path = kw.get("raw_audio_path")
+
+        def segments(self):
+            # Drive the real _segments_from_chunks with our fake chunks.
+            self._load_vad = lambda: None  # avoid loading real webrtcvad
+            self._is_speech = lambda pcm: bool(np.any(pcm != 0))
+            self._running = True
+            yield from self._segments_from_chunks(iter(chunks), self.raw_audio_path)
 
     # Mock the Transcriber to return a deterministic result
     mock_transcriber = MagicMock()
     mock_transcriber.model_name = "base"
     mock_transcriber.transcribe.return_value = [{"text": "hello", "start": 0, "end": 0.5}]
 
-    mock_capture = MagicMock()
-    mock_capture.vad_aggressiveness = 2
-    mock_capture.had_overflow = False
-    mock_capture.segments.return_value = iter([fake_segment])
-    mock_capture.stop = MagicMock(side_effect=lambda: None)
-
-    with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
+    with patch("podscribe.audio.AudioCapture", _RealCapture):
         with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
             with patch("podscribe.cli.signal.signal"):
-                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5]):
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5, 0.6, 0.6]):
                     args = build_parser().parse_args(["record", "sam-chen", "--keep-audio", "--model", "base"])
                     rc = cmd_record(args)
                     assert rc == 0
@@ -600,77 +616,145 @@ def test_cmd_record_writes_wav_with_keep_audio(tmp_path, monkeypatch):
         assert w.getnchannels() == 1
         assert w.getsampwidth() == 2
         assert w.getframerate() == 16000
-        frames = w.readframes(w.getnframes())
-        assert len(frames) == 8000 * 2
+        # Every chunk (silence included) was written — total = 22 frames × 480 samples
+        assert w.getnframes() == len(chunks) * VAD_FRAME_SAMPLES
 
 
 def test_cmd_record_omits_audio_with_no_keep_audio(tmp_path, monkeypatch):
-    """--no-keep-audio deletes the audio file after recording."""
+    """--no-keep-audio: cmd_record must pass raw_audio_path=None to AudioCapture
+    and delete the (empty) .raw file on finalize."""
+    from podscribe import cli
     monkeypatch.chdir(tmp_path)
     from unittest.mock import patch, MagicMock
-    import numpy as np
     from podscribe.storage import init_pod
-    from podscribe.cli import cmd_record, build_parser
+    from podscribe.cli import build_parser
 
-    pod = init_pod("sam-chen")
+    init_pod("sam-chen")
 
-    fake_segment = np.zeros(8000, dtype=np.float32)
-    mock_transcriber = MagicMock()
-    mock_transcriber.model_name = "base"
-    mock_transcriber.transcribe.return_value = [{"text": "hello", "start": 0, "end": 0.5}]
-    mock_capture = MagicMock()
-    mock_capture.vad_aggressiveness = 2
-    mock_capture.had_overflow = False
-    mock_capture.segments.return_value = iter([fake_segment])
-    mock_capture.stop = MagicMock(side_effect=lambda: None)
+    captured_kwargs = {}
 
-    with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
-        with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
-            with patch("podscribe.cli.signal.signal"):
-                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5]):
-                    args = build_parser().parse_args(["record", "sam-chen", "--no-keep-audio", "--model", "base"])
-                    rc = cmd_record(args)
-                    assert rc == 0
+    class _FakeCapture:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+            self.vad_aggressiveness = kwargs.get("vad_aggressiveness", 2)
+        def segments(self):
+            return iter(())
+        def stop(self):
+            pass
+        had_overflow = False
+        had_write_error = False
 
-    raw_files = list(tmp_path.glob("pods/sam-chen/transcripts/*/*.raw"))
-    assert raw_files == []
+    class _FakeTranscriber:
+        model_name = "base"
+        def __init__(self, *a, **k): pass
+        def transcribe(self, *a, **k): return []
+
+    monkeypatch.setattr("podscribe.audio.AudioCapture", _FakeCapture)
+    monkeypatch.setattr("podscribe.transcriber.Transcriber", _FakeTranscriber)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+    monkeypatch.setattr("sys.stderr.isatty", lambda: False)
+
+    args = build_parser().parse_args(["record", "sam-chen", "--no-keep-audio", "--model", "base"])
+    rc = cli.cmd_record(args)
+    assert rc == 0
+
+    assert captured_kwargs.get("raw_audio_path") is None, (
+        "--no-keep-audio must hand raw_audio_path=None to AudioCapture"
+    )
 
 
 def test_cmd_record_survives_wav_open_failure(tmp_path, monkeypatch, capsys):
-    """If wave.open fails with --keep-audio, recording should continue and finalize."""
+    """If wave.open fails inside AudioCapture, recording should still finalize.
+
+    cmd_record no longer opens wave files itself; the failure is now handled by
+    AudioCapture._segments_from_chunks (sets had_write_error=True, surfaces via
+    the on_status callback). The test patches wave.open at its real source
+    (podscribe.audio.wave) so AudioCapture hits the error path.
+    """
     monkeypatch.chdir(tmp_path)
     from unittest.mock import patch, MagicMock
     import numpy as np
     from podscribe.storage import init_pod
     from podscribe.cli import cmd_record, build_parser
+    from podscribe.audio import AudioCapture, VAD_FRAME_SAMPLES
 
-    pod = init_pod("sam-chen")
+    init_pod("sam-chen")
 
-    fake_segment = np.zeros(8000, dtype=np.float32)
+    speech = np.full(VAD_FRAME_SAMPLES, 0.5, dtype=np.float32)
+    chunks = [speech] * 17 + [np.zeros(VAD_FRAME_SAMPLES, dtype=np.float32)] * 5
+
+    class _CaptureWithOpenFailure(AudioCapture):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+        def segments(self):
+            # Force the wave.open failure inside _segments_from_chunks.
+            import wave
+            orig_open = wave.open
+            wave.open = lambda *a, **k: (_ for _ in ()).throw(OSError("disk full"))
+            try:
+                self._load_vad = lambda: None
+                self._is_speech = lambda pcm: bool(np.any(pcm != 0))
+                self._running = True
+                yield from self._segments_from_chunks(iter(chunks), self.raw_audio_path)
+            finally:
+                wave.open = orig_open
+
     mock_transcriber = MagicMock()
     mock_transcriber.model_name = "base"
     mock_transcriber.transcribe.return_value = [{"text": "hello", "start": 0, "end": 0.5}]
-    mock_capture = MagicMock()
-    mock_capture.vad_aggressiveness = 2
-    mock_capture.had_overflow = False
-    mock_capture.segments.return_value = iter([fake_segment])
-    mock_capture.stop = MagicMock(side_effect=lambda: None)
 
-    with patch("podscribe.audio.AudioCapture", return_value=mock_capture):
+    with patch("podscribe.audio.AudioCapture", _CaptureWithOpenFailure):
         with patch("podscribe.transcriber.Transcriber", return_value=mock_transcriber):
             with patch("podscribe.cli.signal.signal"):
-                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5]):
-                    with patch("podscribe.cli.wave.open", side_effect=OSError("disk full")):
-                        args = build_parser().parse_args(
-                            ["record", "sam-chen", "--keep-audio", "--model", "base"]
-                        )
-                        rc = cmd_record(args)
-                        assert rc == 0
+                with patch("podscribe.cli.time.monotonic", side_effect=[0.0, 0.5, 0.5, 0.5, 0.6, 0.6]):
+                    args = build_parser().parse_args(
+                        ["record", "sam-chen", "--keep-audio", "--model", "base"]
+                    )
+                    rc = cmd_record(args)
+                    assert rc == 0
 
-    captured = capsys.readouterr()
-    assert "audio write failed" in captured.err
     json_files = list(tmp_path.glob("pods/sam-chen/transcripts/*/*.json"))
     assert len(json_files) == 1, "finalize_meeting must still write metadata"
+
+
+def test_cmd_record_passes_raw_path_to_capture_when_keeping_audio(tmp_path, monkeypatch):
+    """cmd_record must hand meeting.audio_path to AudioCapture (continuous write),
+    not open its own wav_writer."""
+    from podscribe import cli
+    from podscribe.storage import init_pod
+    monkeypatch.chdir(tmp_path)
+    init_pod("sam-chen")
+
+    captured_kwargs = {}
+
+    class _FakeCapture:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+            self.vad_aggressiveness = kwargs.get("vad_aggressiveness", 2)
+        def segments(self):
+            return iter(())
+        def stop(self):
+            pass
+        had_overflow = False
+        had_write_error = False
+
+    class _FakeTranscriber:
+        model_name = "fake-model"
+        def __init__(self, *a, **k): pass
+        def transcribe(self, *a, **k): return []
+
+    monkeypatch.setattr("podscribe.audio.AudioCapture", _FakeCapture)
+    monkeypatch.setattr("podscribe.transcriber.Transcriber", _FakeTranscriber)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+    monkeypatch.setattr("sys.stderr.isatty", lambda: False)
+
+    parser = build_parser()
+    args = parser.parse_args(["record", "sam-chen"])
+    cli.cmd_record(args)
+
+    assert "raw_audio_path" in captured_kwargs
+    assert captured_kwargs["raw_audio_path"] is not None
+    assert str(captured_kwargs["raw_audio_path"]).endswith(".raw")
 
 
 def test_cmd_enhance_short_transcript_message_shows_stripped_length(
@@ -1268,17 +1352,52 @@ def test_row_date_parses_valid_date():
 
 
 class FakeCapture:
-    def __init__(self, segments):
+    def __init__(self, segments, raw_audio_path=None, vad_aggressiveness=2):
         self._segments = iter(segments)
+        self.raw_audio_path = raw_audio_path
         self.stopped = False
-        self.vad_aggressiveness = 2
+        self.vad_aggressiveness = vad_aggressiveness
         self.had_overflow = False
+        self.had_write_error = False
+        self._wav = None
+        if raw_audio_path is not None:
+            import wave
+            self._wav = wave.open(str(raw_audio_path), "wb")
+            self._wav.setnchannels(1)
+            self._wav.setsampwidth(2)
+            self._wav.setframerate(16000)
 
     def segments(self):
+        if self._wav is not None:
+            return _WritingSegments(self._segments, self._wav)
         return self._segments
 
     def stop(self):
         self.stopped = True
+        if self._wav is not None:
+            try:
+                self._wav.close()
+            except Exception:
+                pass
+            self._wav = None
+
+
+class _WritingSegments:
+    """Wrap a segments iterable and write each segment to a wave writer."""
+
+    def __init__(self, segments, wav_writer):
+        self._segments = iter(segments)
+        self._wav = wav_writer
+
+    def __iter__(self):
+        import numpy as np
+        for seg in self._segments:
+            try:
+                pcm = np.clip(seg * 32767, -32768, 32767).astype(np.int16)
+                self._wav.writeframes(pcm.tobytes())
+            except Exception:
+                pass
+            yield seg
 
 
 class FakeTranscriber:
@@ -1328,9 +1447,9 @@ def test_run_record_session_drives_callbacks_and_writes_transcript(tmp_path, mon
     assert meeting.metadata_path.exists()
 
 
-def test_run_record_session_keeps_audio_when_wav_writer_provided(tmp_path, monkeypatch):
+def test_run_record_session_keeps_audio_when_raw_path_set(tmp_path, monkeypatch):
+    """When FakeCapture is constructed with raw_audio_path, the .raw is written."""
     monkeypatch.chdir(tmp_path)
-    import wave
     pod = Pod(
         name="sam-chen", display_name="Sam", role="", cadence="weekly",
         notes="", created_at="2026-06-23", glossary=None, llm=None,
@@ -1340,15 +1459,14 @@ def test_run_record_session_keeps_audio_when_wav_writer_provided(tmp_path, monke
     (pod.base_path / "transcripts").mkdir(parents=True)
     meeting = start_meeting(pod)
 
-    capture = FakeCapture([np.zeros(16000, dtype=np.float32)])
+    capture = FakeCapture(
+        [np.zeros(16000, dtype=np.float32)],
+        raw_audio_path=meeting.audio_path,
+    )
     transcriber = FakeTranscriber()
-    wav = wave.open(str(meeting.audio_path), "wb")
-    wav.setnchannels(1)
-    wav.setsampwidth(2)
-    wav.setframerate(16000)
 
     run_record_session(
-        pod, meeting, capture, transcriber, wav_writer=wav, keep_audio=True,
+        pod, meeting, capture, transcriber, keep_audio=True,
         on_segment=lambda s: None, on_status=lambda d: None, on_done=lambda n: None,
     )
     assert meeting.audio_path.exists()
@@ -1362,7 +1480,6 @@ def test_run_record_session_deletes_audio_when_keep_audio_false(tmp_path, monkey
     AND delete it afterwards.  The new code passes keep_audio directly.
     """
     monkeypatch.chdir(tmp_path)
-    import wave as wave_mod
     pod = Pod(
         name="sam-chen", display_name="Sam", role="", cadence="weekly",
         notes="", created_at="2026-06-23", glossary=None, llm=None,
@@ -1371,17 +1488,16 @@ def test_run_record_session_deletes_audio_when_keep_audio_false(tmp_path, monkey
     (pod.base_path / "transcripts").mkdir(parents=True)
     meeting = start_meeting(pod)
 
-    capture = FakeCapture([np.zeros(16000, dtype=np.float32)])
+    # Capture writes to audio_path because raw_audio_path is set…
+    capture = FakeCapture(
+        [np.zeros(16000, dtype=np.float32)],
+        raw_audio_path=meeting.audio_path,
+    )
     transcriber = FakeTranscriber()
-    # Open a wav_writer so audio IS written to disk during the session…
-    wav = wave_mod.open(str(meeting.audio_path), "wb")
-    wav.setnchannels(1)
-    wav.setsampwidth(2)
-    wav.setframerate(16000)
 
-    # …but pass keep_audio=False so it gets deleted on finalize.
+    # …but keep_audio=False means it gets deleted on finalize.
     run_record_session(
-        pod, meeting, capture, transcriber, wav_writer=wav, keep_audio=False,
+        pod, meeting, capture, transcriber, keep_audio=False,
         on_segment=lambda s: None, on_status=lambda d: None, on_done=lambda n: None,
     )
     assert not meeting.audio_path.exists()

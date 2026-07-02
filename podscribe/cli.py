@@ -6,7 +6,6 @@ import importlib.metadata
 import signal
 import sys
 import time
-import wave
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -144,7 +143,6 @@ def run_record_session(
     transcriber,
     *,
     glossary_prompt: Optional[str] = None,
-    wav_writer=None,
     keep_audio: bool = True,
     on_segment=lambda s: None,
     on_status=lambda d: None,
@@ -154,8 +152,8 @@ def run_record_session(
 
     Headless: callers (plain wrapper or rich view) decide what to render.
     Owns SIGINT (stop capture), the .raw cleanup, and finalize_meeting.
+    Audio persistence (the continuous .raw file) is owned by the capture.
     """
-    import numpy as np
     with meeting.transcript_path.open("w") as f:
         f.write(f"# Meeting: {meeting.id}\n\n")
         f.write(f"- pod: {pod.name} ({pod.display_name})\n")
@@ -168,7 +166,6 @@ def run_record_session(
     meeting.vad_enabled = True
     start_monotonic = time.monotonic()
     segment_count = 0
-    write_error: Optional[str] = None
     import collections
     recent_texts: "collections.deque[str]" = collections.deque(maxlen=2)
 
@@ -180,13 +177,6 @@ def run_record_session(
 
     try:
         for audio_segment in capture.segments():
-            if wav_writer is not None:
-                try:
-                    pcm = np.clip(audio_segment * 32767, -32768, 32767).astype(np.int16)
-                    wav_writer.writeframes(pcm.tobytes())
-                    write_error = None
-                except OSError as e:
-                    write_error = f"audio write failed: {e}"
             initial_prompt = _rolling_prompt_suffix(list(recent_texts), glossary_prompt)
             kwargs = {"initial_prompt": initial_prompt} if initial_prompt else {}
             results = transcriber.transcribe(audio_segment, **kwargs)
@@ -209,16 +199,11 @@ def run_record_session(
                 "vad_aggr": capture.vad_aggressiveness,
                 "level": 0.0,
                 "overflow": getattr(capture, "had_overflow", False),
-                "write_error": write_error,
+                "write_error": "audio write failed" if getattr(capture, "had_write_error", False) else None,
             })
     finally:
         signal.signal(signal.SIGINT, old_handler)
         capture.stop()
-        if wav_writer is not None:
-            try:
-                wav_writer.close()
-            except Exception:
-                pass
         meeting.duration_sec = int(time.monotonic() - start_monotonic)
         meeting.ended_at = datetime.now().isoformat(timespec="seconds")
         finalize_meeting(meeting, keep_audio=keep_audio)
@@ -263,6 +248,7 @@ def cmd_record(args) -> int:
     capture = AudioCapture(
         vad_aggressiveness=args.vad_aggressiveness,
         device=args.device,
+        raw_audio_path=meeting.audio_path if args.keep_audio else None,
     )
 
     print(f"Recording meeting {meeting.id}")
@@ -273,17 +259,6 @@ def cmd_record(args) -> int:
     print()
     print("  Press Ctrl+C to stop and finalize.")
     print()
-
-    wav_writer = None
-    if args.keep_audio:
-        try:
-            wav_writer = wave.open(str(meeting.audio_path), "wb")
-            wav_writer.setnchannels(1)
-            wav_writer.setsampwidth(2)
-            wav_writer.setframerate(16000)
-        except OSError as e:
-            print(f"  ⚠ audio write failed: {e}", file=sys.stderr)
-            wav_writer = None
 
     def _on_segment(seg: Segment) -> None:
         print(f"[{_hms(seg.start_sec)}] {seg.text}")
@@ -301,7 +276,7 @@ def cmd_record(args) -> int:
 
     run_record_session(
         pod, meeting, capture, transcriber,
-        glossary_prompt=glossary_prompt, wav_writer=wav_writer, keep_audio=args.keep_audio,
+        glossary_prompt=glossary_prompt, keep_audio=args.keep_audio,
         on_segment=_on_segment, on_status=_on_status, on_done=_on_done,
     )
     return 0
