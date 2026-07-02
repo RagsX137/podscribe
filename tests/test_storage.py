@@ -190,6 +190,28 @@ def test_read_transcript_missing(tmp_path, monkeypatch):
         read_transcript(meeting)
 
 
+def test_read_transcript_diarized_prefers_sidecar(tmp_path, monkeypatch):
+    from podscribe.storage import read_transcript_diarized
+    from podscribe.models import Meeting
+    monkeypatch.chdir(tmp_path)
+    md = tmp_path / "meeting.md"
+    dia = tmp_path / "meeting.diarized.md"
+    md.write_text("# original\n\n[00:00:01] Hi\n")
+    dia.write_text("# diarized\n\n[00:00:01] Speaker 0: Hi\n")
+    meeting = Meeting(id="x", pod_name="p", started_at="2026-07-01T00:00:00", transcript_path=md)
+    assert read_transcript_diarized(meeting) == dia.read_text()
+
+
+def test_read_transcript_diarized_falls_back(tmp_path, monkeypatch):
+    from podscribe.storage import read_transcript_diarized
+    from podscribe.models import Meeting
+    monkeypatch.chdir(tmp_path)
+    md = tmp_path / "meeting.md"
+    md.write_text("# original\n\n[00:00:01] Hi\n")
+    meeting = Meeting(id="x", pod_name="p", started_at="2026-07-01T00:00:00", transcript_path=md)
+    assert read_transcript_diarized(meeting) == md.read_text()
+
+
 def test_pods_isolated(tmp_path, monkeypatch):
     """Critical: pods do not share data."""
     monkeypatch.chdir(tmp_path)

@@ -264,6 +264,15 @@ def read_transcript(meeting: Meeting) -> str:
     return meeting.transcript_path.read_text()
 
 
+def read_transcript_diarized(meeting: Meeting) -> str:
+    """Prefer the .diarized.md sidecar if present, else the original .md transcript."""
+    if meeting.transcript_path:
+        dia = meeting.transcript_path.with_suffix(".diarized.md")
+        if dia.exists():
+            return dia.read_text()
+    return read_transcript(meeting)
+
+
 def _parse_since(value: str):
     """Parse a since value into a date.
 
