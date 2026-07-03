@@ -15,7 +15,8 @@ def test_chunk_text_respects_max_and_overlap():
     assert "line 99" in chunks[-1]
 
 
-def test_single_pass_when_fits():
+def test_single_pass_when_fits(monkeypatch):
+    monkeypatch.setattr("podscribe.summarize.context_limit_chars", lambda model: 10_000)
     calls = []
 
     def run_llm(prompt, model):
