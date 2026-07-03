@@ -283,6 +283,103 @@ def cmd_record(args) -> int:
     return 0
 
 
+def cmd_ingest(args) -> int:
+    """Ingest a KT video into a pod as a kt-type session."""
+    from pathlib import Path
+
+    from .media import MEDIA_EXTS, discover_transcript, parse_transcript_cues
+    from .storage import finalize_kt_session, start_kt_session, write_kt_transcript
+
+    if not pod_exists(args.pod):
+        print(f"No pod '{args.pod}'.", file=sys.stderr)
+        return 1
+    pod = load_pod(args.pod)
+
+    video = Path(args.video)
+    if not video.is_file():
+        print(f"No such video: {video}", file=sys.stderr)
+        return 1
+    if video.suffix.lower() not in MEDIA_EXTS:
+        print(
+            f"Unsupported media '{video.suffix}'. Supported: "
+            f"{', '.join(sorted(MEDIA_EXTS))}",
+            file=sys.stderr,
+        )
+        return 1
+
+    transcript_file = Path(args.transcript) if args.transcript else discover_transcript(video)
+
+    recorded_at = None
+    try:
+        recorded_at = datetime.fromtimestamp(video.stat().st_mtime).isoformat(timespec="seconds")
+    except OSError:
+        pass
+
+    duration_sec = None
+    model = ""
+    if args.asr:
+        source = "asr"
+        model = args.model
+        try:
+            segments, duration_sec = _ingest_via_asr(video, model)
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            return 1
+    elif transcript_file is not None:
+        source = "vtt"
+        cues = parse_transcript_cues(transcript_file.read_text(encoding="utf-8"))
+        if not cues:
+            print(f"No cues parsed from {transcript_file.name}.", file=sys.stderr)
+            return 1
+        segments = cues
+        duration_sec = int(cues[-1][0]) if cues else None
+    else:
+        print(
+            f"No transcript found next to {video.name}. "
+            f"Re-run with --asr to transcribe locally.",
+            file=sys.stderr,
+        )
+        return 1
+
+    meeting = start_kt_session(pod)
+    write_kt_transcript(meeting, segments)
+    finalize_kt_session(
+        meeting, source=source, original_media=video.name,
+        recorded_at=recorded_at, duration_sec=duration_sec, model=model,
+    )
+    print(f"Ingested KT session {meeting.id} (source={source}).")
+    print(f"  Summarize: podscribe {pod.name} enhance --kt {meeting.id}")
+    print(f"  Ask:       podscribe {pod.name} ask {meeting.id}")
+    return 0
+
+
+def _ingest_via_asr(video, model):
+    """Decode `video` and transcribe with mlx-whisper. Returns (segments, duration_sec)."""
+    import os
+    import tempfile
+    from pathlib import Path
+
+    import numpy as np
+
+    from .media import decode_to_f32
+    from .transcriber import Transcriber
+
+    fd, tmp_name = tempfile.mkstemp(suffix=".f32")
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
+        duration_sec = int(decode_to_f32(video, tmp))
+        audio = np.fromfile(str(tmp), dtype=np.float32)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+    raw = Transcriber(model=model).transcribe(audio)
+    segments = [(s["start"], s["text"]) for s in raw]
+    return segments, duration_sec
+
+
 def cmd_list(args) -> int:
     """List pods and their meetings, with optional filters."""
     from .models import parse_meeting_type
@@ -932,6 +1029,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_rec.set_defaults(func=cmd_record)
 
+    # ingest (KT video)
+    p_ing = sub.add_parser("ingest", help="Ingest a KT video into a pod (kt-type session).")
+    p_ing.add_argument("pod", help="Pod name")
+    p_ing.add_argument("video", help="Path to the KT video/audio file")
+    p_ing.add_argument("--transcript", default=None, help="Path to a .vtt/.srt (default: sibling next to the video)")
+    p_ing.add_argument("--asr", action="store_true", help="Force local mlx-whisper ASR (default: use the .vtt/.srt if present)")
+    p_ing.add_argument("--model", default="large-v3-turbo", help="Whisper model for --asr (default: large-v3-turbo)")
+    p_ing.set_defaults(func=cmd_ingest)
+
     # list
     p_list = sub.add_parser("list", help="List all pods and their meetings.")
     p_list.add_argument("pod", nargs="?", help="Pod name (omit to list all pods)")
@@ -1092,7 +1198,7 @@ def rewrite_argv(argv: list[str]) -> list[str]:
     `podscribe <pod> <command> [args]` → `<command> <pod> [args]`
     `start` → `record`, `summarize` → `enhance`
     """
-    known_commands = {"init", "record", "list", "show", "context", "enhance", "config", "consolidate", "diarize", "search", "god", "list-devices"}
+    known_commands = {"init", "record", "ingest", "list", "show", "context", "enhance", "config", "consolidate", "diarize", "search", "god", "list-devices"}
     aliases = {"start": "record", "summarize": "enhance", "cons": "consolidate"}
 
     if not argv:
