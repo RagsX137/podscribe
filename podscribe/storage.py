@@ -314,3 +314,120 @@ def _read_pod_log_rows(pod_name: str) -> list:
         return []
     with path.open() as f:
         return list(csv.DictReader(f))
+
+
+def start_kt_session(
+    pod: Pod, *, when: Optional[datetime] = None,
+) -> Meeting:
+    """Create a KT-session Meeting under kt/transcripts/<date>/.
+
+    Unlike start_meeting (which touches a .raw file), KT sessions write nothing
+    at start, so the same-second collision probe keys off {id}.json — which a
+    prior finalized session in the same second will have written.
+    """
+    when = when or datetime.now()
+    base_id = make_meeting_id(pod.name, when)
+    date_str = fmt_date(when)
+    kt_dir = pod.kt_transcripts_dir_for(date_str)
+    kt_dir.mkdir(parents=True, exist_ok=True)
+
+    meeting_id = base_id
+    counter = 0
+    while (kt_dir / f"{meeting_id}.json").exists() or (kt_dir / f"{meeting_id}.md").exists():
+        counter += 1
+        meeting_id = f"{base_id}-{counter:04d}"
+
+    return Meeting(
+        id=meeting_id,
+        pod_name=pod.name,
+        started_at=when.isoformat(timespec="seconds"),
+        transcript_path=kt_dir / f"{meeting_id}.md",
+        metadata_path=kt_dir / f"{meeting_id}.json",
+        audio_path=None,
+        type="kt",
+    )
+
+
+def write_kt_transcript(meeting: Meeting, segments: List) -> None:
+    """Atomically write a KT transcript: header + one [HH:MM:SS] line per cue.
+
+    `segments` is a list of (start_sec, text) tuples.
+    """
+    lines = [f"# KT Session: {meeting.id}", ""]
+    lines += [f"[{_fmt_time(start)}] {text.strip()}" for start, text in segments]
+    new_text = "\n".join(lines) + "\n"
+
+    out_dir = meeting.transcript_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=out_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(new_text)
+        os.replace(tmp_path, meeting.transcript_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def finalize_kt_session(
+    meeting: Meeting, *, source: str, original_media: str,
+    recorded_at: Optional[str], duration_sec: Optional[int], model: str,
+) -> None:
+    """Atomically write the KT sidecar JSON with KT provenance fields."""
+    if meeting.ended_at is None:
+        meeting.ended_at = datetime.now().isoformat(timespec="seconds")
+    metadata = {
+        "id": meeting.id,
+        "pod_name": meeting.pod_name,
+        "started_at": meeting.started_at,
+        "ended_at": meeting.ended_at,
+        "duration_sec": duration_sec,
+        "model": model,
+        "type": "kt",
+        "source": source,
+        "original_media": original_media,
+        "recorded_at": recorded_at,
+    }
+    out_dir = meeting.metadata_path.parent
+    fd, tmp_path = tempfile.mkstemp(dir=out_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(metadata, f, indent=2)
+        os.replace(tmp_path, meeting.metadata_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def list_kt_sessions(pod: Pod) -> List[Meeting]:
+    """List KT sessions in a pod, newest first (globs kt/transcripts/*/*.json)."""
+    sessions: List[Meeting] = []
+    if not pod.base_path.exists():
+        return sessions
+    for json_path in sorted(pod.base_path.glob("kt/transcripts/*/*.json")):
+        try:
+            with json_path.open() as f:
+                data = json.load(f)
+            md_path = json_path.with_suffix(".md")
+            sessions.append(Meeting(
+                id=data["id"],
+                pod_name=data["pod_name"],
+                started_at=data["started_at"],
+                ended_at=data.get("ended_at"),
+                duration_sec=data.get("duration_sec"),
+                transcript_path=md_path if md_path.exists() else None,
+                metadata_path=json_path,
+                audio_path=None,
+                model=data.get("model", ""),
+                type=data.get("type", "kt"),
+            ))
+        except (json.JSONDecodeError, KeyError, ValueError):
+            continue
+    sessions.sort(key=lambda m: m.started_at, reverse=True)
+    return sessions
