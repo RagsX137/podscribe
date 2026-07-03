@@ -67,3 +67,40 @@ def test_ingest_asr_forces_transcription_even_with_vtt(tmp_path, monkeypatch):
     meta = json.loads(sessions[0].metadata_path.read_text())
     assert meta["source"] == "asr"
     assert "asr said this" in sessions[0].transcript_path.read_text()
+
+
+def test_ingest_asr_missing_mlx_whisper_errors_cleanly(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    init_pod("fso")
+    video = tmp_path / "kt.mp4"
+    video.touch()
+
+    # Stub decode so we reach Transcriber() before hitting the missing-dep error.
+    monkeypatch.setattr("podscribe.media.decode_to_f32", lambda m, o: 3.0)
+    import numpy as np
+    monkeypatch.setattr("numpy.fromfile", lambda *a, **k: np.zeros(48000, dtype=np.float32))
+
+    class FakeTranscriber:
+        def __init__(self, *a, **k): pass
+        def transcribe(self, audio, **k):
+            raise ImportError("mlx-whisper is required. Install with: pip install mlx-whisper")
+
+    monkeypatch.setattr("podscribe.transcriber.Transcriber", FakeTranscriber)
+
+    rc = main(["fso", "ingest", str(video), "--asr"])
+    assert rc == 1
+    assert "mlx-whisper is required" in capsys.readouterr().err
+
+
+def test_ingest_missing_transcript_path_errors_cleanly(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    init_pod("fso")
+    video = tmp_path / "kt.mp4"
+    video.touch()
+    missing = tmp_path / "does-not-exist.vtt"
+
+    rc = main(["fso", "ingest", str(video), "--transcript", str(missing)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "No such transcript file" in err
+    assert str(missing) in err

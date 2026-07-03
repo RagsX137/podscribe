@@ -322,11 +322,14 @@ def cmd_ingest(args) -> int:
         model = args.model
         try:
             segments, duration_sec = _ingest_via_asr(video, model)
-        except RuntimeError as e:
+        except (RuntimeError, ImportError) as e:
             print(str(e), file=sys.stderr)
             return 1
     elif transcript_file is not None:
         source = "vtt"
+        if not transcript_file.is_file():
+            print(f"No such transcript file: {transcript_file}", file=sys.stderr)
+            return 1
         cues = parse_transcript_cues(transcript_file.read_text(encoding="utf-8"))
         if not cues:
             print(f"No cues parsed from {transcript_file.name}.", file=sys.stderr)
