@@ -49,7 +49,8 @@ MEETING_TYPES = (
     "customer",
     "vendor",
     "cross-team",
-    # Catch-all
+    # Knowledge transfer (pre-recorded), then catch-all
+    "kt",
     "other",
 )
 
@@ -111,6 +112,12 @@ class Pod:
 
     def summaries_dir_for(self, date_str: str) -> Path:
         return self.base_path / "summaries" / date_str
+
+    def kt_transcripts_dir_for(self, date_str: str) -> Path:
+        return self.base_path / "kt" / "transcripts" / date_str
+
+    def kt_summaries_dir_for(self, date_str: str) -> Path:
+        return self.base_path / "kt" / "summaries" / date_str
 
 
 @dataclass

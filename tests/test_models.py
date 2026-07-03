@@ -183,3 +183,17 @@ def test_parse_meeting_type_rejects_unknown():
 def test_parse_meeting_type_none_returns_none():
     from podscribe.models import parse_meeting_type
     assert parse_meeting_type(None) is None
+
+
+def test_kt_is_a_valid_meeting_type():
+    from podscribe.models import parse_meeting_type
+    assert parse_meeting_type("kt") == "kt"
+    assert parse_meeting_type("KT") == "kt"
+
+
+def test_pod_kt_dir_helpers():
+    from pathlib import Path
+    from podscribe.models import Pod
+    pod = Pod(name="fso", base_path=Path("pods/fso"))
+    assert pod.kt_transcripts_dir_for("03-JUL-2026") == Path("pods/fso/kt/transcripts/03-JUL-2026")
+    assert pod.kt_summaries_dir_for("03-JUL-2026") == Path("pods/fso/kt/summaries/03-JUL-2026")
