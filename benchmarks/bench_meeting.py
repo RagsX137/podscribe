@@ -29,11 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-# Media containers ffmpeg can decode audio from. Lowercase, leading dot.
-MEDIA_EXTS: frozenset[str] = frozenset({
-    ".mp4", ".mov", ".m4a", ".mkv", ".webm", ".avi",
-    ".wav", ".mp3", ".aac", ".flac", ".ogg", ".opus",
-})
+from podscribe.media import MEDIA_EXTS, decode_to_f32  # noqa: F401  (re-exported for callers)
 
 _VTT_VOICE_TAG = re.compile(r"</?v[^>]*>")
 _VTT_CUE_ID = re.compile(r"^[0-9a-f-]{8,}.*[0-9]+-[0-9]+$")
@@ -112,36 +108,6 @@ def discover_media_and_vtt(folder: Path) -> tuple[Path, Path]:
             "keep one per benchmark folder"
         )
     return media[0], vtts[0]
-
-
-def decode_to_f32(media: Path, out_f32: Path) -> float:
-    """Decode media audio to 16kHz mono float32 raw via ffmpeg; return duration_s.
-
-    Raises RuntimeError if ffmpeg is missing or the decode fails.
-    """
-    import shutil
-    import subprocess
-
-    import numpy as np
-
-    if shutil.which("ffmpeg") is None:
-        raise RuntimeError(
-            "ffmpeg not found — install it (`brew install ffmpeg`) to decode media"
-        )
-    out_f32.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "ffmpeg", "-y", "-i", str(media),
-        "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", str(out_f32),
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"ffmpeg failed decoding {media.name}:\n{proc.stderr[-2000:]}"
-        )
-    samples = np.fromfile(out_f32, dtype=np.float32)
-    if samples.size == 0:
-        raise RuntimeError(f"decoded 0 samples from {media.name} (no audio stream?)")
-    return samples.size / 16000.0
 
 
 def write_manifest(asr_dir: Path, name: str, duration_s: float, source: str) -> Path:
