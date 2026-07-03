@@ -21,12 +21,17 @@ as the reference.
 
 | Model | Params | Mean RTF (↓) | Peak RSS (MB) | Mean WER (↓) | Mean CER (↓) | Mean MER (↓) | Mean WIL (↓) | Mean WIP (↑) |
 |---|---|---|---|---|---|---|---|---|
-| `base` | ~74 M | 0.006 | 730 | 0.139 | 0.091 | 0.132 | 0.176 | 0.824 |
-| `large-v3-turbo` | ~809 M | 0.037 | 2038 | 0.101 | 0.072 | 0.097 | 0.121 | 0.879 |
+| `base` | ~74 M | 0.006 | 725 | 0.139 | 0.091 | 0.132 | 0.176 | 0.824 |
+| `large-v3-turbo` | ~809 M | 0.028 | 2035 | 0.103 | 0.071 | 0.100 | 0.125 | 0.875 |
+| `large` | ~1550 M | 0.063 | 2845 | 0.132 | 0.097 | 0.126 | 0.151 | 0.849 |
 
-`large-v3-turbo` transcribes the meeting ~27% more accurately (WER 0.101 vs
-0.139, CER 0.072 vs 0.091) for ~6× the wall time and ~2.8× the peak memory.
-Both models run far faster than realtime (RTF ≪ 1).
+`large-v3-turbo` is the clear winner: best accuracy (WER 0.103, ~26% below
+`base`) *and* ~2.3× faster and ~800 MB lighter than full `large`. Notably the
+1.5 B-param `large` is barely better than tiny `base` here (WER 0.132 vs 0.139)
+while costing the most time and memory — `large-v3-turbo` is a distilled decoder
+of `large-v3` tuned for exactly this, so on real conversational audio it beats
+its parent at a fraction of the cost. All three run far faster than realtime
+(RTF ≪ 1). On this meeting there is no reason to run `large`.
 
 Generated on 2026-07-02 on an Apple M1 Max with 32 GB RAM. Model cache warm.
 1 run per model.
@@ -36,7 +41,7 @@ Generated on 2026-07-02 on an Apple M1 Max with 32 GB RAM. Model cache warm.
 > Teams' ASR*, not ground-truth accuracy — the reference can mishear too
 > (proper nouns especially). Read them as a *relative* model-quality signal.
 > The benchmark also runs **without VAD** (by design — it isolates model
-> quality), so both models hallucinate somewhat on silent stretches, which
+> quality), so the models hallucinate somewhat on silent stretches, which
 > inflates error versus a VAD-gated live session.
 
 The recording, decoded audio, and reference transcript are private and live
