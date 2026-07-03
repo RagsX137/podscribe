@@ -471,3 +471,20 @@ def test_glossary_cache_invalidates_on_pod_config_mtime(tmp_path, monkeypatch):
         assert m_read.call_count == 2, (
             "pod-config mtime change must invalidate the glossary cache"
         )
+
+
+def test_load_kt_prompt_returns_default_when_unset(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import KT_PROMPT_DEFAULT, load_kt_prompt
+    assert load_kt_prompt() == KT_PROMPT_DEFAULT
+    assert "{{transcript}}" in KT_PROMPT_DEFAULT
+
+
+def test_load_kt_prompt_reads_override(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    import yaml
+    from podscribe.config import load_kt_prompt
+    (tmp_path / "podscribe.yaml").write_text(
+        yaml.safe_dump({"kt": {"prompt": "custom {{transcript}}"}})
+    )
+    assert load_kt_prompt() == "custom {{transcript}}"

@@ -160,6 +160,44 @@ def save_consolidate_prompt(prompt: str) -> None:
     save_project_config(cfg)
 
 
+KT_PROMPT_DEFAULT = """You are reviewing a pre-recorded Knowledge-Transfer (KT) session transcript so a busy team lead can skip watching it and still trust a second pair of eyes.
+
+Glossary (project names/people — spell exactly): {{glossary}}
+
+Produce a markdown briefing with these sections, each grounded only in the transcript:
+
+## Overview
+2-3 sentences: what this KT covers and why it matters.
+
+## How it works / architecture
+The system, components, and flow as explained.
+
+## Key decisions & rationale
+Decisions made and the stated reasons.
+
+## Dependencies & gotchas
+External systems, credentials, ordering constraints, and any "be careful" notes.
+
+## Second pair of eyes
+- Assumptions the presenter made but did not justify.
+- What a reviewer should double-check before relying on this.
+- Jargon/acronyms decoded (only those actually used).
+- Anything glossed over or left incomplete.
+
+## Open questions / follow-ups
+Concrete questions to raise with the presenter or team.
+
+Transcript:
+{{transcript}}"""
+
+
+def load_kt_prompt() -> str:
+    """Load the KT summarize prompt from podscribe.yaml (kt.prompt), or default."""
+    cfg = load_project_config()
+    prompt = (cfg.get("kt") or {}).get("prompt")
+    return prompt if prompt else KT_PROMPT_DEFAULT
+
+
 _glossary_cache: dict = {
     "key": None,
     "value": None,
