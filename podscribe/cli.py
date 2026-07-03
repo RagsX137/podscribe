@@ -558,6 +558,9 @@ def cmd_enhance(args) -> int:
         return 1
 
     pod = load_pod(args.pod)
+    if getattr(args, "kt", False):
+        return _enhance_kt(pod, args.meeting)
+
     llm_config = pod.llm if pod.llm else load_project_config().get("llm")
     if not llm_config or not llm_config.get("model") or not llm_config.get("prompt_template"):
         print(
@@ -615,6 +618,56 @@ def cmd_enhance(args) -> int:
     summary_dir.mkdir(parents=True, exist_ok=True)
     enhanced_path.write_text(text)
     print(f"Enhanced transcript saved to {enhanced_path}")
+    return 0
+
+
+def _enhance_kt(pod, session_prefix) -> int:
+    from .config import load_kt_prompt
+    from .storage import list_kt_sessions
+    from .summarize import summarize_transcript
+
+    llm_config = pod.llm if pod.llm else load_project_config().get("llm")
+    if not llm_config or not llm_config.get("model"):
+        print(
+            "LLM not configured. Set a model via `podscribe config llm set <model> '<template>'`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    sessions = list_kt_sessions(pod)
+    if not sessions:
+        print(f"No KT sessions for pod '{pod.name}'. Run `ingest` first.", file=sys.stderr)
+        return 1
+    meeting, err = _resolve_meeting(sessions, session_prefix, pod.name)
+    if err is not None:
+        print(err, file=sys.stderr)
+        return 1
+
+    transcript = read_transcript_diarized(meeting)
+    if len(transcript.strip()) < 50:
+        print("KT transcript too short to summarize.", file=sys.stderr)
+        return 1
+
+    effective_glossary = get_effective_glossary(pod)
+    preserve_speakers = load_preserve_speakers(pod)
+    text, err = summarize_transcript(
+        transcript,
+        model=llm_config["model"],
+        prompt_template=load_kt_prompt(),
+        glossary=effective_glossary,
+        preserve_speakers=preserve_speakers,
+        run_llm=_run_enhance,
+    )
+    if err is not None:
+        print(err, file=sys.stderr)
+        return 1
+
+    date_str = fmt_date(datetime.fromisoformat(meeting.started_at))
+    summary_dir = pod.kt_summaries_dir_for(date_str)
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    out_path = summary_dir / f"{meeting.id}.md"
+    out_path.write_text(text)
+    print(f"KT summary saved to {out_path}")
     return 0
 
 
@@ -1091,6 +1144,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_enh = sub.add_parser("enhance", help="Enhance transcript via local LLM (Ollama).")
     p_enh.add_argument("pod", help="Pod name")
     p_enh.add_argument("meeting", nargs="?", default="latest", help="Meeting ID prefix (default: latest)")
+    p_enh.add_argument("--kt", action="store_true", help="Summarize a KT session (from the kt/ subtree) instead of a meeting")
     p_enh.set_defaults(func=cmd_enhance)
 
     # consolidate

@@ -104,3 +104,29 @@ def test_ingest_missing_transcript_path_errors_cleanly(tmp_path, monkeypatch, ca
     err = capsys.readouterr().err
     assert "No such transcript file" in err
     assert str(missing) in err
+
+
+def test_enhance_kt_writes_to_kt_summaries(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    init_pod("fso")
+    video = tmp_path / "kt.mp4"
+    video.touch()
+    (tmp_path / "kt.vtt").write_text(
+        "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n" + ("blah " * 40) + "\n"
+    )
+    assert main(["fso", "ingest", str(video)]) == 0
+
+    # Project LLM config + stub the LLM call.
+    import yaml
+    (tmp_path / "podscribe.yaml").write_text(
+        yaml.safe_dump({"llm": {"model": "m", "prompt_template": "T {{transcript}}"}})
+    )
+    monkeypatch.setattr("podscribe.cli._run_enhance", lambda prompt, model: ("KT SUMMARY", None))
+
+    from podscribe.storage import load_pod, list_kt_sessions
+    sid = list_kt_sessions(load_pod("fso"))[0].id
+    rc = main(["fso", "enhance", "--kt", sid])
+    assert rc == 0
+
+    hits = list((tmp_path / "pods" / "fso" / "kt" / "summaries").rglob(f"{sid}.md"))
+    assert hits and hits[0].read_text() == "KT SUMMARY"
