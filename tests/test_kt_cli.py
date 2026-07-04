@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import pytest
 
 from podscribe.cli import main
-from podscribe.storage import init_pod, list_kt_sessions
+from podscribe.storage import (
+    append_segment,
+    finalize_kt_session,
+    finalize_meeting,
+    init_pod,
+    list_kt_sessions,
+    load_pod,
+    start_kt_session,
+    start_meeting,
+    write_kt_transcript,
+)
+from podscribe.models import Segment
 
 VTT = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nhello from the KT\n"
 
@@ -37,6 +49,39 @@ def test_show_kt_reads_kt_subtree(tmp_path, monkeypatch, capsys):
     assert main(["fso", "ingest", str(video)]) == 0
     assert main(["fso", "show", "--kt", "latest"]) == 0
     assert "hello from the KT" in capsys.readouterr().out
+
+
+def test_show_latest_merges_meeting_and_kt_by_timestamp(tmp_path, monkeypatch, capsys):
+    """Regression: `show latest` (no --kt) must chronologically merge meetings
+    and KT sessions, not just concatenate list_meetings() + list_kt_sessions().
+
+    An older meeting plus a newer KT session should resolve to the KT session.
+    """
+    monkeypatch.chdir(tmp_path)
+    init_pod("fso")
+    pod = load_pod("fso")
+
+    older = datetime(2026, 1, 1, 9, 0, 0)
+    newer = datetime(2026, 6, 1, 9, 0, 0)
+
+    # Older meeting.
+    meeting = start_meeting(pod, when=older)
+    append_segment(meeting, Segment(start_sec=0.0, end_sec=1.0, text="older meeting content"))
+    finalize_meeting(meeting)
+
+    # Newer KT session, ingested later.
+    kt = start_kt_session(pod, when=newer)
+    write_kt_transcript(kt, [(1.0, "newer kt content")])
+    finalize_kt_session(
+        kt, source="vtt", original_media="kt.mp4",
+        recorded_at=None, duration_sec=3, model="",
+    )
+
+    rc = main(["fso", "show", "latest"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "newer kt content" in out
+    assert "older meeting content" not in out
 
 
 def test_ingest_no_transcript_no_asr_errors_with_hint(tmp_path, monkeypatch, capsys):

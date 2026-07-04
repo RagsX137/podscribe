@@ -562,7 +562,12 @@ def cmd_show(args) -> int:
     if getattr(args, "kt", False):
         meetings = list_kt_sessions(pod)
     else:
-        meetings = list_meetings(pod) + list_kt_sessions(pod)   # cross-subtree; _resolve errors on ambiguity
+        # cross-subtree; re-sort the merge since each list is independently
+        # newest-first and concatenation would not interleave them correctly.
+        meetings = sorted(
+            list_meetings(pod) + list_kt_sessions(pod),
+            key=lambda m: m.started_at, reverse=True,
+        )
     if not meetings:
         print(f"No meetings for pod '{args.pod}'.")
         return 1
