@@ -13,7 +13,7 @@ from typing import Optional
 from .config import get_effective_glossary, load_consolidate_prompt, load_god_model, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_god_model, save_project_config
 from rich.console import Console
 from .glossary import add_entry, format_glossary_prompt, remove_entry
-from .llm import build_consolidate_prompt, build_enhance_prompt, enhance_transcript, extract_structured_fields, ollama_model_info
+from .llm import ANTI_HALLUCINATION_PREAMBLE, build_consolidate_prompt, build_enhance_prompt, chat_stream, enhance_transcript, extract_structured_fields, ollama_model_info
 from .models import Segment, fmt_date
 from .storage import (
     _read_pod_log_rows,
@@ -381,6 +381,65 @@ def _ingest_via_asr(video, model):
     raw = Transcriber(model=model).transcribe(audio)
     segments = [(s["start"], s["text"]) for s in raw]
     return segments, duration_sec
+
+
+def cmd_ask(args) -> int:
+    """Ask questions grounded in a single KT session transcript (kt/ subtree only)."""
+    from .storage import list_kt_sessions, read_transcript
+
+    if not pod_exists(args.pod):
+        print(f"No pod '{args.pod}'.", file=sys.stderr)
+        return 1
+    pod = load_pod(args.pod)
+
+    llm_config = pod.llm if pod.llm else load_project_config().get("llm")
+    if not llm_config or not llm_config.get("model"):
+        print("LLM not configured. Set `podscribe config llm set <model> '<template>'`.", file=sys.stderr)
+        return 1
+
+    sessions = list_kt_sessions(pod)
+    if not sessions:
+        print(f"No KT sessions for pod '{args.pod}'. Run `ingest` first.", file=sys.stderr)
+        return 1
+    meeting, err = _resolve_meeting(sessions, args.session, args.pod)
+    if err is not None:
+        print(err, file=sys.stderr)
+        return 1
+
+    transcript = read_transcript(meeting)
+    system = (
+        ANTI_HALLUCINATION_PREAMBLE
+        + "\n\nAnswer ONLY from the KT transcript below. If it is not covered, "
+        "say so.\n\nKT transcript:\n" + transcript
+    )
+    model = llm_config["model"]
+
+    def ask_once(question: str) -> None:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": question},
+        ]
+        chat_stream(model, messages, on_token=lambda t: sys.stdout.write(t))
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+    question = " ".join(args.question).strip() if args.question else ""
+    if question:
+        ask_once(question)
+        return 0
+
+    # Interactive REPL (TTY). Empty line / Ctrl-D exits.
+    print(f"Ask about KT {meeting.id} (blank line to quit):")
+    while True:
+        try:
+            q = input("> ").strip()
+        except EOFError:
+            print()
+            break
+        if not q:
+            break
+        ask_once(q)
+    return 0
 
 
 def cmd_list(args) -> int:
@@ -1094,6 +1153,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_ing.add_argument("--model", default="large-v3-turbo", help="Whisper model for --asr (default: large-v3-turbo)")
     p_ing.set_defaults(func=cmd_ingest)
 
+    # ask (KT Q&A)
+    p_ask = sub.add_parser("ask", help="Ask questions about a KT session (scoped to kt/).")
+    p_ask.add_argument("pod", help="Pod name")
+    p_ask.add_argument("session", nargs="?", default="latest", help="KT session ID prefix or 'latest'")
+    p_ask.add_argument("question", nargs="*", help="Question (omit for an interactive REPL)")
+    p_ask.set_defaults(func=cmd_ask)
+
     # list
     p_list = sub.add_parser("list", help="List all pods and their meetings.")
     p_list.add_argument("pod", nargs="?", help="Pod name (omit to list all pods)")
@@ -1255,7 +1321,7 @@ def rewrite_argv(argv: list[str]) -> list[str]:
     `podscribe <pod> <command> [args]` → `<command> <pod> [args]`
     `start` → `record`, `summarize` → `enhance`
     """
-    known_commands = {"init", "record", "ingest", "list", "show", "context", "enhance", "config", "consolidate", "diarize", "search", "god", "list-devices"}
+    known_commands = {"init", "record", "ingest", "ask", "list", "show", "context", "enhance", "config", "consolidate", "diarize", "search", "god", "list-devices"}
     aliases = {"start": "record", "summarize": "enhance", "cons": "consolidate"}
 
     if not argv:

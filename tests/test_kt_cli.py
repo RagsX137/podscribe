@@ -130,3 +130,35 @@ def test_enhance_kt_writes_to_kt_summaries(tmp_path, monkeypatch):
 
     hits = list((tmp_path / "pods" / "fso" / "kt" / "summaries").rglob(f"{sid}.md"))
     assert hits and hits[0].read_text() == "KT SUMMARY"
+
+
+def test_ask_one_shot_returns_grounded_answer(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    init_pod("fso")
+    video = tmp_path / "kt.mp4"
+    video.touch()
+    (tmp_path / "kt.vtt").write_text(VTT)
+    assert main(["fso", "ingest", str(video)]) == 0
+
+    import yaml
+    (tmp_path / "podscribe.yaml").write_text(
+        yaml.safe_dump({"llm": {"model": "m", "prompt_template": "x"}})
+    )
+
+    captured = {}
+
+    def fake_chat_stream(model, messages, **kwargs):
+        captured["messages"] = messages
+        on_token = kwargs.get("on_token", lambda t: None)
+        on_token("grounded answer")
+        return "grounded answer"
+
+    monkeypatch.setattr("podscribe.cli.chat_stream", fake_chat_stream)
+
+    rc = main(["fso", "ask", "latest", "what", "is", "this?"])
+    assert rc == 0
+    # The transcript text must be in the prompt (grounding), and the user question present.
+    joined = " ".join(m["content"] for m in captured["messages"])
+    assert "hello from the KT" in joined
+    assert "what is this?" in joined
+    assert "grounded answer" in capsys.readouterr().out
