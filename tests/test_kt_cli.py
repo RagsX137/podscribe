@@ -241,6 +241,25 @@ def test_list_kt_without_pod_errors(capsys):
     assert "--kt" in capsys.readouterr().err
 
 
+def test_list_kt_empty_pod_returns_zero_with_message(tmp_path, monkeypatch, capsys):
+    """Regression: list --kt with a valid pod that has zero KT sessions should return 0."""
+    monkeypatch.chdir(tmp_path)
+    init_pod("fso")
+
+    rc = main(["fso", "list", "--kt"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert f"No KT sessions for pod 'fso'." in out
+
+
+def test_list_kt_nonexistent_pod_errors(capsys):
+    """Regression: list --kt with a nonexistent pod should error with 'No pod' message."""
+    rc = main(["nope", "list", "--kt"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "No pod 'nope'." in err
+
+
 def test_ask_one_shot_reports_llm_failure(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     init_pod("fso")
