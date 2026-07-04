@@ -177,6 +177,7 @@ def run_once(model: str, prompt: str, *, label: str, quiet: bool = False) -> dic
             (stats.get("eval_count", 0) or 0)
             / ((stats.get("eval_duration", 0) or 1) / 1e9)
         ),
+        "response_text": "".join(text_parts),
         "response_preview": "".join(text_parts)[:200],
         "response_len": len("".join(text_parts)),
     }
