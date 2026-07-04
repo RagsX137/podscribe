@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import requests
 import yaml
@@ -37,9 +37,9 @@ class Contestant:
 
 @dataclass
 class Manifest:
-    public: list
-    private: list
-    contestants: list
+    public: list[SuiteEntry]
+    private: list[SuiteEntry]
+    contestants: list[Contestant]
 
 
 def load_manifest(path: Path = MANIFEST_PATH) -> Manifest:
