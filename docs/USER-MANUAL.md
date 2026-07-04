@@ -345,6 +345,77 @@ prompts and caches to `~/.config/podscribe/hf_token`, or set `$HF_TOKEN`).
 
 ---
 
+### Knowledge-Transfer videos: `ingest`, `enhance --kt`, `ask`
+
+Ingest external video tutorials, demos, and knowledge-transfer (KT) sessions into your pod. The workflow mirrors live meetings but operates independently on video files.
+
+#### `podscribe <pod> ingest <video>`
+
+Ingest a KT video into a pod. The command automatically looks for a sibling `.vtt` or `.srt` file (the transcript you downloaded alongside the video), which is the **source of truth**.
+
+```bash
+podscribe fso ingest ~/Downloads/auth-design-kt.mp4
+# Automatically finds ~/Downloads/auth-design-kt.vtt (or .srt)
+
+podscribe fso ingest ~/Downloads/some-video.mp4 --transcript ~/path/to/custom.vtt
+# Use a custom transcript path
+
+podscribe fso ingest ~/Downloads/unlabeled-video.mp4 --asr --model large-v3-turbo
+# Force local mlx-whisper ASR (requires ffmpeg on PATH)
+# Creates a separate KT session; never overwrites a .vtt-derived one
+```
+
+**What happens:**
+1. If `--transcript` is given or a sibling `.vtt`/`.srt` is found, that file is parsed and a KT session is created
+2. With `--asr`, ffmpeg extracts audio, mlx-whisper transcribes it, and a **separate** KT session is created (coexisting with any vtt-derived session)
+3. The video file itself is not copied — only the transcript is stored
+4. Metadata (original media path, source type, timestamp) is saved in a JSON sidecar
+
+**Output:** stored under `pods/<pod>/kt/transcripts/<DD-MMM-YYYY>/` as `.md` + `.json` files.
+
+**Requirements:**
+- Sibling `.vtt`/`.srt` file (default) — no extra requirements
+- OR: `--asr` flag + ffmpeg on PATH (for local transcription)
+
+---
+
+#### `podscribe <pod> enhance --kt <id|latest>`
+
+Generate an LLM summary of a KT session (just like `enhance` for meetings, but scoped to KT only).
+
+```bash
+podscribe fso enhance --kt latest
+podscribe fso enhance --kt 2026-06
+# Uses the pod's llm config; generates a summary file
+```
+
+**Output:** saved to `pods/<pod>/kt/summaries/<DD-MMM-YYYY>/<id>.md`
+
+**Requirements:** Ollama running + `llm` config set (same as meeting `enhance`).
+
+---
+
+#### `podscribe <pod> ask <id|latest> [question]`
+
+Ask questions about a **single** KT session. Scoped to that session only — never cross-references meetings or other KT sessions.
+
+```bash
+podscribe fso ask latest                           # Opens REPL
+podscribe fso ask latest "what are the key takeaways?"
+podscribe fso ask 2026-06 "list all action items"
+```
+
+**Behavior:**
+- If a question is given, it runs once and exits (one-shot).
+- Omit the question to open an interactive REPL (`>` prompt, `/exit` to quit).
+- Each answer is grounded **only** in that KT transcript — no cross-session search.
+
+**Output:** printed to stdout (not logged).
+
+**Requirements:** none (text-only, no LLM call required if you have the transcript).
+
+---
+
 ### `podscribe config consolidate`
 Manage the consolidate prompt template (stored under the `consolidate:` key in `podscribe.yaml`).
 

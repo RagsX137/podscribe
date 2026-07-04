@@ -135,6 +135,42 @@ Each step is independent. Run only what you need.
 
 ---
 
+## 📹 Knowledge-Transfer videos
+
+Ingest external video tutorials, demos, and knowledge-transfer sessions into a pod alongside live meetings. The `.vtt` or `.srt` transcript file (often included with downloaded videos) is the **source of truth**; optionally force local transcription with `--asr`.
+
+```
+ingest  →  enhance --kt  →  ask
+```
+
+| step | what it does | requires |
+|---|---|---|
+| `ingest <video>` | video + sibling `.vtt`/`.srt` → KT session | sibling transcript file (or `--asr` + ffmpeg for ASR path) |
+| `enhance --kt` | LLM summary of KT session → `summaries/` | Ollama |
+| `ask <id>` | Q&A grounded in ONE KT transcript | none (text-only) |
+
+Each KT session lives in `pods/<pod>/kt/` — separate from meetings. The `--asr` path forces local mlx-whisper transcription, creates a coexisting session, and never overwrites a `.vtt`-derived one.
+
+**Example workflow (with bundled transcript):**
+
+```bash
+podscribe fso ingest ~/Downloads/auth-kt.mp4            # auto-finds auth-kt.vtt as source
+podscribe fso show --kt latest                          # read the transcript
+podscribe fso enhance --kt latest                       # generate LLM summary
+podscribe fso ask latest "what are the open questions?" # Q&A on this session only
+```
+
+**Example workflow (ASR path):**
+
+```bash
+podscribe fso ingest ~/Downloads/another-kt.mp4 --asr --model large-v3-turbo
+# creates a separate KT session, transcribed locally (ffmpeg required on PATH)
+```
+
+**Note:** ffmpeg is required **only** for the `--asr` path (and the bundled benchmark harness); if you use a sibling `.vtt`/`.srt`, no external tools are needed.
+
+---
+
 ## 📈 Benchmarks
 
 The bundled Whisper models are benchmarked on real audio for speed (RTF) and
