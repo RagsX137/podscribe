@@ -155,7 +155,7 @@ def show_meeting(pod_name: str, meeting_id: str) -> str:
 
 
 def list_kt_tool(pod_name: str) -> list:
-    """List KT sessions in a pod (id, date, source)."""
+    """List KT sessions in a pod (id, started_at, type)."""
     if not pod_exists(pod_name):
         return [{"error": f"Pod '{pod_name}' does not exist."}]
     pod = load_pod(pod_name)
@@ -174,7 +174,10 @@ def show_kt(pod_name: str, session_id: str) -> str:
     meeting, err = _resolve_meeting(sessions, session_id)
     if err is not None:
         return err
-    return _truncate(read_transcript(meeting))
+    try:
+        return read_transcript(meeting)
+    except FileNotFoundError as e:
+        return str(e)
 
 
 # -- Recording state (module-level, one active recording at a time) --
