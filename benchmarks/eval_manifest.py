@@ -11,6 +11,7 @@ import yaml
 
 MANIFEST_PATH = Path("benchmarks/eval_manifest.yaml")
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
+_last_ollama_error: Optional[Exception] = None
 
 
 @dataclass
@@ -73,12 +74,15 @@ def load_manifest(path: Path = MANIFEST_PATH) -> Manifest:
     return Manifest(public=public, private=private, contestants=contestants)
 
 
-def _fetch_installed_digests() -> dict:
+def _fetch_installed_digests() -> Optional[dict]:
+    global _last_ollama_error
     try:
         r = requests.get(OLLAMA_TAGS_URL, timeout=5)
         r.raise_for_status()
-    except requests.RequestException:
-        return {}
+    except requests.RequestException as e:
+        _last_ollama_error = e
+        return None
+    _last_ollama_error = None
     out = {}
     for m in r.json().get("models", []):
         tag = m.get("name") or ""
@@ -90,10 +94,14 @@ def _fetch_installed_digests() -> dict:
 
 def verify_contestants(contestants: list) -> None:
     installed = _fetch_installed_digests()
-    if not installed:
+    if installed is None:
+        e = _last_ollama_error
         sys.exit(
-            "Ollama not reachable at localhost:11434. Start it with `ollama serve`."
+            f"Ollama not reachable at localhost:11434 ({e}). "
+            f"Start it with `ollama serve`."
         )
+    if not installed:
+        sys.exit("Ollama reachable but no models installed.")
     for c in contestants:
         actual = installed.get(c.tag)
         if actual is None:
@@ -110,8 +118,15 @@ def verify_contestants(contestants: list) -> None:
             )
 
 
-def champion(contestants: list) -> Contestant:
+def _first_or_champion(contestants: list) -> Contestant:
     for c in contestants:
         if c.role == "champion":
             return c
     return contestants[0]
+
+
+def champion(contestants: list) -> Contestant:
+    for c in contestants:
+        if c.role == "champion":
+            return c
+    raise ValueError("no champion in manifest")

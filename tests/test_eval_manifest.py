@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmarks.eval_manifest import Contestant, Manifest, SuiteEntry, load_manifest, verify_contestants
+from benchmarks.eval_manifest import Contestant, Manifest, SuiteEntry, champion, load_manifest, verify_contestants
 
 
 MANIFEST_YAML = """\
@@ -64,3 +64,17 @@ def test_verify_contestants_digest_mismatch_fails_fast(monkeypatch, tmp_path):
         verify_contestants(contestants)
     assert "qwen3.6:27b" in str(exc.value)
     assert "pull" in str(exc.value).lower()
+
+
+def test_champion_returns_named_champion():
+    contestants = [
+        Contestant(tag="a", digest="x", role="challenger"),
+        Contestant(tag="b", digest="y", role="champion"),
+    ]
+    assert champion(contestants).tag == "b"
+
+
+def test_champion_raises_when_no_explicit_champion():
+    contestants = [Contestant(tag="a", digest="x", role="challenger")]
+    with pytest.raises(ValueError, match="no champion"):
+        champion(contestants)
