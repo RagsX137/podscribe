@@ -50,7 +50,7 @@ in the meeting JSON gates `diarize`.
 | `context` | Subcommands: `add`, `remove`, `list`; glossary merged from `leadership_team.yaml` + per-pod `config.yaml` |
 | `enhance` | Requires Ollama at localhost:11434 + `llm` section in pod or project config. Flag: `--kt` summarizes a KT session (from the `kt/` subtree) instead of a meeting. |
 | `consolidate` (alias `cons`) | Requires Ollama; extracts structured YAML from enhanced summary and appends/rewrites a row in `meetings.csv`. `--no-log`/`-n` skips the CSV update. Prompts on existing row before rewriting. |
-| `ask` | Scoped KT Q&A: `podscribe <pod> ask <id\|latest> [question]`. Grounded in one KT transcript (kt/ subtree only); REPL when no question. |
+| `ask` | Scoped KT Q&A: `podscribe <pod> ask <id\|latest> [question...]`. Grounded in one KT transcript (kt/ subtree only); REPL when no question. |
 | `diarize` | Post-hoc diarization via pyannote.audio (`pip install -e '.[diarize]'` + HF token). Writes `.diarized.md`; `show`/`enhance` prefer it. Refuses non-continuous recordings. Defaults to Apple MPS/Metal when available (CPU fallback). Flags: `--num-speakers`, `--cpu`, `--relogin`. |
 | `search <query>` | Fixed-string match across transcripts. Flags: `--pod`, `--since`, `--type`, `--color`, `--kt` (search KT sessions instead of meetings; default excludes kt/). Uses `rg` if on PATH, else Python fallback. |
 | `god [prompt]` | Agentic mode: no prompt → TUI REPL; `--model` override stored as `god.model` in `podscribe.yaml` |

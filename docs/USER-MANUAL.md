@@ -395,7 +395,7 @@ podscribe fso enhance --kt 2026-06
 
 ---
 
-#### `podscribe <pod> ask <id|latest> [question]`
+#### `podscribe <pod> ask <id|latest> [question...]`
 
 Ask questions about a **single** KT session. Scoped to that session only — never cross-references meetings or other KT sessions.
 
