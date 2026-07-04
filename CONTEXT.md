@@ -36,6 +36,32 @@ glossary entries, and an optional per-pod `llm` section.
 
 ---
 
+## KT (Knowledge-Transfer) domain
+
+**KT session** — A pre-recorded Knowledge-Transfer video ingested into a pod
+as a `kt`-type meeting. Stored under `pods/<pod>/kt/` (separate from real
+meetings). Identified by the same `YYYY-MM-DD-HHMMSS-<pod>` ID shape, with a
+`-NNNN` suffix appended on same-second collisions (probed against `{id}.json`,
+not `.raw`, since KT sessions have no audio file).
+
+**Source** — The origin of a KT session's transcript, recorded in the JSON
+sidecar as `source`: `vtt` (parsed from a sibling `.vtt`/`.srt`, the source of
+truth) or `asr` (local mlx-whisper transcription of the decoded audio). `--asr`
+always creates a separate, coexisting session — it never overwrites a vtt
+session.
+
+**Ingest** — The act of creating a KT session from a video file
+(`podscribe <pod> ingest <video>`). Requires ffmpeg only on the `--asr` path;
+the vtt path parses cues without decoding audio.
+
+**Diarized transcript** — A `.diarized.md` sidecar produced by `podscribe
+diarize` (pyannote.audio speaker diarization over the continuous `.raw`). One
+`[HH:MM:SS] Speaker N: text` line per utterance, speakers renumbered 0..N-1 by
+first appearance. `show`/`enhance` prefer it over the original `.md` when
+present. Requires `audio_layout: "continuous"` in the meeting JSON.
+
+---
+
 ## TUI domain
 
 **Normal mode** — The default interactive state of the TUI. The cursor rests on
