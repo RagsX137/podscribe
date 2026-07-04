@@ -29,14 +29,17 @@ def search(
     since: Optional[str] = None,
     meeting_type: Optional[str] = None,
     color: bool = False,
+    include_kt: bool = False,
 ) -> Iterator[SearchMatch]:
     """Yield SearchMatch for each line matching `query` in any transcript.
 
     Backend: rg if available, else Python Path.rglob + substring.
     Filters: pod, since (date string parseable by storage._parse_since),
-    meeting_type (must match a directory between the date and the file).
+    meeting_type (must match a directory between the date and the file),
+    include_kt (search the kt/ subtree instead of regular meetings; default
+    excludes kt/ entirely).
     """
-    files = _iter_transcript_files(pod)
+    files = _iter_transcript_files(pod, include_kt)
     files = _filter_by_since(files, since)
     files = _filter_by_type(files, meeting_type)
 
@@ -46,16 +49,23 @@ def search(
         yield from _python_search(query, files, color=color)
 
 
-def _iter_transcript_files(pod: Optional[str]) -> list[Path]:
+def _iter_transcript_files(pod: Optional[str], include_kt: bool) -> list[Path]:
+    def _wanted(p: Path) -> bool:
+        parts = p.parts
+        if "transcripts" not in parts:
+            return False
+        is_kt = "kt" in parts[: parts.index("transcripts")]
+        return is_kt if include_kt else not is_kt
+
     if pod:
-        base = Path("pods") / pod / "transcripts"
+        base = Path("pods") / pod
         if not base.exists():
             return []
-        return sorted(base.rglob("*.md"))
+        return sorted(p for p in base.rglob("*.md") if _wanted(p))
     base = Path("pods")
     if not base.exists():
         return []
-    return sorted(p for p in base.rglob("*.md") if "transcripts" in p.parts)
+    return sorted(p for p in base.rglob("*.md") if _wanted(p))
 
 
 def _filter_by_since(files: list[Path], since: Optional[str]) -> list[Path]:
@@ -142,7 +152,11 @@ def _make_match_from_path(path: Path, line: str) -> Optional[SearchMatch]:
     if "transcripts" not in parts:
         return None
     idx = parts.index("transcripts")
-    pod_name = parts[idx - 1] if idx >= 1 else "?"
+    # For kt/transcripts/... the pod is the segment before "kt"; else before "transcripts".
+    if idx >= 2 and parts[idx - 1] == "kt":
+        pod_name = parts[idx - 2]
+    else:
+        pod_name = parts[idx - 1] if idx >= 1 else "?"
     date_str = parts[idx + 1]
     meeting_id = path.stem
 

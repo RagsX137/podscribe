@@ -558,7 +558,11 @@ def cmd_show(args) -> int:
         print(f"No pod '{args.pod}'.", file=sys.stderr)
         return 1
     pod = load_pod(args.pod)
-    meetings = list_meetings(pod)
+    from .storage import list_kt_sessions
+    if getattr(args, "kt", False):
+        meetings = list_kt_sessions(pod)
+    else:
+        meetings = list_meetings(pod) + list_kt_sessions(pod)   # cross-subtree; _resolve errors on ambiguity
     if not meetings:
         print(f"No meetings for pod '{args.pod}'.")
         return 1
@@ -867,6 +871,7 @@ def cmd_search(args) -> int:
         since=args.since,
         meeting_type=args.type,
         color=args.color,
+        include_kt=args.kt,
     ))
     if not matches:
         print("No matches.")
@@ -1197,6 +1202,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_show = sub.add_parser("show", help="Show a meeting transcript.")
     p_show.add_argument("pod", help="Pod name")
     p_show.add_argument("meeting", help="Meeting ID prefix or 'latest'")
+    p_show.add_argument("--kt", action="store_true", help="Resolve the id within KT sessions only")
     p_show.set_defaults(func=cmd_show)
 
     # context
@@ -1254,6 +1260,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--color", action="store_true",
         help="Highlight matches in ANSI colors",
     )
+    p_search.add_argument("--kt", action="store_true", help="Search KT sessions instead of meetings")
     p_search.set_defaults(func=cmd_search)
 
     # god

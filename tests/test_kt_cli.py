@@ -28,6 +28,17 @@ def test_ingest_vtt_creates_kt_session(tmp_path, monkeypatch):
     assert "hello from the KT" in sessions[0].transcript_path.read_text()
 
 
+def test_show_kt_reads_kt_subtree(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    init_pod("fso")
+    video = tmp_path / "kt.mp4"
+    video.touch()
+    (tmp_path / "kt.vtt").write_text(VTT)
+    assert main(["fso", "ingest", str(video)]) == 0
+    assert main(["fso", "show", "--kt", "latest"]) == 0
+    assert "hello from the KT" in capsys.readouterr().out
+
+
 def test_ingest_no_transcript_no_asr_errors_with_hint(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     init_pod("fso")

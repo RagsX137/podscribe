@@ -118,3 +118,19 @@ def test_search_since_filter(tmp_path, monkeypatch):
     matches = list(search("alpha", since="2026-06-01"))
     assert len(matches) == 1
     assert "143000" in matches[0].meeting_id
+
+
+def test_search_excludes_kt_by_default(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from podscribe.cli import main as cli_main
+    from podscribe.storage import init_pod
+    init_pod("fso")
+    video = tmp_path / "kt.mp4"
+    video.touch()
+    (tmp_path / "kt.vtt").write_text("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nzebra term\n")
+    assert cli_main(["fso", "ingest", str(video)]) == 0
+
+    from podscribe.search import search
+    assert list(search("zebra term")) == []                       # excluded by default
+    hits = list(search("zebra term", include_kt=True))
+    assert hits and hits[0].pod_name == "fso"                      # correct pod, not "kt"
