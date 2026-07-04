@@ -414,19 +414,26 @@ def cmd_ask(args) -> int:
     )
     model = llm_config["model"]
 
-    def ask_once(question: str) -> None:
+    def ask_once(question: str) -> bool:
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": question},
         ]
-        chat_stream(model, messages, on_token=lambda t: sys.stdout.write(t))
+        result = chat_stream(model, messages, on_token=lambda t: sys.stdout.write(t))
         sys.stdout.write("\n")
         sys.stdout.flush()
+        if not result:
+            print(
+                f"Failed to get a response from model '{model}'. "
+                f"Check that Ollama is running and the model is pulled.",
+                file=sys.stderr,
+            )
+            return False
+        return True
 
     question = " ".join(args.question).strip() if args.question else ""
     if question:
-        ask_once(question)
-        return 0
+        return 0 if ask_once(question) else 1
 
     # Interactive REPL (TTY). Empty line / Ctrl-D exits.
     print(f"Ask about KT {meeting.id} (blank line to quit):")

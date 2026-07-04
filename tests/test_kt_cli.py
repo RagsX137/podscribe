@@ -162,3 +162,30 @@ def test_ask_one_shot_returns_grounded_answer(tmp_path, monkeypatch, capsys):
     assert "hello from the KT" in joined
     assert "what is this?" in joined
     assert "grounded answer" in capsys.readouterr().out
+
+
+def test_ask_one_shot_reports_llm_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    init_pod("fso")
+    video = tmp_path / "kt.mp4"
+    video.touch()
+    (tmp_path / "kt.vtt").write_text(VTT)
+    assert main(["fso", "ingest", str(video)]) == 0
+
+    import yaml
+    (tmp_path / "podscribe.yaml").write_text(
+        yaml.safe_dump({"llm": {"model": "m", "prompt_template": "x"}})
+    )
+
+    def fake_chat_stream(model, messages, **kwargs):
+        # Simulate Ollama-not-running / exhausted retries: on_token never fires.
+        return None
+
+    monkeypatch.setattr("podscribe.cli.chat_stream", fake_chat_stream)
+
+    capsys.readouterr()  # discard ingest output
+    rc = main(["fso", "ask", "latest", "some", "question"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert captured.out.strip() == ""
+    assert "Failed to get a response" in captured.err
