@@ -1,0 +1,51 @@
+public:
+  - id: yt-sig-k8s-001
+    source: youtube
+    video_id: VIDEO_ID_1
+    title: "Kubernetes SIG: Working Session (clip 1)"
+    license: "CC-BY"
+    duration_sec: 900
+    start: "00:05:00"
+    end: "00:20:00"
+    expected_speakers: 4
+  - id: yt-sig-k8s-002
+    source: youtube
+    video_id: VIDEO_ID_2
+    title: "Kubernetes SIG: Working Session (clip 2)"
+    license: "CC-BY"
+    duration_sec: 900
+    start: "00:00:00"
+    end: "00:15:00"
+    expected_speakers: 3
+  - id: yt-sig-k8s-003
+    source: youtube
+    video_id: VIDEO_ID_3
+    title: "Kubernetes SIG: Working Session (clip 3)"
+    license: "CC-BY"
+    duration_sec: 900
+    start: "00:10:00"
+    end: "00:25:00"
+    expected_speakers: 5
+private:
+  - id: fso-2026-06-22
+    pod: fso
+    meeting_prefix: "2026-06-22-1438"
+contestants:
+  - tag: qwen3.6:27b
+    digest: PLACEHOLDER_DIGEST_27B
+    role: champion
+  - tag: qwen3.6:14b
+    digest: PLACEHOLDER_DIGEST_14B
+    role: challenger
+  - tag: qwen3.6:8b
+    digest: PLACEHOLDER_DIGEST_8B
+    role: challenger
+  - tag: llama3.1:8b
+    digest: PLACEHOLDER_DIGEST_LLAMA
+    role: challenger
+  - tag: gemma2:9b
+    digest: PLACEHOLDER_DIGEST_GEMMA
+    role: challenger
+  - tag: mistral-nemo:12b
+    digest: PLACEHOLDER_DIGEST_MISTRAL
+    role: challenger
