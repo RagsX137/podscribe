@@ -31,7 +31,7 @@ def test_build_tool_defs_has_all_tools():
     names = {t["function"]["name"] for t in defs}
     expected = {
         "list_pods", "pod_info", "init_pod_tool", "list_meetings_tool",
-        "show_meeting", "start_recording", "stop_recording",
+        "show_meeting", "list_kt_tool", "show_kt", "start_recording", "stop_recording",
         "get_recording_status", "enhance_meeting", "consolidate_meeting",
         "search_transcripts", "glossary_list", "glossary_add", "glossary_remove",
         "export_data",
@@ -228,7 +228,7 @@ def test_tool_registry_has_all_tools():
     from podscribe.agent import TOOL_REGISTRY
     expected = {
         "list_pods", "pod_info", "init_pod_tool", "list_meetings_tool",
-        "show_meeting", "start_recording", "stop_recording",
+        "show_meeting", "list_kt_tool", "show_kt", "start_recording", "stop_recording",
         "get_recording_status", "enhance_meeting", "consolidate_meeting",
         "search_transcripts", "glossary_list", "glossary_add", "glossary_remove",
         "export_data",

@@ -103,6 +103,35 @@ def _build_tool_defs() -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "list_kt_tool",
+                "description": "List KT (knowledge-transfer) sessions in a pod",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pod_name": {"type": "string", "description": "Pod name"},
+                    },
+                    "required": ["pod_name"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "show_kt",
+                "description": "Get the raw transcript text for a KT session",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pod_name": {"type": "string", "description": "Pod name"},
+                        "session_id": {"type": "string", "description": "KT session ID or 'latest'"},
+                    },
+                    "required": ["pod_name", "session_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "start_recording",
                 "description": "Start a background recording session",
                 "parameters": {
@@ -364,6 +393,8 @@ TOOL_REGISTRY: dict[str, Callable] = {
     "init_pod_tool": agent_tools.init_pod_tool,
     "list_meetings_tool": agent_tools.list_meetings_tool,
     "show_meeting": agent_tools.show_meeting,
+    "list_kt_tool": agent_tools.list_kt_tool,
+    "show_kt": agent_tools.show_kt,
     "start_recording": agent_tools.start_recording,
     "stop_recording": agent_tools.stop_recording,
     "get_recording_status": agent_tools.get_recording_status,

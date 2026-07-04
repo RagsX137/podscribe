@@ -13,6 +13,7 @@ from .storage import (
     append_segment,
     finalize_meeting,
     init_pod,
+    list_kt_sessions,
     list_meetings,
     load_pod,
     pod_exists,
@@ -151,6 +152,29 @@ def show_meeting(pod_name: str, meeting_id: str) -> str:
         return read_transcript(meeting)
     except FileNotFoundError as e:
         return str(e)
+
+
+def list_kt_tool(pod_name: str) -> list:
+    """List KT sessions in a pod (id, date, source)."""
+    if not pod_exists(pod_name):
+        return [{"error": f"Pod '{pod_name}' does not exist."}]
+    pod = load_pod(pod_name)
+    out = []
+    for m in list_kt_sessions(pod):
+        out.append({"id": m.id, "started_at": m.started_at, "type": m.type})
+    return out
+
+
+def show_kt(pod_name: str, session_id: str) -> str:
+    """Return the raw transcript text for a KT session ('latest' allowed)."""
+    if not pod_exists(pod_name):
+        return f"Pod '{pod_name}' does not exist."
+    pod = load_pod(pod_name)
+    sessions = list_kt_sessions(pod)
+    meeting, err = _resolve_meeting(sessions, session_id)
+    if err is not None:
+        return err
+    return _truncate(read_transcript(meeting))
 
 
 # -- Recording state (module-level, one active recording at a time) --
