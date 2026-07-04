@@ -449,10 +449,43 @@ def cmd_ask(args) -> int:
     return 0
 
 
+def _cmd_list_kt(args) -> int:
+    """`list --kt`: list KT sessions for a single pod. No global rollup exists."""
+    from .storage import list_kt_sessions
+
+    if args.pod is None:
+        print(
+            "--kt requires a pod name (no global KT rollup exists).",
+            file=sys.stderr,
+        )
+        return 1
+    if not pod_exists(args.pod):
+        print(f"No pod '{args.pod}'.", file=sys.stderr)
+        return 1
+
+    pod = load_pod(args.pod)
+    sessions = list_kt_sessions(pod)
+    if not sessions:
+        print(f"No KT sessions for pod '{args.pod}'.")
+        return 0
+
+    headers = ["id", "date", "duration"]
+    lines = [" | ".join(headers), " | ".join("---" for _ in headers)]
+    for m in sessions:
+        date_str = fmt_date(datetime.fromisoformat(m.started_at))
+        duration = _hms(m.duration_sec) if m.duration_sec is not None else "-"
+        lines.append(" | ".join([m.id, date_str, duration]))
+    print("\n".join(lines))
+    return 0
+
+
 def cmd_list(args) -> int:
     """List pods and their meetings, with optional filters."""
     from .models import parse_meeting_type
     from .storage import _parse_since
+
+    if getattr(args, "kt", False):
+        return _cmd_list_kt(args)
 
     # Validate --type and --since up front (before the empty-log short-circuit).
     valid_type = None
@@ -1200,6 +1233,10 @@ def build_parser() -> argparse.ArgumentParser:
             "technical: design-review, incident, post-mortem, brainstorm; "
             "external: customer, vendor, cross-team; other"
         ),
+    )
+    p_list.add_argument(
+        "--kt", action="store_true",
+        help="List KT sessions instead of meetings (requires a pod)",
     )
     p_list.set_defaults(func=cmd_list)
 

@@ -220,6 +220,27 @@ def test_ask_one_shot_returns_grounded_answer(tmp_path, monkeypatch, capsys):
     assert "grounded answer" in capsys.readouterr().out
 
 
+def test_list_kt_shows_kt_sessions(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    init_pod("fso")
+    video = tmp_path / "kt.mp4"
+    video.touch()
+    (tmp_path / "kt.vtt").write_text(VTT)
+    assert main(["fso", "ingest", str(video)]) == 0
+
+    sid = list_kt_sessions(load_pod("fso"))[0].id
+    capsys.readouterr()  # discard ingest output
+    rc = main(["fso", "list", "--kt"])
+    assert rc == 0
+    assert sid in capsys.readouterr().out
+
+
+def test_list_kt_without_pod_errors(capsys):
+    rc = main(["list", "--kt"])
+    assert rc == 1
+    assert "--kt" in capsys.readouterr().err
+
+
 def test_ask_one_shot_reports_llm_failure(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     init_pod("fso")

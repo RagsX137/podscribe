@@ -45,7 +45,7 @@ in the meeting JSON gates `diarize`.
 | `init <name>` | Name must be kebab-case `^[a-z0-9]+(-[a-z0-9]+)*$`; flags: `--display-name`, `--role`, `--cadence`, `--notes` |
 | `record` | `--model` (default `large-v3-turbo`), `--vad-aggressiveness` 0-3, `--device`, `--keep-audio` (default **on**; use `--no-keep-audio` to delete), `--type`; Ctrl+C to stop; audio lazy-imported |
 | `ingest` | KT video → kt-type session. `podscribe <pod> ingest <video> [--transcript P] [--asr] [--model M]`. Uses a sibling `.vtt`/`.srt` as source of truth; `--asr` forces local mlx-whisper (never overwrites the vtt — creates a separate session). Requires ffmpeg only on the `--asr` path. |
-| `list` | `list <pod>` filters to one pod. Flags: `--all` (global CSV), `--since` (e.g. `7d`/`24h`/`2026-06-15`), `--recent N`, `--type`; renders a markdown table |
+| `list` | `list <pod>` filters to one pod. Flags: `--all` (global CSV), `--since` (e.g. `7d`/`24h`/`2026-06-15`), `--recent N`, `--type`; renders a markdown table. `--kt` lists KT sessions instead (requires a pod — no global KT rollup); table columns are `id \| date \| duration` only. |
 | `show <pod> <id-prefix\|latest>` | Reads from `.md` transcript file. Flag: `--kt` targets KT sessions only (resolves within the `kt/` subtree). |
 | `context` | Subcommands: `add`, `remove`, `list`; glossary merged from `leadership_team.yaml` + per-pod `config.yaml` |
 | `enhance` | Requires Ollama at localhost:11434 + `llm` section in pod or project config. Flag: `--kt` summarizes a KT session (from the `kt/` subtree) instead of a meeting. |
@@ -165,7 +165,7 @@ pip install -e .              # installs all deps including pytest under [dev]
 - **`consolidate` is what writes `meetings.csv`**, not `enhance`. `enhance` only writes the enhanced markdown to `summaries/`.
 - **`pods/` is gitignored**, so pod data is never committed; run commands from the repo root so the relative `pods/` path resolves.
 - **`list_meetings` skips** any meeting whose JSON sidecar is missing or malformed (no error raised).
-- **KT sessions live under `pods/<pod>/kt/`** and are excluded from `list`/`search`/`list_meetings` by default; use `--kt` to target them. `search` default explicitly excludes `kt/` (it would otherwise mislabel the pod).
+- **KT sessions live under `pods/<pod>/kt/`** and are excluded from `list`/`search`/`list_meetings` by default; use `--kt` to target them. `search` default explicitly excludes `kt/` (it would otherwise mislabel the pod). `list --kt` requires a pod argument (unlike plain `list`, there's no global KT rollup) and goes through `storage.list_kt_sessions`/`Meeting` objects directly rather than `meetings.csv`, since KT sessions never write to that CSV.
 - **`god` command is a full agentic loop** (`agent.py` + `agent_tools.py`): it uses `/api/chat` (not `/api/generate`) via `llm.chat_stream`, supports tool calling, and maintains session history inside `GodSession`.
 - **TUI palette** is 256-color synthwave (`C_PEACH`, `C_PINK`, `C_LILAC`, `C_MINT`, `C_DIM`, `C_RED`) defined as constants in `tui.py` — use these for any new TUI output.
 - **`export` deliberately skips `podscribe.yaml`** on import to avoid overwriting local LLM config.
