@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+
+import pytest
 
 from benchmarks.eval_cache import (
     cache_key,
@@ -35,3 +38,19 @@ def test_list_cached_returns_existing_keys(tmp_path):
     keys = list_cached(tmp_path)
     assert len(keys) == 2
     assert all(k.endswith(".json") for k in keys)
+
+
+def test_save_artifact_atomic_replace_failure_leaves_no_temp(tmp_path, monkeypatch):
+    target = tmp_path / "x.json"
+    calls = {"tmp_paths": []}
+
+    def fake_replace(src, dst):
+        calls["tmp_paths"].append(src)
+        raise OSError("simulated crash")
+
+    monkeypatch.setattr("os.replace", fake_replace)
+    with pytest.raises(OSError):
+        save_artifact(target, {"x": 1})
+    # Tempfile cleaned up; target never created.
+    assert not target.exists()
+    assert all(not os.path.exists(p) for p in calls["tmp_paths"])
