@@ -18,6 +18,8 @@ podscribe/
 ├── transcriber.py  — mlx_whisper.transcribe wrapper (Apple MLX)
 ├── diarizer.py     — pyannote.audio speaker diarization (lazy-imported; [diarize] extra)
 ├── hf_auth.py      — HuggingFace token resolution (~/.config/podscribe/hf_token, mode 0o600)
+├── media.py        — ffmpeg decode-to-f32 + timestamp-preserving VTT/SRT cue parser (shared w/ benchmarks)
+├── summarize.py    — map-reduce long-form KT summarizer (orchestration only; consumes llm.build_enhance_prompt)
 ├── storage.py      — pods/<name>/ per pod, transcripts .md/.json, raw .raw (kept by default)
 ├── models.py       — Pod, Meeting, Segment dataclasses + ID/name/type helpers
 ├── config.py       — load/save pod config.yaml + project podscribe.yaml + leadership_team.yaml
@@ -120,7 +122,7 @@ Effective glossary = `leadership_team.yaml` terms + per-pod `config.yaml` terms.
 
 `preserve_speakers` (bool, default `true`): resolution order pod-level `llm` > project-level `llm` > default. When true, `llm.build_enhance_prompt` prepends anti-hallucination + speaker-preservation preambles before the template.
 
-`podscribe.yaml` currently sets `llm.model: qwen3.6:27b` (Ollama tag). `consolidate` uses the same model by default but a separate `consolidate.prompt`. `god` command uses `god.model` with fallback to `llm.model`.
+`podscribe.yaml` currently sets `llm.model: qwen3.6:27b` (Ollama tag). `consolidate` uses the same model by default but a separate `consolidate.prompt`. `god` command uses `god.model` with fallback to `llm.model`. KT enhance (`enhance --kt`) reuses the same `llm.model` with a KT-specific prompt (`load_kt_prompt` → `kt.prompt` in `podscribe.yaml`, else `KT_PROMPT_DEFAULT`).
 
 ## Tests
 
@@ -131,9 +133,10 @@ pytest tests/ -k "test_init_pod" -v          # single test by name
 pytest tests/ -k "not transcriber" -v        # skip the smoke test (offline)
 ```
 
-- 208 tests collected (207 offline + 1 smoke). All offline tests need no mic or model.
+- 456 tests collected (455 offline + 1 smoke that needs network / gated models). All offline tests need no mic or model.
 - **Filesystem isolation**: every test uses `monkeypatch.chdir(tmp_path)` — tests rely on relative `pods/` path resolving inside `tmp_path`. Omitting this will corrupt real pod data.
 - `test_transcriber.py::test_transcriber_accepts_initial_prompt` downloads a real Whisper model — skip with `-k "not transcriber"` when offline.
+- `test_diarizer.py::test_diarize_smoke` runs real pyannote.audio — gated behind an HF token (`HF_TOKEN` env or `~/.config/podscribe/hf_token`), skipped otherwise. Cached HF weights work offline with `HF_HUB_OFFLINE=1`.
 - Invalidate the glossary cache in tests that add/modify pod glossaries: set `podscribe.config._glossary_cache["key"] = None` after saving config changes.
 - Use `tmp_path` fixture for temp directories.
 
@@ -160,15 +163,18 @@ pip install -e .              # installs all deps including pytest under [dev]
 ## Gotchas
 
 - **Audio modules lazy-imported** in `cmd_record` — `audio.py` and `transcriber.py` (and their heavy deps) are not loaded for non-recording commands.
-- **`.raw` audio kept by default** (`keep_audio=True`); use `record --no-keep-audio` to delete after finalize. Required for future diarization support.
+- **`.raw` audio kept by default** (`keep_audio=True`); use `record --no-keep-audio` to delete after finalize. **Required for diarization** — `cmd_diarize` refuses meetings whose JSON sidecar lacks `audio_layout: "continuous"`.
 - **Ollama must be running** (`ollama serve`) for both `enhance` and `consolidate`. `consolidate` requires an existing enhanced summary (run `enhance` first).
 - **`consolidate` is what writes `meetings.csv`**, not `enhance`. `enhance` only writes the enhanced markdown to `summaries/`.
 - **`pods/` is gitignored**, so pod data is never committed; run commands from the repo root so the relative `pods/` path resolves.
 - **`list_meetings` skips** any meeting whose JSON sidecar is missing or malformed (no error raised).
-- **KT sessions live under `pods/<pod>/kt/`** and are excluded from `list`/`search`/`list_meetings` by default; use `--kt` to target them. `search` default explicitly excludes `kt/` (it would otherwise mislabel the pod). `list --kt` requires a pod argument (unlike plain `list`, there's no global KT rollup) and goes through `storage.list_kt_sessions`/`Meeting` objects directly rather than `meetings.csv`, since KT sessions never write to that CSV.
+- **KT sessions live under `pods/<pod>/kt/`** and are excluded from `list`/`search`/`list_meetings` by default; use `--kt` to target them. `search` default explicitly excludes `kt/` (it would otherwise mislabel the pod as `"kt"` instead of the real pod — `_make_match_from_path` special-cases `kt/transcripts/...` paths to recover the true pod name). `list --kt` requires a pod argument (unlike plain `list`, there's no global KT rollup) and goes through `storage.list_kt_sessions`/`Meeting` objects directly rather than `meetings.csv`, since KT sessions never write to that CSV.
 - **`god` command is a full agentic loop** (`agent.py` + `agent_tools.py`): it uses `/api/chat` (not `/api/generate`) via `llm.chat_stream`, supports tool calling, and maintains session history inside `GodSession`.
 - **TUI palette** is 256-color synthwave (`C_PEACH`, `C_PINK`, `C_LILAC`, `C_MINT`, `C_DIM`, `C_RED`) defined as constants in `tui.py` — use these for any new TUI output.
 - **`export` deliberately skips `podscribe.yaml`** on import to avoid overwriting local LLM config.
+- **Diarize provenance**: `cmd_diarize` requires `HF_TOKEN` (or interactive prompt in a TTY) + the `[diarize]` extras; MPS is tried first with a one-shot CPU retry on MPS op failure. `.raw` must be a valid RIFF/WAV (probed via `wave.open`); a truncated file produces a clear `ValueError`, not a pyannote traceback.
+- **`enhance --kt` `<50`-char guard is effectively unreachable** — the `# KT Session: <long-id>` header alone exceeds 50 chars, so a real KT session always passes; existing tests don't cover the guard.
+- **`search --kt --type X` returns nothing** — KT sessions use a 2-level layout (`kt/transcripts/<date>/<id>.md`) and `_filter_by_type` skips 2-level layouts; the flags are effectively mutually exclusive.
 
 ## Working directory rules
 
