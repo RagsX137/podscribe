@@ -9,6 +9,7 @@ pods/
 .DS_Store
 *.raw
 benchmarks/results/
+benchmarks/eval_data/
 .env
 .scratch/
 .superpowers/
