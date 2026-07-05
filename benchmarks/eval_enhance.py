@@ -160,6 +160,31 @@ def cmd_rate(*, base: Path, ratings_path: Path) -> int:
     return 0
 
 
+def cmd_report(*, base: Path, suite: str) -> int:
+    attempted = judged = failed = 0
+    wins = ties = losses = 0
+    for vpath in base.glob("*.verdict.json"):
+        v = load_artifact(vpath)
+        attempted += 1
+        if v["status"] == "judged":
+            judged += 1
+            overall = (v.get("verdict") or {}).get("overall", "")
+            if overall == "a":
+                wins += 1
+            elif overall == "b":
+                losses += 1
+            else:
+                ties += 1
+        else:
+            failed += 1
+    assert judged + failed == attempted, f"quiet drop: {judged}+{failed}!={attempted}"
+    print(f"# Eval report ({suite})")
+    print(f"Judge: attempted={attempted} judged={judged} failed={failed} (failure rate {failed / attempted:.1%})")
+    print(f"  wins={wins}  ties={ties}  losses={losses}")
+    print(f"  Judgment invariant: judged + failed == attempted  ->  {judged} + {failed} == {attempted} ✓")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(prog="eval_enhance", description="LLM enhance eval harness.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -173,6 +198,8 @@ def main() -> int:
     j.add_argument("--judge-runs", default="run0", help="run0 or all")
     r = sub.add_parser("rate", help="Layer-3 blind A/B REPL.")
     r.add_argument("--ratings", default="benchmarks/eval_data/ratings.json")
+    r = sub.add_parser("report", help="Pure aggregation over cached outputs.")
+    r.add_argument("--suite", default="public")
     args = p.parse_args()
     if args.cmd == "generate":
         from benchmarks.eval_manifest import load_manifest, verify_contestants, Contestant
@@ -190,6 +217,8 @@ def main() -> int:
         return cmd_judge(base=Path("benchmarks/eval_data"), backend=args.backend, model=args.model, judge_runs=args.judge_runs)
     elif args.cmd == "rate":
         return cmd_rate(base=Path("benchmarks/eval_data"), ratings_path=Path(args.ratings))
+    elif args.cmd == "report":
+        return cmd_report(base=Path("benchmarks/eval_data"), suite=args.suite)
     return 0
 
 

@@ -134,3 +134,18 @@ def test_rate_stage_logs_rating_to_file(monkeypatch, tmp_path, capsys):
     rc = cmd_rate(base=base, ratings_path=base / "ratings.json")
     assert rc == 0
     assert (base / "ratings.json").exists()
+
+
+def test_report_stage_prints_summary_and_respects_invariant(monkeypatch, tmp_path, capsys):
+    from benchmarks.eval_enhance import cmd_report
+    monkeypatch.chdir(tmp_path)
+    base = Path("benchmarks/eval_data")
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "public__m1__qwen3.6_27b__run0.json").write_text(json.dumps({"suite": "public", "meeting": "m1", "model": "qwen3.6_27b", "run": 0, "response_text": "a", "response_len": 1}))
+    (base / "public__m1__qwen3.6_14b__run0.json").write_text(json.dumps({"suite": "public", "meeting": "m1", "model": "qwen3.6_14b", "run": 0, "response_text": "b", "response_len": 1}))
+    (base / "public__m1__qwen3.6_14b__vs__qwen3.6_27b__m1__run0__pos_a_first.verdict.json").write_text(json.dumps({"status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1}))
+    (base / "public__m1__qwen3.6_14b__vs__qwen3.6_27b__m1__run0__pos_b_first.verdict.json").write_text(json.dumps({"status": "failed", "raw": "x", "attempt": 2}))
+    rc = cmd_report(base=base, suite="public")
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "judged" in captured.out.lower() or "attempted" in captured.out.lower()
