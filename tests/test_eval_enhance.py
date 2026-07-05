@@ -35,3 +35,22 @@ def test_generate_skips_existing_cache(monkeypatch, tmp_path):
     rc = cmd_generate(entries=entries, contestants=contestants, runs=1, base=base)
     assert rc == 0
     assert call_count["n"] == 0
+
+
+def test_check_stage_reads_cache_and_reports(monkeypatch, tmp_path, capsys):
+    from benchmarks.eval_enhance import cmd_check
+    monkeypatch.chdir(tmp_path)
+    base = Path("benchmarks/eval_data")
+    base.mkdir(parents=True, exist_ok=True)
+    transcript_text = "[00:00:01] Sam: We saw 100 requests."
+    (base / "public__m1__qwen3.6_27b__run0.json").write_text(json.dumps({
+        "suite": "public", "meeting": "m1", "model": "qwen3.6_27b", "run": 0,
+        "response_text": "Sam reported 100 requests.",
+        "response_len": 22,
+    }))
+    monkeypatch.setattr("benchmarks.eval_enhance.load_transcript_for_check", lambda entry, base_dir: transcript_text)
+
+    rc = cmd_check(base=base)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "qwen3.6_27b" in captured.out or "passed" in captured.out.lower()

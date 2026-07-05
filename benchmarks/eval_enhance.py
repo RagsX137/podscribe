@@ -15,6 +15,7 @@ from typing import Optional
 
 from benchmarks.bench_enhance import run_once
 from benchmarks.eval_cache import cache_path, list_cached, load_artifact, save_artifact
+from benchmarks.eval_checks import run_checks
 
 
 def load_transcript(entry: dict, base_dir: Path) -> str:
@@ -63,12 +64,35 @@ def cmd_generate(*, entries: list, contestants: list, runs: int, base: Path) -> 
     return 0
 
 
+def load_transcript_for_check(entry: dict, base_dir: Path) -> str:
+    if entry["suite"] == "public":
+        return (base_dir / f"{entry['meeting']}.transcript.md").read_text()
+    return load_transcript(entry, base_dir)
+
+
+def cmd_check(*, base: Path) -> int:
+    results_by_model = {}
+    for name in list_cached(base):
+        artifact = load_artifact(base / name)
+        entry = {"suite": artifact["suite"], "meeting": artifact["meeting"], "id": artifact["meeting"]}
+        transcript = load_transcript_for_check(entry, base)
+        runs = [artifact]
+        results = run_checks(transcript, artifact["response_text"], [], runs=runs, llm_response_text=artifact["response_text"])
+        results_by_model.setdefault(artifact["model"], []).extend([(r.name, r.passed) for r in results])
+    for model, flat in results_by_model.items():
+        passed = sum(1 for _, p in flat if p)
+        total = len(flat)
+        print(f"{model}: {passed}/{total} checks passed")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(prog="eval_enhance", description="LLM enhance eval harness.")
     sub = p.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("generate", help="Run all models on all suite inputs.")
     g.add_argument("--runs", type=int, default=3)
     g.add_argument("--models", help="Comma-separated override; default reads manifest.")
+    c = sub.add_parser("check", help="Layer-1 metrics over cached outputs.")
     args = p.parse_args()
     if args.cmd == "generate":
         from benchmarks.eval_manifest import load_manifest, verify_contestants, Contestant
@@ -80,6 +104,8 @@ def main() -> int:
         verify_contestants(contestants)
         entries = [{"id": e.id, "suite": "public"} for e in m.public] + [{"id": e.id, "suite": "private", "pod": e.pod, "meeting_prefix": e.meeting_prefix} for e in m.private]
         return cmd_generate(entries=entries, contestants=[{"tag": c.tag, "digest": c.digest, "role": c.role} for c in contestants], runs=args.runs, base=Path("benchmarks/eval_data"))
+    elif args.cmd == "check":
+        return cmd_check(base=Path("benchmarks/eval_data"))
     return 0
 
 
