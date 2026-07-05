@@ -32,6 +32,7 @@ diarize = [
     "torchaudio>=2.3",
 ]
 cuda = ["faster-whisper>=1.0"]
+parakeet-mlx = ["parakeet-mlx>=0.1"]
 
 [project.scripts]
 podscribe = "podscribe.cli:main"
