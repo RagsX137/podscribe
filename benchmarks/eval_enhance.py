@@ -1,0 +1,87 @@
+# benchmarks/eval_enhance.py
+"""Staged eval harness: generate/check/judge/rate/report.
+
+Stage scripts share a JSON cache under benchmarks/eval_data/. generate runs
+all (model, meeting, run) combos and caches full response text + timing.
+check, judge, rate, report are pure aggregation over cached outputs.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Optional
+
+from benchmarks.bench_enhance import run_once
+from benchmarks.eval_cache import cache_path, list_cached, load_artifact, save_artifact
+
+
+def load_transcript(entry: dict, base_dir: Path) -> str:
+    if entry.get("suite") == "public":
+        return (base_dir / f"{entry['id']}.transcript.md").read_text()
+    from podscribe.storage import list_meetings, load_pod, read_transcript_diarized
+    pod = load_pod(entry["pod"])
+    meetings = list_meetings(pod)
+    for m in meetings:
+        if m.id.startswith(entry["meeting_prefix"]):
+            return read_transcript_diarized(m)
+    sys.exit(f"No meeting matching '{entry['meeting_prefix']}' for pod '{entry['pod']}'.")
+
+
+def build_prompt_for_transcript(transcript: str) -> str:
+    from podscribe.config import get_effective_glossary, load_preserve_speakers, load_project_config
+    from podscribe.llm import build_enhance_prompt
+
+    cfg = load_project_config().get("llm") or {}
+    template = cfg.get("prompt_template") or ""
+    return build_enhance_prompt(template, [], transcript, preserve_speakers=load_preserve_speakers(None) if False else True)
+
+
+def cmd_generate(*, entries: list, contestants: list, runs: int, base: Path) -> int:
+    existing = set(list_cached(base))
+    for entry in entries:
+        transcript = load_transcript(entry, base)
+        prompt = build_prompt_for_transcript(transcript)
+        for c in contestants:
+            for run in range(runs):
+                path_key = cache_path(entry["suite"], entry["id"], c["tag"], run, base=base)
+                rel = path_key.name
+                if rel in existing:
+                    sys.stderr.write(f"  skip cached: {rel}\n")
+                    continue
+                sys.stderr.write(f"  generate: {rel}\n")
+                result = run_once(c["tag"], prompt, label=rel, quiet=True)
+                payload = {
+                    "suite": entry["suite"], "meeting": entry["id"],
+                    "model": c["tag"], "run": run,
+                    "response_text": result.get("response_text") or result.get("response_preview"),
+                    "response_len": result.get("response_len", 0),
+                    "timing": {k: v for k, v in result.items() if k.startswith(("total", "warm", "load", "prompt", "eval", "wall", "in_", "out_"))},
+                }
+                save_artifact(path_key, payload)
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(prog="eval_enhance", description="LLM enhance eval harness.")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    g = sub.add_parser("generate", help="Run all models on all suite inputs.")
+    g.add_argument("--runs", type=int, default=3)
+    g.add_argument("--models", help="Comma-separated override; default reads manifest.")
+    args = p.parse_args()
+    if args.cmd == "generate":
+        from benchmarks.eval_manifest import load_manifest, verify_contestants, Contestant
+        m = load_manifest()
+        contestants = [Contestant(tag=c.tag, digest=c.digest, role=c.role) for c in m.contestants]
+        if args.models:
+            wanted = set(s.strip() for s in args.models.split(","))
+            contestants = [c for c in contestants if c.tag in wanted]
+        verify_contestants(contestants)
+        entries = [{"id": e.id, "suite": "public"} for e in m.public] + [{"id": e.id, "suite": "private", "pod": e.pod, "meeting_prefix": e.meeting_prefix} for e in m.private]
+        return cmd_generate(entries=entries, contestants=[{"tag": c.tag, "digest": c.digest, "role": c.role} for c in contestants], runs=args.runs, base=Path("benchmarks/eval_data"))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
