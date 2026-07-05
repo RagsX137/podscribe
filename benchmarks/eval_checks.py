@@ -185,3 +185,30 @@ def length_sanity(
             detail=f"summary {s_len} chars vs transcript {t_len}: ratio {ratio:.3f} above {max_ratio} (parroting)",
         )
     return CheckResult(name="length_sanity", passed=True, detail=f"ratio {ratio:.3f}")
+
+
+def _count_action_items(run: dict) -> int:
+    items = run.get("action_items")
+    if isinstance(items, list):
+        return len(items)
+    return 0
+
+
+def consistency(runs: list) -> CheckResult:
+    if len(runs) < 2:
+        return CheckResult(name="consistency", passed=True, detail="single run")
+    lengths = [len(r.get("text", "")) for r in runs]
+    actions = [_count_action_items(r) for r in runs]
+    len_var = max(lengths) - min(lengths)
+    act_var = max(actions) - min(actions)
+    mean_len = sum(lengths) / len(lengths) or 1
+    len_drift = len_var > 0.5 * mean_len
+    passed = not (len_drift or act_var > 1)
+    return CheckResult(
+        name="consistency",
+        passed=passed,
+        detail=(
+            f"lengths={lengths} drift {len_var} (mean {mean_len:.0f}); "
+            f"action-item counts={actions} drift {act_var}"
+        ),
+    )

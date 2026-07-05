@@ -126,3 +126,26 @@ def test_length_sanity_flags_parroting():
     r = length_sanity(transcript, summary, glossary=[], min_ratio=0.05, max_ratio=0.6)
     assert r.passed is False
     assert "above" in r.detail.lower() or "long" in r.detail.lower()
+
+
+def test_consistency_low_variance_passes():
+    from benchmarks.eval_checks import consistency
+    runs = [
+        {"text": "Summary of length one.", "action_items": ["a"]},
+        {"text": "Summary of length one.", "action_items": ["a"]},
+        {"text": "Summary of length one.", "action_items": ["a"]},
+    ]
+    r = consistency(runs)
+    assert r.passed is True
+    assert r.detail != ""
+
+
+def test_consistency_high_variance_flags():
+    from benchmarks.eval_checks import consistency
+    runs = [
+        {"text": "short", "action_items": ["a"]},
+        {"text": "short " * 50, "action_items": ["a", "b", "c"]},
+        {"text": "xxxx", "action_items": []},
+    ]
+    r = consistency(runs)
+    assert r.passed is False
