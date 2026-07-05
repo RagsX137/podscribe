@@ -426,6 +426,12 @@ class GodSession:
                 "Or set a shared model: podscribe config llm set <model> '<template>'"
             )
         self.model = resolved
+        from .providers.registry import build_provider
+        from .config import load_project_config
+        cfg = load_project_config()
+        llm_cfg = dict((cfg.get("god") or {}) or (cfg.get("llm") or {}))
+        llm_cfg["model"] = resolved
+        self.provider = build_provider(llm_cfg, model=resolved)
         self.tool_defs = _build_tool_defs()
         self.registry = TOOL_REGISTRY
         self._build_system_message()
@@ -464,6 +470,7 @@ class GodSession:
                 self.model,
                 self.messages,
                 tools=self.tool_defs,
+                provider=self.provider,
                 on_token=on_token,
                 on_message=lambda msg: self._handle_message(msg, on_tool_call, on_result),
             )

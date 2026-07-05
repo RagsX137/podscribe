@@ -16,15 +16,15 @@ def test_chunk_text_respects_max_and_overlap():
 
 
 def test_single_pass_when_fits(monkeypatch):
-    monkeypatch.setattr("podscribe.summarize.context_limit_chars", lambda model: 10_000)
+    monkeypatch.setattr("podscribe.summarize.context_limit_chars", lambda cfg: 10_000)
     calls = []
 
-    def run_llm(prompt, model):
+    def run_llm(prompt, llm_config):
         calls.append(prompt)
         return "SUMMARY", None
 
     text, err = summarize_transcript(
-        "short transcript", model="m", prompt_template="T {{transcript}}",
+        "short transcript", llm_config={"model": "m"}, prompt_template="T {{transcript}}",
         glossary=[], preserve_speakers=False, run_llm=run_llm,
     )
     assert (text, err) == ("SUMMARY", None)
@@ -34,16 +34,16 @@ def test_single_pass_when_fits(monkeypatch):
 
 def test_map_reduce_when_too_long(monkeypatch):
     # Force a tiny budget so any real transcript triggers chunking.
-    monkeypatch.setattr("podscribe.summarize.context_limit_chars", lambda model: 60)
+    monkeypatch.setattr("podscribe.summarize.context_limit_chars", lambda cfg: 60)
     prompts = []
 
-    def run_llm(prompt, model):
+    def run_llm(prompt, llm_config):
         prompts.append(prompt)
         return f"partial-{len(prompts)}", None
 
     long_text = "\n".join(f"sentence number {i} here" for i in range(40))
     text, err = summarize_transcript(
-        long_text, model="m", prompt_template="FINAL {{transcript}}",
+        long_text, llm_config={"model": "m"}, prompt_template="FINAL {{transcript}}",
         glossary=[], preserve_speakers=False, run_llm=run_llm,
     )
     assert err is None
@@ -52,14 +52,14 @@ def test_map_reduce_when_too_long(monkeypatch):
 
 
 def test_map_reduce_propagates_error(monkeypatch):
-    monkeypatch.setattr("podscribe.summarize.context_limit_chars", lambda model: 60)
+    monkeypatch.setattr("podscribe.summarize.context_limit_chars", lambda cfg: 60)
 
-    def run_llm(prompt, model):
+    def run_llm(prompt, llm_config):
         return None, "ollama down"
 
     long_text = "\n".join(f"sentence number {i} here" for i in range(40))
     text, err = summarize_transcript(
-        long_text, model="m", prompt_template="FINAL {{transcript}}",
+        long_text, llm_config={"model": "m"}, prompt_template="FINAL {{transcript}}",
         glossary=[], preserve_speakers=False, run_llm=run_llm,
     )
     assert text is None

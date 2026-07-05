@@ -15,6 +15,7 @@ from rich.console import Console
 from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .llm import ANTI_HALLUCINATION_PREAMBLE, build_consolidate_prompt, build_enhance_prompt, chat_stream, enhance_transcript, extract_structured_fields, ollama_model_info
 from .models import Segment, fmt_date
+from .providers.registry import build_provider
 from .storage import (
     _read_pod_log_rows,
     append_log_row,
@@ -67,7 +68,7 @@ def _resolve_meeting(meetings, prefix, pod_name):
 
 
 def _run_enhance(
-    prompt: str, model: str,
+    prompt: str, llm_config: dict,
 ) -> tuple[Optional[str], Optional[str]]:
     """Run LLM enhance. Returns (text, None) on success, (None, error) on failure.
 
@@ -75,9 +76,13 @@ def _run_enhance(
     final '✓ done in Ns | prompt X + response Y tokens @ Z tok/s' metrics line
     (both to stderr). The core just streams and fires on_token/on_stats.
     """
-    info = ollama_model_info(model)
+    try:
+        provider = build_provider(llm_config)
+    except ValueError as e:
+        return None, str(e)
+    info = provider.model_info()
     num_ctx = (info.get("model_info") or {}).get("llama.context_length", "?")
-    sys.stderr.write(f"Calling Model:{model}...\n")
+    sys.stderr.write(f"Calling Model:{provider.model}...\n")
     sys.stderr.write(f"Context window size : {num_ctx} tokens\n")
     sys.stderr.flush()
 
@@ -93,9 +98,9 @@ def _run_enhance(
         )
         sys.stderr.flush()
 
-    result = enhance_transcript(model, prompt, on_stats=_on_stats)
+    result = enhance_transcript(provider.model, prompt, provider=provider, on_stats=_on_stats)
     if result is None:
-        return None, "Failed to reach Ollama. Is it running? Start with: ollama serve"
+        return None, "LLM request failed. Check the provider/base_url and that the server is reachable."
     return result, None
 
 
@@ -397,6 +402,12 @@ def cmd_ask(args) -> int:
         print("LLM not configured. Set `podscribe config llm set <model> '<template>'`.", file=sys.stderr)
         return 1
 
+    try:
+        provider = build_provider(llm_config)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
     sessions = list_kt_sessions(pod)
     if not sessions:
         print(f"No KT sessions for pod '{args.pod}'. Run `ingest` first.", file=sys.stderr)
@@ -412,20 +423,21 @@ def cmd_ask(args) -> int:
         + "\n\nAnswer ONLY from the KT transcript below. If it is not covered, "
         "say so.\n\nKT transcript:\n" + transcript
     )
-    model = llm_config["model"]
+    model = provider.model
 
     def ask_once(question: str) -> bool:
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": question},
         ]
-        result = chat_stream(model, messages, on_token=lambda t: sys.stdout.write(t))
+        result = chat_stream(model, messages, provider=provider,
+                             on_token=lambda t: sys.stdout.write(t))
         sys.stdout.write("\n")
         sys.stdout.flush()
         if not result:
             print(
                 f"Failed to get a response from model '{model}'. "
-                f"Check that Ollama is running and the model is pulled.",
+                f"Check the provider/base_url and that the server is reachable.",
                 file=sys.stderr,
             )
             return False
@@ -718,7 +730,7 @@ def cmd_enhance(args) -> int:
     print(f"  Ollama URL: http://localhost:11434")
     print()
 
-    text, err = _run_enhance(prompt, llm_config["model"])
+    text, err = _run_enhance(prompt, llm_config)
     if err is not None:
         print(err, file=sys.stderr)
         return 1
@@ -760,7 +772,7 @@ def _enhance_kt(pod, session_prefix) -> int:
     preserve_speakers = load_preserve_speakers(pod)
     text, err = summarize_transcript(
         transcript,
-        model=llm_config["model"],
+        llm_config=llm_config,
         prompt_template=load_kt_prompt(),
         glossary=effective_glossary,
         preserve_speakers=preserve_speakers,
@@ -995,8 +1007,7 @@ def run_consolidate(
     if not llm_config or not llm_config.get("model"):
         print("LLM not configured for this pod. Set up LLM config first.", file=sys.stderr)
         return 1
-    model_name = llm_config["model"]
-    text, err = _run_enhance(prompt, model_name)
+    text, err = _run_enhance(prompt, llm_config)
     if err is not None:
         print(err, file=sys.stderr)
         return 1

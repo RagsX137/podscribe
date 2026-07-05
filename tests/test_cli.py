@@ -799,44 +799,64 @@ def test_cmd_enhance_short_transcript_message_shows_stripped_length(
 
 def test_run_enhance_returns_text_on_success():
     """Helper returns (text, None) on LLM success."""
-    from unittest.mock import patch
+    from unittest.mock import patch, MagicMock
     from podscribe.cli import _run_enhance
 
-    with patch("podscribe.cli.enhance_transcript", return_value="Enhanced output."):
-        text, err = _run_enhance("prompt", "qwen3.6:27b")
+    fake_provider = MagicMock()
+    fake_provider.model = "qwen3.6:27b"
+    fake_provider.model_info.return_value = {}
+    with patch("podscribe.cli.build_provider", return_value=fake_provider):
+        with patch("podscribe.cli.enhance_transcript", return_value="Enhanced output."):
+            text, err = _run_enhance("prompt", {"model": "qwen3.6:27b"})
     assert text == "Enhanced output."
     assert err is None
 
 
 def test_run_enhance_returns_error_on_failure():
     """Helper returns (None, error_msg) on LLM failure."""
+    from unittest.mock import patch, MagicMock
+    from podscribe.cli import _run_enhance
+
+    fake_provider = MagicMock()
+    fake_provider.model = "qwen3.6:27b"
+    fake_provider.model_info.return_value = {}
+    with patch("podscribe.cli.build_provider", return_value=fake_provider):
+        with patch("podscribe.cli.enhance_transcript", return_value=None):
+            text, err = _run_enhance("prompt", {"model": "qwen3.6:27b"})
+    assert text is None
+    assert err is not None
+    assert "provider" in err or "base_url" in err
+
+
+def test_run_enhance_propagates_build_provider_value_error():
+    """If build_provider raises ValueError, _run_enhance returns it as the error."""
     from unittest.mock import patch
     from podscribe.cli import _run_enhance
 
-    with patch("podscribe.cli.enhance_transcript", return_value=None):
-        text, err = _run_enhance("prompt", "qwen3.6:27b")
+    with patch("podscribe.cli.build_provider", side_effect=ValueError("unknown provider 'x'")):
+        text, err = _run_enhance("prompt", {"provider": "x", "model": "m"})
     assert text is None
-    assert err is not None
-    assert "ollama serve" in err
+    assert "unknown provider" in err
 
 
 def test_run_enhance_prints_header_and_metrics(capfd, monkeypatch):
     """The CLI wrapper prints the Calling/Context header and the metrics line."""
+    from unittest.mock import patch, MagicMock
     from podscribe.cli import _run_enhance
-    from podscribe.llm import ollama_model_info
-    from tests.test_llm import make_streaming_response
 
-    resp = make_streaming_response(
-        ["Hi"],
-        final_stats={"prompt_eval_count": 7, "eval_count": 1,
-                     "total_duration": 1_000_000_000, "eval_duration": 100_000_000},
-    )
-    monkeypatch.setattr(
-        "podscribe.cli.ollama_model_info",
-        lambda model: {"model_info": {"llama.context_length": 32768}},
-    )
-    with patch("podscribe.providers.ollama.requests.post", return_value=resp):
-        text, err = _run_enhance("the prompt", "qwen3.6:27b")
+    fake_provider = MagicMock()
+    fake_provider.model = "qwen3.6:27b"
+    fake_provider.model_info.return_value = {"model_info": {"llama.context_length": 32768}}
+
+    with patch("podscribe.cli.build_provider", return_value=fake_provider):
+        with patch("podscribe.cli.enhance_transcript") as fake_enhance:
+            fake_enhance.return_value = "Hi"
+            text, err = _run_enhance("the prompt", {"model": "qwen3.6:27b"})
+            assert fake_enhance.call_args.kwargs["on_stats"] is not None
+            # Fire the on_stats callback with realistic stats
+            stats = {"prompt_eval_count": 7, "eval_count": 1,
+                     "total_duration": 1_000_000_000, "eval_duration": 100_000_000}
+            fake_enhance.call_args.kwargs["on_stats"](stats)
     captured = capfd.readouterr()
     assert err is None
     assert text == "Hi"

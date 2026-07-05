@@ -26,7 +26,7 @@ from rich.text import Text
 
 from .cli import _resolve_meeting
 from .config import load_last_pod, load_project_config, save_last_pod
-from .llm import build_enhance_prompt, enhance_transcript, ollama_model_info
+from .llm import build_enhance_prompt, enhance_transcript
 from .models import Pod, fmt_date
 from .storage import (
     list_meetings,
@@ -869,7 +869,9 @@ def enhance_view(pod: Pod, meeting) -> int:
     tokens: list[str] = ["(waiting for first token)"]
     footer = {"tokens": 0, "tps": 0.0, "status": "streaming"}
 
-    info = ollama_model_info(llm_config["model"])
+    from .providers.registry import build_provider
+    provider = build_provider(llm_config)
+    info = provider.model_info()
     num_ctx = (info.get("model_info") or {}).get("llama.context_length", "?")
 
     def _on_token(t: str) -> None:
@@ -912,7 +914,8 @@ def enhance_view(pod: Pod, meeting) -> int:
 
         try:
             result = enhance_transcript(
-                llm_config["model"], prompt,
+                provider.model, prompt,
+                provider=provider,
                 on_token=_on_token_live, on_stats=_on_stats, on_retry=_on_retry,
             )
         except KeyboardInterrupt:
@@ -1011,7 +1014,9 @@ def launch() -> int:
             llm_ctx: Optional[str] = None
             if llm_model:
                 try:
-                    info = ollama_model_info(llm_model)
+                    from .providers.registry import build_provider
+                    provider = build_provider(llm_cfg, model=llm_model)
+                    info = provider.model_info()
                     llm_ctx = str((info.get("model_info") or {}).get("llama.context_length", "?"))
                 except Exception:
                     llm_ctx = "?"

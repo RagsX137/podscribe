@@ -264,3 +264,8 @@ def load_preserve_speakers(pod: "Pod") -> bool:
                 )
             return value
     return True
+
+
+def resolve_llm_config(pod: "Pod") -> Optional[dict]:
+    """Return the effective llm config: pod-level if set, else project-level."""
+    return pod.llm if pod.llm else load_project_config().get("llm")

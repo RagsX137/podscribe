@@ -488,3 +488,28 @@ def test_load_kt_prompt_reads_override(tmp_path, monkeypatch):
         yaml.safe_dump({"kt": {"prompt": "custom {{transcript}}"}})
     )
     assert load_kt_prompt() == "custom {{transcript}}"
+
+
+# ── resolve_llm_config (L6) ────────────────────────────────────────────────────
+
+def test_resolve_llm_prefers_pod_over_project(tmp_path, monkeypatch):
+    """When pod.llm is set, it wins over the project llm block."""
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import resolve_llm_config, save_project_config
+    from podscribe.storage import init_pod
+
+    save_project_config({"llm": {"provider": "ollama", "model": "project-model"}})
+    pod = init_pod("sam")
+    pod.llm = {"provider": "openai", "model": "pod-model", "base_url": "https://x/v1"}
+    assert resolve_llm_config(pod)["model"] == "pod-model"
+
+
+def test_resolve_llm_falls_back_to_project(tmp_path, monkeypatch):
+    """When pod.llm is None, the project llm block is returned."""
+    monkeypatch.chdir(tmp_path)
+    from podscribe.config import resolve_llm_config, save_project_config
+    from podscribe.storage import init_pod
+
+    save_project_config({"llm": {"model": "project-model"}})
+    pod = init_pod("sam")
+    assert resolve_llm_config(pod)["model"] == "project-model"
