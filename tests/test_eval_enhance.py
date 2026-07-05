@@ -77,7 +77,7 @@ def test_judge_stage_writes_persisted_verdicts(monkeypatch, tmp_path):
         }))
     verdict = {"coverage": "a", "faithfulness": "a", "readability": "b", "action-item quality": "tie", "overall": "a", "justification": "A is better."}
     monkeypatch.setattr("benchmarks.eval_enhance.judge_pair", lambda pair, **kw: {"status": "judged", "verdict": verdict, "raw": "", "attempt": 1})
-    rc = cmd_judge(base=base, backend="claude", model="claude-sonnet-5", judge_runs="run0")
+    rc = cmd_judge(base=base, backend="claude", model="claude-sonnet-5", judge_runs="run0", suite="public")
     assert rc == 0
     judged = [p for p in base.iterdir() if "pos_" in p.name]
     assert len(judged) == 2
@@ -107,7 +107,7 @@ def test_judge_stage_asserts_judged_plus_failed_eq_attempted(monkeypatch, tmp_pa
     def fake(pair, **kw):
         return {"status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1} if next(calls) == 0 else {"status": "failed", "raw": "bad", "attempt": 2}
     monkeypatch.setattr("benchmarks.eval_enhance.judge_pair", fake)
-    rc = cmd_judge(base=base, backend="claude", model="claude-sonnet-5", judge_runs="run0")
+    rc = cmd_judge(base=base, backend="claude", model="claude-sonnet-5", judge_runs="run0", suite="public")
     assert rc == 0
 
 
@@ -149,3 +149,38 @@ def test_report_stage_prints_summary_and_respects_invariant(monkeypatch, tmp_pat
     assert rc == 0
     captured = capsys.readouterr()
     assert "judged" in captured.out.lower() or "attempted" in captured.out.lower()
+
+
+def test_judge_refuses_private_with_claude_backend(monkeypatch, tmp_path, capsys):
+    from benchmarks.eval_enhance import cmd_judge
+    monkeypatch.chdir(tmp_path)
+    base = Path("benchmarks/eval_data")
+    base.mkdir(parents=True, exist_ok=True)
+    for model in ("qwen3.6_27b", "qwen3.6_14b"):
+        (base / f"public__m1__{model}__run0.json").write_text(json.dumps({
+            "suite": "public", "meeting": "m1", "model": model, "run": 0,
+            "response_text": "x", "response_len": 1,
+        }))
+    with pytest.raises(SystemExit) as exc:
+        cmd_judge(base=base, backend="claude", model="claude-sonnet-5", judge_runs="run0", suite="private")
+    assert "cloud" in str(exc.value).lower() or "private" in str(exc.value).lower()
+
+
+def test_check_stage_groups_runs_by_model_and_meeting(monkeypatch, tmp_path, capsys):
+    from benchmarks.eval_enhance import cmd_check
+    monkeypatch.chdir(tmp_path)
+    base = Path("benchmarks/eval_data")
+    base.mkdir(parents=True, exist_ok=True)
+    transcript_text = "[00:00:01] Sam: We saw 100 requests."
+    # 3 runs for the same (model, meeting).
+    for run in range(3):
+        (base / f"public__m1__qwen3.6_27b__run{run}.json").write_text(json.dumps({
+            "suite": "public", "meeting": "m1", "model": "qwen3.6_27b", "run": run,
+            "response_text": "Sam reported 100 requests.",
+            "response_len": 22,
+        }))
+    monkeypatch.setattr("benchmarks.eval_enhance.load_transcript_for_check", lambda entry, base_dir: transcript_text)
+    rc = cmd_check(base=base)
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "qwen3.6_27b" in captured.out

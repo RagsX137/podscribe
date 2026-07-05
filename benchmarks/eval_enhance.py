@@ -73,14 +73,37 @@ def load_transcript_for_check(entry: dict, base_dir: Path) -> str:
 
 
 def cmd_check(*, base: Path) -> int:
-    results_by_model = {}
+    from podscribe.config import get_effective_glossary
+    from podscribe.models import Pod
+
+    # TODO: resolve per-pod glossary from artifact["pod"] when artifact["suite"] == "private";
+    # for v1 we read only the leadership glossary via a stub Pod (non-existent base_path).
+    stub_pod = Pod(name="eval-stub", base_path=Path("/nonexistent/eval-stub"))
+    glossary = get_effective_glossary(stub_pod)
+
+    by_key: dict = {}
     for name in list_cached(base):
+        if "verdict" in name:
+            continue
         artifact = load_artifact(base / name)
-        entry = {"suite": artifact["suite"], "meeting": artifact["meeting"], "id": artifact["meeting"]}
+        key = (artifact["suite"], artifact["meeting"], artifact["model"])
+        by_key.setdefault(key, []).append(artifact)
+
+    results_by_model = {}
+    for (suite, meeting, model), artifacts in by_key.items():
+        artifacts.sort(key=lambda a: a.get("run", 0))
+        artifact = artifacts[0]
+        entry = {"suite": suite, "meeting": meeting, "id": meeting}
         transcript = load_transcript_for_check(entry, base)
-        runs = [artifact]
-        results = run_checks(transcript, artifact["response_text"], [], runs=runs, llm_response_text=artifact["response_text"])
-        results_by_model.setdefault(artifact["model"], []).extend([(r.name, r.passed) for r in results])
+        runs = [
+            {"text": a.get("response_text", ""), "action_items": a.get("action_items", [])}
+            for a in artifacts
+        ]
+        results = run_checks(
+            transcript, artifact["response_text"], glossary,
+            runs=runs, llm_response_text=artifact["response_text"],
+        )
+        results_by_model.setdefault(model, []).extend([(r.name, r.passed) for r in results])
     for model, flat in results_by_model.items():
         passed = sum(1 for _, p in flat if p)
         total = len(flat)
@@ -88,7 +111,9 @@ def cmd_check(*, base: Path) -> int:
     return 0
 
 
-def cmd_judge(*, base: Path, backend: str, model: str, judge_runs: str) -> int:
+def cmd_judge(*, base: Path, backend: str, model: str, judge_runs: str, suite: str) -> int:
+    if suite == "private" and backend == "claude":
+        sys.exit("Refusing to send private suite to a cloud API. Use --backend local.")
     from benchmarks.eval_manifest import load_manifest
     m = load_manifest()
     champion_tag = next((c.tag for c in m.contestants if c.role == "champion"), m.contestants[0].tag)
@@ -98,11 +123,13 @@ def cmd_judge(*, base: Path, backend: str, model: str, judge_runs: str) -> int:
     seen_pair_keys = set()
     for meeting_artifact in [a for a in base.iterdir() if "pos_" not in a.name and a.name.endswith(".json")]:
         data = load_artifact(meeting_artifact)
+        if data.get("suite") != suite:
+            continue
         meeting = data["meeting"]
         for chal in challenger_tags:
             for run in runs_to_judge:
-                challenger_path = base / f"public__{meeting}__{chal.replace(':', '_')}__run{run}.json"
-                champion_path = base / f"public__{meeting}__{champion_tag.replace(':', '_')}__run{run}.json"
+                challenger_path = base / f"{suite}__{meeting}__{chal.replace(':', '_')}__run{run}.json"
+                champion_path = base / f"{suite}__{meeting}__{champion_tag.replace(':', '_')}__run{run}.json"
                 if not (challenger_path.exists() and champion_path.exists()):
                     continue
                 pair = {
@@ -196,6 +223,7 @@ def main() -> int:
     j.add_argument("--backend", choices=["claude", "local"], default="claude")
     j.add_argument("--model", default="claude-sonnet-5")
     j.add_argument("--judge-runs", default="run0", help="run0 or all")
+    j.add_argument("--suite", choices=["public", "private"], default="public")
     r = sub.add_parser("rate", help="Layer-3 blind A/B REPL.")
     r.add_argument("--ratings", default="benchmarks/eval_data/ratings.json")
     r = sub.add_parser("report", help="Pure aggregation over cached outputs.")
@@ -214,7 +242,7 @@ def main() -> int:
     elif args.cmd == "check":
         return cmd_check(base=Path("benchmarks/eval_data"))
     elif args.cmd == "judge":
-        return cmd_judge(base=Path("benchmarks/eval_data"), backend=args.backend, model=args.model, judge_runs=args.judge_runs)
+        return cmd_judge(base=Path("benchmarks/eval_data"), backend=args.backend, model=args.model, judge_runs=args.judge_runs, suite=args.suite)
     elif args.cmd == "rate":
         return cmd_rate(base=Path("benchmarks/eval_data"), ratings_path=Path(args.ratings))
     elif args.cmd == "report":
