@@ -1,4 +1,3 @@
-# tests/test_eval_rate.py
 from __future__ import annotations
 
 import json

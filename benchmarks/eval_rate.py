@@ -1,4 +1,3 @@
-# benchmarks/eval_rate.py
 """Layer-3 blind human A/B rating: shuffle, conceal, persist.
 
 Module is importable without `rich` so tests can run headless. TUI rendering
@@ -7,7 +6,9 @@ lazy-imports tui.py constants at render time only.
 from __future__ import annotations
 
 import json
+import os
 import random
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -53,7 +54,18 @@ def session_state(*, pairs: list) -> SessionState:
 def append_rating(path: Path, rating: dict) -> None:
     existing = load_ratings(path) if path.exists() else []
     existing.append(rating)
-    path.write_text(json.dumps(existing, indent=2))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(existing, f, indent=2)
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def load_ratings(path: Path) -> list:

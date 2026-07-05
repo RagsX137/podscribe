@@ -118,13 +118,6 @@ def verify_contestants(contestants: list) -> None:
             )
 
 
-def _first_or_champion(contestants: list) -> Contestant:
-    for c in contestants:
-        if c.role == "champion":
-            return c
-    return contestants[0]
-
-
 def champion(contestants: list) -> Contestant:
     for c in contestants:
         if c.role == "champion":

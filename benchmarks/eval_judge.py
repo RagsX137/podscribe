@@ -1,4 +1,3 @@
-# benchmarks/eval_judge.py
 """Layer-2 LLM judge: rubric prompt, anonymization, position-swap pairing, verdict parsing."""
 from __future__ import annotations
 
