@@ -201,3 +201,7 @@ writing its snapshot into the gitignored pod folder instead.
 | WIL | Word Information Lost | ↓ | information-theoretic error rate |
 | WIP | Word Information Preserved | ↑ | 1 - WIL |
 | Peak RSS | peak resident memory | ↓ | per-process peak (subprocess isolation) |
+
+## LLM Enhance
+
+See [`docs/EVALS.md`](EVALS.md) for the `enhance` stage's regression harness.

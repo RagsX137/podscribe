@@ -184,6 +184,8 @@ for the full table, per-clip breakdown, methodology, and reproduction instructio
 
 Apple Silicon · on-device · reproducible via `python benchmarks/bench_transcribe.py`.
 
+- [LLM Enhance Evaluations](docs/EVALS.md) — methodology, results, caveats.
+
 ---
 
 ## ⌨️ Commands
