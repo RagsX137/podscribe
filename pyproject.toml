@@ -31,6 +31,7 @@ diarize = [
     "torch>=2.3",
     "torchaudio>=2.3",
 ]
+cuda = ["faster-whisper>=1.0"]
 
 [project.scripts]
 podscribe = "podscribe.cli:main"
