@@ -1,0 +1,11 @@
+quick_summary: "Team reviewed the rollout plan and deferred caching to next sprint."
+key_topics:
+  - rollout plan
+  - caching strategy
+action_items:
+  - "Anurag to draft the cache invalidation spec"
+  - "Bob to file the rollout ticket"
+blockers:
+  - "Cache layer ownership unclear"
+next_steps:
+  - "Revisit cache plan next sprint"

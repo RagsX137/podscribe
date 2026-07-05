@@ -212,3 +212,26 @@ def consistency(runs: list) -> CheckResult:
             f"action-item counts={actions} drift {act_var}"
         ),
     )
+
+
+from podscribe.llm import extract_structured_fields
+
+
+def consolidate_parse(summary: str, *, llm_response_text: str) -> CheckResult:
+    fields = extract_structured_fields(llm_response_text)
+    if fields is None:
+        return CheckResult(
+            name="consolidate_parse", passed=False,
+            detail="extract_structured_fields returned None (unparseable)",
+        )
+    expected = {"quick_summary", "key_topics", "action_items", "blockers", "next_steps"}
+    present = expected & set(fields.keys())
+    if present:
+        return CheckResult(
+            name="consolidate_parse", passed=True,
+            detail=f"parsed fields: {sorted(present)}",
+        )
+    return CheckResult(
+        name="consolidate_parse", passed=False,
+        detail=f"parsed dict but no expected fields (got {list(fields.keys())})",
+    )

@@ -149,3 +149,18 @@ def test_consistency_high_variance_flags():
     ]
     r = consistency(runs)
     assert r.passed is False
+
+
+def test_consolidate_parse_pass_on_well_formed_yaml():
+    from benchmarks.eval_checks import consolidate_parse
+    summary = "irrelevant summary text"
+    fixture = open("benchmarks/fixtures/consolidate_response.yaml").read()
+    r = consolidate_parse(summary, llm_response_text=fixture)
+    assert r.passed is True
+    assert r.detail != ""
+
+
+def test_consolidate_parse_fail_on_unparseable_yaml():
+    from benchmarks.eval_checks import consolidate_parse
+    r = consolidate_parse("summary", llm_response_text="::not yaml::@!@")
+    assert r.passed is False
