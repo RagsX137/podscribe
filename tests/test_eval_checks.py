@@ -32,8 +32,41 @@ def test_glossary_fidelity_misspelt_term_violation():
     summary = "Anurag Kausik discussed kubernates upgrades."
     r = glossary_fidelity("transcript", summary, GLOSSARY)
     assert r.passed is False
-    assert len(r.violations) == 1
-    assert "kubernates" in r.violations[0]
+    # "kubernates" violates "Kubernetes" (single-token edit distance).
+    # "kausik" violates the "Kaushik" token within the multi-word term
+    # "Anurag Kaushik" (Bug 1 fix: per-token near-match for multi-word terms).
+    assert "kubernates" in r.violations
+    assert "kausik" in r.violations
+
+
+def test_glossary_fidelity_multi_word_misspelt_caught():
+    r = glossary_fidelity(
+        "transcript",
+        "Anurag Kausik discussed it.",
+        [{"term": "Anurag Kaushik", "category": "person"}],
+    )
+    assert r.passed is False
+    assert "kausik" in r.violations
+
+
+def test_glossary_fidelity_multi_word_misspelt_first_caught():
+    r = glossary_fidelity(
+        "transcript",
+        "Anurog Kaushik discussed it.",
+        [{"term": "Anurag Kaushik", "category": "person"}],
+    )
+    assert r.passed is False
+    assert "anurog" in r.violations
+
+
+def test_glossary_fidelity_multi_word_canonical_passes():
+    r = glossary_fidelity(
+        "transcript",
+        "Anurag Kaushik discussed it.",
+        [{"term": "Anurag Kaushik", "category": "person"}],
+    )
+    assert r.passed is True
+    assert r.violations == []
 
 
 def test_glossary_fidelity_no_partial_word_match():
@@ -58,6 +91,24 @@ def test_speaker_preservation_flags_hallucinated_speaker():
     r = speaker_preservation(transcript, summary, glossary=[])
     assert r.passed is False
     assert "Bob" in r.violations
+
+
+def test_speaker_preservation_skips_company_names():
+    from benchmarks.eval_checks import speaker_preservation
+    transcript = "[00:00:01] Sam: hi"
+    summary = "Sam discussed the Microsoft acquisition and the JIRA tickets."
+    r = speaker_preservation(transcript, summary, glossary=[])
+    assert r.passed is True
+    assert r.violations == []
+
+
+def test_speaker_preservation_still_flags_unknown_person():
+    from benchmarks.eval_checks import speaker_preservation
+    transcript = "[00:00:01] Sam: hi"
+    summary = "Sam spoke. Carol joined."
+    r = speaker_preservation(transcript, summary, glossary=[])
+    assert r.passed is False
+    assert "Carol" in r.violations
 
 
 def test_number_date_faithfulness_pass_existing_number():
@@ -164,6 +215,13 @@ def test_consolidate_parse_fail_on_unparseable_yaml():
     from benchmarks.eval_checks import consolidate_parse
     r = consolidate_parse("summary", llm_response_text="::not yaml::@!@")
     assert r.passed is False
+
+
+def test_consolidate_parse_fails_on_partial_fields():
+    from benchmarks.eval_checks import consolidate_parse
+    r = consolidate_parse("summary", llm_response_text="quick_summary: ok\n")
+    assert r.passed is False
+    assert "missing" in r.detail.lower()
 
 
 def test_run_checks_returns_list_of_results(monkeypatch, tmp_path):
