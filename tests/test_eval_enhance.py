@@ -109,3 +109,28 @@ def test_judge_stage_asserts_judged_plus_failed_eq_attempted(monkeypatch, tmp_pa
     monkeypatch.setattr("benchmarks.eval_enhance.judge_pair", fake)
     rc = cmd_judge(base=base, backend="claude", model="claude-sonnet-5", judge_runs="run0")
     assert rc == 0
+
+
+def test_rate_stage_logs_rating_to_file(monkeypatch, tmp_path, capsys):
+    from benchmarks.eval_enhance import cmd_rate
+    monkeypatch.chdir(tmp_path)
+    base = Path("benchmarks/eval_data")
+    base.mkdir(parents=True, exist_ok=True)
+    (Path("benchmarks") / "eval_manifest.yaml").write_text(
+        "contestants:\n"
+        "  - tag: qwen3.6:27b\n"
+        "    digest: d27\n"
+        "    role: champion\n"
+        "  - tag: qwen3.6:14b\n"
+        "    digest: d14\n"
+        "    role: challenger\n"
+    )
+    for model in ("qwen3.6_27b", "qwen3.6_14b"):
+        (base / f"public__m1__{model}__run0.json").write_text(json.dumps({
+            "suite": "public", "meeting": "m1", "model": model, "run": 0,
+            "response_text": f"Summary by {model}.", "response_len": 10,
+        }))
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: "left")
+    rc = cmd_rate(base=base, ratings_path=base / "ratings.json")
+    assert rc == 0
+    assert (base / "ratings.json").exists()

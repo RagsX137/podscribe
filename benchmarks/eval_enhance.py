@@ -17,6 +17,7 @@ from benchmarks.bench_enhance import run_once
 from benchmarks.eval_cache import cache_path, list_cached, load_artifact, save_artifact
 from benchmarks.eval_checks import run_checks
 from benchmarks.eval_judge import anonymize_pair, build_rubric_prompt, judge_pair, pair_key, swapped_key
+from benchmarks.eval_rate import append_rating, randomize_pair, session_state
 
 
 def load_transcript(entry: dict, base_dir: Path) -> str:
@@ -125,6 +126,40 @@ def cmd_judge(*, base: Path, backend: str, model: str, judge_runs: str) -> int:
     return 0
 
 
+def cmd_rate(*, base: Path, ratings_path: Path) -> int:
+    from benchmarks.eval_manifest import load_manifest
+    m = load_manifest()
+    champion_tag = next((c.tag for c in m.contestants if c.role == "champion"), m.contestants[0].tag)
+    challenger_tags = [c.tag for c in m.contestants if c.role == "challenger"]
+    pairs = []
+    for meeting_artifact in [a for a in base.iterdir() if "pos_" not in a.name and a.name.endswith(".json")]:
+        data = load_artifact(meeting_artifact)
+        meeting = data["meeting"]
+        for chal in challenger_tags:
+            challenger_path = base / f"public__{meeting}__{chal.replace(':', '_')}__run0.json"
+            champion_path = base / f"public__{meeting}__{champion_tag.replace(':', '_')}__run0.json"
+            if not (challenger_path.exists() and champion_path.exists()):
+                continue
+            pairs.append({"challenger": {"model": chal, "text": load_artifact(challenger_path)["response_text"]}, "champion": {"model": champion_tag, "text": load_artifact(champion_path)["response_text"]}})
+    state = session_state(pairs=pairs)
+    for i, pair in enumerate(pairs):
+        randomized = randomize_pair(pair, seed=i)
+        print(f"\n=== Pair {i + 1}/{len(pairs)} ===")
+        print(f"Left:\n{randomized['left']['text']}\n")
+        print(f"Right:\n{randomized['right']['text']}\n")
+        print("Type 'left', 'right', 'tie', or Ctrl+C to quit.")
+        try:
+            choice = input("> ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if choice not in ("left", "right", "tie"):
+            print("Skipping unrecognized choice.")
+            continue
+        append_rating(ratings_path, {"pair_id": f"pair-{i}", "choice": choice, "run": 0})
+    state.reveal()
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(prog="eval_enhance", description="LLM enhance eval harness.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -136,6 +171,8 @@ def main() -> int:
     j.add_argument("--backend", choices=["claude", "local"], default="claude")
     j.add_argument("--model", default="claude-sonnet-5")
     j.add_argument("--judge-runs", default="run0", help="run0 or all")
+    r = sub.add_parser("rate", help="Layer-3 blind A/B REPL.")
+    r.add_argument("--ratings", default="benchmarks/eval_data/ratings.json")
     args = p.parse_args()
     if args.cmd == "generate":
         from benchmarks.eval_manifest import load_manifest, verify_contestants, Contestant
@@ -151,6 +188,8 @@ def main() -> int:
         return cmd_check(base=Path("benchmarks/eval_data"))
     elif args.cmd == "judge":
         return cmd_judge(base=Path("benchmarks/eval_data"), backend=args.backend, model=args.model, judge_runs=args.judge_runs)
+    elif args.cmd == "rate":
+        return cmd_rate(base=Path("benchmarks/eval_data"), ratings_path=Path(args.ratings))
     return 0
 
 
