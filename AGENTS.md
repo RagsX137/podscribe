@@ -79,6 +79,7 @@ in the meeting JSON gates `diarize`.
 - **Meeting ID: `YYYY-MM-DD-HHMMSS-<pod-name>`** (seconds = 6 digits, NOT 4)
 - `MEETING_TYPES` — full set: `1on1`, `skip-level`, `interview`, `standup`, `retro`, `planning`, `sprint-review`, `all-hands`, `team-sync`, `design-review`, `incident`, `post-mortem`, `brainstorm`, `customer`, `vendor`, `cross-team`, `other`; validated by `parse_meeting_type` (lowercased)
 - mlx-whisper model names: short names resolved by `transcriber.MODEL_MAP` are only `base`, `turbo`, `large-v3-turbo`; any other value (including full HF paths) passes through unchanged
+- `Transcriber` is a thin facade over pluggable ASR backends in `podscribe/backends/` (whisper-mlx default on Apple Silicon, whisper-faster on NVIDIA/CPU, parakeet-mlx / parakeet-nemo optional). `--backend auto` selects by `(model, platform)`. Deferred features live in `docs/ROADMAP.md`.
 - Glossary: list of `{"term": str, "category": str}` injected as Whisper `initial_prompt`
 - LLM config: `{"model": str, "prompt_template": str, "preserve_speakers"?: bool}`; templates support `{{glossary}}`, `{{transcript}}`, and `{{summary}}` placeholders
 
