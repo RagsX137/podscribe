@@ -164,3 +164,18 @@ def test_consolidate_parse_fail_on_unparseable_yaml():
     from benchmarks.eval_checks import consolidate_parse
     r = consolidate_parse("summary", llm_response_text="::not yaml::@!@")
     assert r.passed is False
+
+
+def test_run_checks_returns_list_of_results(monkeypatch, tmp_path):
+    from benchmarks.eval_checks import run_checks
+    transcript = "[00:00:01] Sam: We saw 100 requests"
+    summary = "Sam said there were 100 requests."
+    results = run_checks(transcript, summary, glossary=[], runs=[{"text": summary, "action_items": []}], llm_response_text=summary)
+    assert isinstance(results, list)
+    names = [r.name for r in results]
+    assert "glossary_fidelity" in names
+    assert "speaker_preservation" in names
+    assert "number_date_faithfulness" in names
+    assert "length_sanity" in names
+    assert "consistency" in names
+    assert "consolidate_parse" in names

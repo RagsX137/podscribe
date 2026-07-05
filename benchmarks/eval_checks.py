@@ -235,3 +235,23 @@ def consolidate_parse(summary: str, *, llm_response_text: str) -> CheckResult:
         name="consolidate_parse", passed=False,
         detail=f"parsed dict but no expected fields (got {list(fields.keys())})",
     )
+
+
+def run_checks(
+    transcript: str,
+    summary: str,
+    glossary: list,
+    *,
+    runs: list,
+    llm_response_text: str,
+    min_ratio: float = 0.05,
+    max_ratio: float = 0.6,
+) -> list:
+    return [
+        glossary_fidelity(transcript, summary, glossary),
+        speaker_preservation(transcript, summary, glossary),
+        number_date_faithfulness(transcript, summary, glossary),
+        length_sanity(transcript, summary, glossary, min_ratio=min_ratio, max_ratio=max_ratio),
+        consistency(runs),
+        consolidate_parse(summary, llm_response_text=llm_response_text),
+    ]
