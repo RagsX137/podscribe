@@ -797,17 +797,31 @@ def cmd_config_llm_show(args) -> int:
     if not cfg:
         print("No project-level LLM config set.")
         return 0
+    print(f"provider: {cfg.get('provider', 'ollama')}")
     print(f"model: {cfg.get('model', '(none)')}")
+    if cfg.get("base_url"):
+        print(f"base_url: {cfg['base_url']}")
+    if cfg.get("api_key_env"):
+        print(f"api_key_env: {cfg['api_key_env']}")
     print(f"prompt_template: {cfg.get('prompt_template', '(none)')}")
     return 0
 
 
 def cmd_config_llm_set(args) -> int:
-    """Set project-level LLM config."""
+    """Set project-level LLM config (provider/base_url/api_key_env optional)."""
     cfg = load_project_config()
-    cfg["llm"] = {"model": args.model, "prompt_template": args.prompt_template}
+    llm: dict = {
+        "provider": args.provider or "ollama",
+        "model": args.model,
+        "prompt_template": args.prompt_template,
+    }
+    if args.base_url:
+        llm["base_url"] = args.base_url
+    if args.api_key_env:
+        llm["api_key_env"] = args.api_key_env
+    cfg["llm"] = llm
     save_project_config(cfg)
-    print(f"Project LLM config set: {args.model}")
+    print(f"Project LLM config set: {args.provider or 'ollama'}:{args.model}")
     return 0
 
 
@@ -1373,6 +1387,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_llm_set = llm_sub.add_parser("set", help="Set project LLM config.")
     p_llm_set.add_argument("model", help="Ollama model name (e.g. qwen3.6)")
     p_llm_set.add_argument("prompt_template", help="Prompt template with {{transcript}} placeholder")
+    p_llm_set.add_argument("--provider", choices=["ollama", "openai"], default=None,
+                           help="LLM provider (default: ollama)")
+    p_llm_set.add_argument("--base-url", dest="base_url", default=None,
+                           help="Server base URL (e.g. https://api.deepseek.com/v1)")
+    p_llm_set.add_argument("--api-key-env", dest="api_key_env", default=None,
+                           help="Name of the env var holding the API key (never stored)")
     p_llm_set.set_defaults(func=cmd_config_llm_set)
 
     p_cfg_cons = cfg_sub.add_parser("consolidate", help="Manage consolidate prompt.")

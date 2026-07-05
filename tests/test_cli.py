@@ -1,11 +1,13 @@
 """Tests for CLI command structure (no audio, no model)."""
+import argparse
 import io
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-from podscribe.cli import build_parser, main, rewrite_argv, run_consolidate, run_record_session
+from podscribe.cli import build_parser, cmd_config_llm_set, main, rewrite_argv, run_consolidate, run_record_session
+from podscribe.config import load_project_config
 from podscribe.models import Meeting, Pod
 from podscribe.storage import start_meeting
 
@@ -1872,3 +1874,30 @@ def test_ingest_accepts_backend_flag():
     parser = build_parser()
     args = parser.parse_args(rewrite_argv(["ingest", "sam", "video.mp4", "--backend", "parakeet-nemo"]))
     assert args.backend == "parakeet-nemo"
+
+
+def test_config_llm_set_writes_provider_fields(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    args = argparse.Namespace(
+        model="deepseek-chat", prompt_template="{{transcript}}",
+        provider="openai", base_url="https://api.deepseek.com/v1",
+        api_key_env="DEEPSEEK_KEY",
+    )
+    assert cmd_config_llm_set(args) == 0
+    llm = load_project_config()["llm"]
+    assert llm["provider"] == "openai"
+    assert llm["base_url"] == "https://api.deepseek.com/v1"
+    assert llm["api_key_env"] == "DEEPSEEK_KEY"
+    assert llm["model"] == "deepseek-chat"
+
+
+def test_config_llm_set_defaults_provider_ollama(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    args = argparse.Namespace(
+        model="qwen3.6", prompt_template="{{transcript}}",
+        provider=None, base_url=None, api_key_env=None,
+    )
+    assert cmd_config_llm_set(args) == 0
+    llm = load_project_config()["llm"]
+    assert llm["provider"] == "ollama"
+    assert "base_url" not in llm  # omit unset optional fields
