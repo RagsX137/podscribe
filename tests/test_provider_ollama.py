@@ -1,6 +1,7 @@
 import json
 import requests
 from podscribe.providers.ollama import OllamaProvider
+from podscribe.providers import ollama as ollama_mod
 
 
 class _StreamResp:
@@ -70,6 +71,7 @@ def test_model_info_hits_show_endpoint(monkeypatch):
             def json(self): return {"model_info": {"llama.context_length": 4096}}
         return R()
 
+    monkeypatch.setattr(ollama_mod, "_info_cache", {})
     monkeypatch.setattr(requests, "post", fake_post)
     p = OllamaProvider("qwen3.6")
     assert p.model_info()["model_info"]["llama.context_length"] == 4096

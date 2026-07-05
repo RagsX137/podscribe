@@ -1,19 +1,13 @@
 """Ollama HTTP client for transcript enhancement."""
 from __future__ import annotations
 
-import json
 import re
-import time
 from typing import Callable, Optional
 
-import requests
 import yaml
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_SHOW_URL = "http://localhost:11434/api/show"
-
-OLLAMA_INFO_TTL_SEC = 300  # model metadata rarely changes; 5 min is plenty
-_info_cache: dict = {}  # {model_name: (fetched_at, info_dict)}
+from .providers.base import Provider
+from .providers.ollama import OllamaProvider
 
 ANTI_HALLUCINATION_PREAMBLE = (
     "Strict grounding rules — read carefully:\n"
@@ -61,25 +55,14 @@ def build_enhance_prompt(
     return prompt
 
 
-def ollama_model_info(model: str) -> dict:
-    """Fetch model details (num_ctx etc.) from /api/show. Best-effort.
+def ollama_model_info(model: str, *, provider: Optional[Provider] = None) -> dict:
+    """Fetch model details (context window etc.). Best-effort; {} on failure.
 
-    Cached per model for OLLAMA_INFO_TTL_SEC seconds: the /api/show round-trip
-    is ~50–150 ms and model metadata rarely changes.
-    Public (no underscore) so the TUI/CLI can call it for header rendering.
+    Kept named `ollama_model_info` for caller compatibility; delegates to the
+    given provider (default: localhost Ollama).
     """
-    now = time.time()
-    cached = _info_cache.get(model)
-    if cached is not None and (now - cached[0]) < OLLAMA_INFO_TTL_SEC:
-        return cached[1]
-    try:
-        r = requests.post(OLLAMA_SHOW_URL, json={"name": model}, timeout=5)
-        r.raise_for_status()
-        info = r.json()
-    except requests.RequestException:
-        info = {}
-    _info_cache[model] = (now, info)
-    return info
+    provider = provider or OllamaProvider(model)
+    return provider.model_info()
 
 
 def enhance_transcript(
@@ -90,6 +73,7 @@ def enhance_transcript(
     on_token: Callable[[str], None] = lambda t: None,
     on_stats: Callable[[dict], None] = lambda d: None,
     on_retry: Callable[[int, str], None] = lambda a, e: None,
+    provider: Optional[Provider] = None,
 ) -> Optional[str]:
     """Stream from Ollama, fire callbacks, return full text (None on failure).
 
@@ -105,64 +89,11 @@ def enhance_transcript(
     on_retry(attempt:int, error:str): fires before each retry sleep
         (so views can show "retrying…").
     """
-    payload = {"model": model, "prompt": prompt, "stream": True}
-
-    for attempt in range(max_retries):
-        try:
-            resp = requests.post(OLLAMA_URL, json=payload, stream=True, timeout=1800)
-            resp.raise_for_status()
-
-            text_parts: list = []
-            stats: dict = {}
-            try:
-                for line in resp.iter_lines(decode_unicode=True):
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if chunk.get("done"):
-                        # Ollama's done chunk has response=""; check done first to avoid emitting a spurious on_token("").
-                        stats = {
-                            "prompt_eval_count": chunk.get("prompt_eval_count", 0),
-                            "eval_count": chunk.get("eval_count", 0),
-                            "total_duration_ns": chunk.get("total_duration", 0),
-                            "eval_duration_ns": chunk.get("eval_duration", 0),
-                        }
-                        break
-                    if "response" in chunk:
-                        text_parts.append(chunk["response"])
-                        on_token(chunk["response"])
-            except requests.RequestException as e:
-                if attempt < max_retries - 1:
-                    on_retry(attempt + 1, str(e))
-                    time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
-                    continue
-                return None
-
-            on_stats(stats)
-            return "".join(text_parts)
-
-        except requests.HTTPError as e:
-            # HTTPError may lack .response (e.g. test mocks); fall back to the response mock's status_code.
-            status = e.response.status_code if e.response is not None else getattr(resp, "status_code", None)
-            if status is not None and 400 <= status < 500:
-                return None  # 4xx: don't retry
-            # 5xx (or unknown status): mirror the RequestException arm
-            if attempt < max_retries - 1:
-                on_retry(attempt + 1, str(e))
-                time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
-                continue
-            return None
-        except requests.RequestException as e:
-            if attempt < max_retries - 1:
-                on_retry(attempt + 1, str(e))
-                time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
-                continue
-            return None
-
-    return None
+    provider = provider or OllamaProvider(model)
+    return provider.generate(
+        prompt, max_retries=max_retries,
+        on_token=on_token, on_stats=on_stats, on_retry=on_retry,
+    )
 
 
 def build_consolidate_prompt(template: str, summary: str) -> str:
@@ -207,11 +138,6 @@ def _extract_fenced_yaml(text: str) -> Optional[str]:
     return None
 
 
-OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
-
-RETRY_DELAYS = [1, 2, 4]
-
-
 def chat_stream(
     model: str,
     messages: list,
@@ -221,6 +147,7 @@ def chat_stream(
     on_token: Callable[[str], None] = lambda t: None,
     on_message: Callable[[dict], None] = lambda d: None,
     on_retry: Callable[[int, str], None] = lambda a, e: None,
+    provider: Optional[Provider] = None,
 ) -> Optional[str]:
     """Stream from Ollama /api/chat with optional tools support.
 
@@ -232,64 +159,8 @@ def chat_stream(
 
     Returns the full accumulated text on success, or None on failure.
     """
-    payload: dict = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-        "keep_alive": -1,
-    }
-    if tools:
-        payload["tools"] = tools
-
-    for attempt in range(max_retries):
-        try:
-            resp = requests.post(OLLAMA_CHAT_URL, json=payload, stream=True, timeout=1800)
-            resp.raise_for_status()
-
-            text_parts: list = []
-            done_data: dict = {}
-            accumulated_tool_calls: list = []
-
-            for line in resp.iter_lines(decode_unicode=True):
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                msg = chunk.get("message", {})
-                if msg.get("content"):
-                    text_parts.append(msg["content"])
-                    on_token(msg["content"])
-
-                if msg.get("tool_calls"):
-                    accumulated_tool_calls.extend(msg["tool_calls"])
-
-                if chunk.get("done"):
-                    done_data = dict(msg)
-                    if accumulated_tool_calls:
-                        done_data["tool_calls"] = accumulated_tool_calls
-                    break
-
-            if done_data:
-                on_message(done_data)
-            return "".join(text_parts)
-
-        except requests.HTTPError as e:
-            status = e.response.status_code if e.response is not None else getattr(resp, "status_code", None)
-            if status is not None and 400 <= status < 500:
-                return None
-            if attempt < max_retries - 1:
-                on_retry(attempt + 1, str(e))
-                time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
-                continue
-            return None
-        except requests.RequestException as e:
-            if attempt < max_retries - 1:
-                on_retry(attempt + 1, str(e))
-                time.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
-                continue
-            return None
-
-    return None
+    provider = provider or OllamaProvider(model)
+    return provider.chat(
+        messages, tools=tools, max_retries=max_retries,
+        on_token=on_token, on_message=on_message, on_retry=on_retry,
+    )

@@ -835,7 +835,7 @@ def test_run_enhance_prints_header_and_metrics(capfd, monkeypatch):
         "podscribe.cli.ollama_model_info",
         lambda model: {"model_info": {"llama.context_length": 32768}},
     )
-    with patch("podscribe.llm.requests.post", return_value=resp):
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp):
         text, err = _run_enhance("the prompt", "qwen3.6:27b")
     captured = capfd.readouterr()
     assert err is None
