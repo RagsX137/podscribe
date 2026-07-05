@@ -1,5 +1,6 @@
-# tests/test_eval_checks.py
 from __future__ import annotations
+
+from pathlib import Path
 
 from benchmarks.eval_checks import glossary_fidelity, CheckResult
 
@@ -32,9 +33,6 @@ def test_glossary_fidelity_misspelt_term_violation():
     summary = "Anurag Kausik discussed kubernates upgrades."
     r = glossary_fidelity("transcript", summary, GLOSSARY)
     assert r.passed is False
-    # "kubernates" violates "Kubernetes" (single-token edit distance).
-    # "kausik" violates the "Kaushik" token within the multi-word term
-    # "Anurag Kaushik" (Bug 1 fix: per-token near-match for multi-word terms).
     assert "kubernates" in r.violations
     assert "kausik" in r.violations
 
@@ -73,6 +71,21 @@ def test_glossary_fidelity_no_partial_word_match():
     summary = "The K8sNode count increased."
     r = glossary_fidelity("transcript", summary, [{"term": "K8s", "category": "project"}])
     assert r.passed is True
+
+
+def test_glossary_fidelity_short_acronym_no_false_positive():
+    summary = "We shipped the app and the apt package via the API."
+    r = glossary_fidelity("transcript", summary, [{"term": "API", "category": "project"}])
+    assert r.passed is True
+    assert r.violations == []
+
+
+def test_glossary_fidelity_short_terms_do_not_flag_common_words():
+    summary = "The UI and SDK app run on the CLI."
+    glossary = [{"term": "UI"}, {"term": "SDK"}, {"term": "CLI"}]
+    r = glossary_fidelity("transcript", summary, glossary)
+    assert r.passed is True
+    assert r.violations == []
 
 
 def test_speaker_preservation_pass_when_subset():
@@ -142,7 +155,7 @@ def test_number_date_faithfulness_rounding_strict_flag():
     transcript = "We saw 1234 requests."
     summary = "About 1200 requests."
     r = number_date_faithfulness(transcript, summary, glossary=[])
-    assert r.passed is False  # exact entity rule: 1200 is new
+    assert r.passed is False
 
 
 def test_number_date_faithfulness_paraphrase_q2_not_flagged():
@@ -205,7 +218,7 @@ def test_consistency_high_variance_flags():
 def test_consolidate_parse_pass_on_well_formed_yaml():
     from benchmarks.eval_checks import consolidate_parse
     summary = "irrelevant summary text"
-    fixture = open("benchmarks/fixtures/consolidate_response.yaml").read()
+    fixture = (Path(__file__).resolve().parent.parent / "benchmarks" / "fixtures" / "consolidate_response.yaml").read_text()
     r = consolidate_parse(summary, llm_response_text=fixture)
     assert r.passed is True
     assert r.detail != ""

@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from podscribe.llm import extract_structured_fields
+
 
 @dataclass
 class CheckResult:
@@ -36,6 +38,9 @@ def _term_token_canonicals(term: str) -> set:
     return {_plural_canonical(t) for t in tokens} | {t.lower() for t in tokens}
 
 
+MIN_FUZZY_LEN = 5
+
+
 def _levenshtein_max(a: str, b: str) -> int:
     """Max allowed Levenshtein for a near-match. Scales with the longer string;
     floor of 2 catches short-token misspellings (e.g. 3-letter tokens).
@@ -51,6 +56,11 @@ def glossary_fidelity(transcript: str, summary: str, glossary: list) -> CheckRes
     one token within a multi-word term (e.g. "Kausik" in "Anurag Kaushik") is
     caught. The per-token distance threshold scales with token length so we
     permit ~1 typo per ~3 characters.
+
+    Fuzzy matching is only applied to term tokens of length >= MIN_FUZZY_LEN.
+    Short acronyms (API, CLI, SDK, K8s) sit within an edit or two of ordinary
+    English words ("and", "app", "apt"), so fuzzy-matching them flags nearly
+    every summary; for those we require an exact/plural hit instead.
     """
     summary_tokens = set(_tokenize(summary))
     violations = []
@@ -63,6 +73,8 @@ def glossary_fidelity(transcript: str, summary: str, glossary: list) -> CheckRes
             if _plural_canonical(tok) in token_canonicals:
                 continue
             for canon in token_canonicals:
+                if len(canon) < MIN_FUZZY_LEN:
+                    continue
                 if _levenshtein(tok, canon) <= _levenshtein_max(tok, canon):
                     violations.append(tok)
                     break
@@ -257,9 +269,6 @@ def consistency(runs: list) -> CheckResult:
             f"action-item counts={actions} drift {act_var}"
         ),
     )
-
-
-from podscribe.llm import extract_structured_fields
 
 
 def consolidate_parse(summary: str, *, llm_response_text: str) -> CheckResult:
