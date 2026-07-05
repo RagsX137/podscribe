@@ -33,6 +33,7 @@ diarize = [
 ]
 cuda = ["faster-whisper>=1.0"]
 parakeet-mlx = ["parakeet-mlx>=0.1"]
+parakeet-cuda = ["nemo_toolkit[asr]>=2.0"]
 
 [project.scripts]
 podscribe = "podscribe.cli:main"
