@@ -2,8 +2,12 @@
 """Layer-2 LLM judge: rubric prompt, anonymization, position-swap pairing, verdict parsing."""
 from __future__ import annotations
 
+import os
 import re
+import sys
 from typing import Optional
+
+import requests
 
 POS_A_FIRST = "pos_a_first"
 POS_B_FIRST = "pos_b_first"
@@ -82,3 +86,63 @@ def parse_verdict(raw: str) -> Optional[dict]:
     j = _JUST_RE.search(raw)
     out["justification"] = j.group(1).strip() if j else ""
     return out
+
+
+ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
+
+
+def _call_claude(prompt: str, model: str) -> str:
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        sys.exit("ANTHROPIC_API_KEY not set — required for the Claude judge backend.")
+    r = requests.post(
+        ANTHROPIC_URL,
+        headers={
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": model,
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=180,
+    )
+    r.raise_for_status()
+    data = r.json()
+    parts = []
+    for block in data.get("content", []):
+        if block.get("type") == "text":
+            parts.append(block.get("text", ""))
+    return "".join(parts)
+
+
+def _call_local(prompt: str, model: str) -> str:
+    r = requests.post(
+        OLLAMA_GENERATE_URL,
+        json={"model": model, "prompt": prompt, "stream": False},
+        timeout=600,
+    )
+    r.raise_for_status()
+    return r.json().get("response", "")
+
+
+def judge_pair(pair: dict, *, backend: str, model: str) -> dict:
+    anon = anonymize_pair(pair)
+    prompt = build_rubric_prompt(anon["summary_a"], anon["summary_b"])
+    call = _call_claude if backend == "claude" else _call_local
+    for attempt in (1, 2):
+        try:
+            raw = call(prompt, model)
+        except Exception as e:
+            if attempt == 2:
+                return {"status": "failed", "raw": f"exception: {e}", "attempt": attempt}
+            continue
+        v = parse_verdict(raw)
+        if v is not None:
+            return {"status": "judged", "verdict": v, "raw": raw, "attempt": attempt}
+        if attempt == 2:
+            return {"status": "failed", "raw": raw, "attempt": attempt}
+    return {"status": "failed", "raw": "", "attempt": 2}

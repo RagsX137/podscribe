@@ -62,3 +62,34 @@ def test_parse_verdict_extracts_axis_and_overall():
 
 def test_parse_verdict_returns_none_on_malformed():
     assert parse_verdict("totally random text without structure") is None
+
+
+def test_judge_pair_returns_verdict_dict_on_success(monkeypatch):
+    from benchmarks.eval_judge import judge_pair
+    raw = "coverage: A\nfaithfulness: A\nreadability: B\naction-item quality: A\noverall: A\nJustification: better."
+    monkeypatch.setattr("benchmarks.eval_judge._call_claude", lambda prompt, model: raw)
+    result = judge_pair({"challenger": {"text": "x"}, "champion": {"text": "y"}}, backend="claude", model="claude-sonnet-5")
+    assert result["status"] == "judged"
+    assert result["verdict"]["overall"] == "a"
+
+
+def test_judge_pair_retries_once_then_records_failure(monkeypatch):
+    from benchmarks.eval_judge import judge_pair
+    calls = {"n": 0}
+
+    def flaky(prompt, model):
+        calls["n"] += 1
+        return "garbage that does not parse"
+
+    monkeypatch.setattr("benchmarks.eval_judge._call_claude", flaky)
+    result = judge_pair({"challenger": {"text": "x"}, "champion": {"text": "y"}}, backend="claude", model="claude-sonnet-5")
+    assert result["status"] == "failed"
+    assert calls["n"] == 2
+
+
+def test_judge_pair_missing_api_key_fails_fast(monkeypatch):
+    from benchmarks.eval_judge import judge_pair
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    import pytest
+    with pytest.raises(SystemExit):
+        judge_pair({"challenger": {"text": "x"}, "champion": {"text": "y"}}, backend="claude", model="claude-sonnet-5")
