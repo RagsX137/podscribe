@@ -100,3 +100,29 @@ def test_number_date_faithfulness_paraphrase_q2_not_flagged():
     summary = "The second quarter went smoothly."
     r = number_date_faithfulness(transcript, summary, glossary=[])
     assert r.passed is True
+
+
+def test_length_sanity_pass_in_band():
+    from benchmarks.eval_checks import length_sanity
+    transcript = "x " * 1000
+    summary = "y " * 300
+    r = length_sanity(transcript, summary, glossary=[], min_ratio=0.05, max_ratio=0.6)
+    assert r.passed is True
+
+
+def test_length_sanity_flags_over_truncation():
+    from benchmarks.eval_checks import length_sanity
+    transcript = "x " * 1000
+    summary = "y "
+    r = length_sanity(transcript, summary, glossary=[], min_ratio=0.05, max_ratio=0.6)
+    assert r.passed is False
+    assert "below" in r.detail.lower() or "short" in r.detail.lower()
+
+
+def test_length_sanity_flags_parroting():
+    from benchmarks.eval_checks import length_sanity
+    transcript = "x " * 1000
+    summary = transcript
+    r = length_sanity(transcript, summary, glossary=[], min_ratio=0.05, max_ratio=0.6)
+    assert r.passed is False
+    assert "above" in r.detail.lower() or "long" in r.detail.lower()

@@ -165,3 +165,23 @@ def number_date_faithfulness(transcript: str, summary: str, glossary: list) -> C
         passed=not invented,
         violations=invented,
     )
+
+
+def length_sanity(
+    transcript: str, summary: str, glossary: list,
+    *, min_ratio: float = 0.05, max_ratio: float = 0.6,
+) -> CheckResult:
+    t_len = max(len(transcript or ""), 1)
+    s_len = len(summary or "")
+    ratio = s_len / t_len
+    if ratio < min_ratio:
+        return CheckResult(
+            name="length_sanity", passed=False,
+            detail=f"summary {s_len} chars vs transcript {t_len}: ratio {ratio:.3f} below {min_ratio}",
+        )
+    if ratio > max_ratio:
+        return CheckResult(
+            name="length_sanity", passed=False,
+            detail=f"summary {s_len} chars vs transcript {t_len}: ratio {ratio:.3f} above {max_ratio} (parroting)",
+        )
+    return CheckResult(name="length_sanity", passed=True, detail=f"ratio {ratio:.3f}")
