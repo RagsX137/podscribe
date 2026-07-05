@@ -63,3 +63,40 @@ def _levenshtein(a: str, b: str) -> int:
             cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
         prev = cur
     return prev[-1]
+
+
+SPEAKER_LINE_RE = re.compile(r"^\[[\d:]+\]\s+([^:]+):", re.MULTILINE)
+_HONORIFICS = {"mr", "mrs", "ms", "dr", "prof"}
+
+
+def _speaker_labels_in_transcript(transcript: str) -> set:
+    out = set()
+    for m in SPEAKER_LINE_RE.finditer(transcript):
+        name = m.group(1).strip().rstrip(":")
+        name = name.split("—")[0].strip()
+        if name.lower() in _HONORIFICS:
+            continue
+        if name:
+            out.add(name)
+    return out
+
+
+def _names_in_summary(summary: str, known: set) -> set:
+    candidates = set()
+    for line in summary.splitlines():
+        for tok in re.findall(r"\b[A-Z][a-zA-Z]+\b", line):
+            if tok.lower() in {"the", "a", "an", "i", "we", "they", "he", "she"}:
+                continue
+            candidates.add(tok)
+    return candidates
+
+
+def speaker_preservation(transcript: str, summary: str, glossary: list) -> CheckResult:
+    known = _speaker_labels_in_transcript(transcript)
+    candidates = _names_in_summary(summary, known)
+    hallucinated = [n for n in candidates if n not in known and n.lower() not in {k.lower() for k in known}]
+    return CheckResult(
+        name="speaker_preservation",
+        passed=not hallucinated,
+        violations=hallucinated,
+    )
