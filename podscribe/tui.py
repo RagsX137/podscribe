@@ -702,7 +702,10 @@ def record_view(pod: Pod, args) -> int:
         if len(waveform) > WAVEFORM_WIDTH:
             del waveform[: len(waveform) - WAVEFORM_WIDTH]
 
-    transcriber = Transcriber(model=getattr(args, "model", "large-v3-turbo"))
+    transcriber = Transcriber(
+        model=getattr(args, "model", "large-v3-turbo"),
+        backend=getattr(args, "backend", "auto"),
+    )
     capture = AudioCapture(
         vad_aggressiveness=getattr(args, "vad_aggressiveness", 2),
         device=getattr(args, "device", None),

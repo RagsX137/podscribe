@@ -1834,3 +1834,21 @@ def test_cmd_show_falls_back_to_original(tmp_path, monkeypatch, capsys):
     args = build_parser().parse_args(["show", "sam-chen", "latest"])
     assert cli.cmd_show(args) == 0
     assert "# original" in capsys.readouterr().out
+
+
+def test_record_accepts_backend_flag():
+    parser = build_parser()
+    args = parser.parse_args(rewrite_argv(["record", "sam", "--backend", "whisper-faster"]))
+    assert args.backend == "whisper-faster"
+
+
+def test_record_backend_defaults_to_auto():
+    parser = build_parser()
+    args = parser.parse_args(rewrite_argv(["record", "sam"]))
+    assert args.backend == "auto"
+
+
+def test_ingest_accepts_backend_flag():
+    parser = build_parser()
+    args = parser.parse_args(rewrite_argv(["ingest", "sam", "video.mp4", "--backend", "parakeet-nemo"]))
+    assert args.backend == "parakeet-nemo"

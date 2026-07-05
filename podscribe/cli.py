@@ -245,7 +245,7 @@ def cmd_record(args) -> int:
     effective_glossary = get_effective_glossary(pod)
     glossary_prompt = format_glossary_prompt(effective_glossary) if effective_glossary else None
     meeting = start_meeting(pod, meeting_type=meeting_type)
-    transcriber = Transcriber(model=args.model)
+    transcriber = Transcriber(model=args.model, backend=args.backend)
     capture = AudioCapture(
         vad_aggressiveness=args.vad_aggressiveness,
         device=args.device,
@@ -321,7 +321,7 @@ def cmd_ingest(args) -> int:
         source = "asr"
         model = args.model
         try:
-            segments, duration_sec = _ingest_via_asr(video, model)
+            segments, duration_sec = _ingest_via_asr(video, model, args.backend)
         except (RuntimeError, ImportError) as e:
             print(str(e), file=sys.stderr)
             return 1
@@ -356,7 +356,7 @@ def cmd_ingest(args) -> int:
     return 0
 
 
-def _ingest_via_asr(video, model):
+def _ingest_via_asr(video, model, backend="auto"):
     """Decode `video` and transcribe with mlx-whisper. Returns (segments, duration_sec)."""
     import os
     import tempfile
@@ -378,7 +378,7 @@ def _ingest_via_asr(video, model):
             tmp.unlink()
         except OSError:
             pass
-    raw = Transcriber(model=model).transcribe(audio)
+    raw = Transcriber(model=model, backend=backend).transcribe(audio)
     segments = [(s["start"], s["text"]) for s in raw]
     return segments, duration_sec
 
@@ -1173,6 +1173,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_rec = sub.add_parser("record", help="Live record and transcribe a meeting.")
     p_rec.add_argument("pod", help="Pod name")
     p_rec.add_argument("--model", default="large-v3-turbo", help="Whisper model (default: large-v3-turbo)")
+    p_rec.add_argument(
+        "--backend",
+        default="auto",
+        choices=["auto", "whisper-mlx", "whisper-faster", "parakeet-mlx", "parakeet-nemo"],
+        help="ASR backend (default: auto — Apple Silicon→mlx, else faster-whisper/NeMo)",
+    )
     p_rec.add_argument("--vad-aggressiveness", type=int, default=2, choices=[0, 1, 2, 3], help="VAD strictness (0=loose, 3=strict; default 2)")
     p_rec.add_argument("--device", type=int, default=None, help="Input device index (default: system default)")
     p_rec.add_argument(
@@ -1201,6 +1207,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ing.add_argument("--transcript", default=None, help="Path to a .vtt/.srt (default: sibling next to the video)")
     p_ing.add_argument("--asr", action="store_true", help="Force local mlx-whisper ASR (default: use the .vtt/.srt if present)")
     p_ing.add_argument("--model", default="large-v3-turbo", help="Whisper model for --asr (default: large-v3-turbo)")
+    p_ing.add_argument(
+        "--backend",
+        default="auto",
+        choices=["auto", "whisper-mlx", "whisper-faster", "parakeet-mlx", "parakeet-nemo"],
+        help="ASR backend for --asr (default: auto)",
+    )
     p_ing.set_defaults(func=cmd_ingest)
 
     # ask (KT Q&A)
