@@ -42,6 +42,20 @@ There is no lint/format tooling configured — match existing style manually.
 - **`pods/`, `podscribe.yaml`, `leadership_team.yaml` are gitignored** — pod data and configs are never committed. Use the `.example` files to set up.
 - **Ollama at `localhost:11434` must be running** for `enhance`, `consolidate`, and `god`.
 
+## LLM Enhance Eval Harness
+
+A staged regression harness for the `enhance` LLM stage. Lives at `benchmarks/eval_enhance.py` with five subcommands sharing a JSON cache under `benchmarks/eval_data/` (gitignored).
+
+- `generate` — runs all (model, meeting, run) combos through the full podscribe pipeline; resumable (skips existing cache).
+- `check` — Layer-1 deterministic checks over cached outputs.
+- `judge` — Layer-2 champion-anchored pairwise (Claude API for public; local Ollama for fso). Persists both position-swap verdicts separately. Asserts `judged + failed == attempted`.
+- `rate` — Layer-3 blind A/B REPL with appended ratings.
+- `report` — pure aggregation: per-model Layer-1 pass rates, win/tie/loss vs champion, judge failure rate, cost one-liner.
+
+Cache layout: `benchmarks/eval_data/<suite>__<meeting>__<model>__run<N>.json` (generate/check) and `*.verdict.json` (judge). Manifest at `benchmarks/eval_manifest.yaml` carries 3 public YouTube clips (≤15 min each, pinned time-ranges), 1 private fso ref, and 6 contestants pinned by `{tag, digest}`. `/api/tags` verifies digests on every run.
+
+Privacy: the fso private-suite transcript never reaches a hosted API; it is only judged by the local Ollama model. Documented at `docs/EVALS.md`.
+
 ## Working directory rules
 
 Keep throwaway scripts/outputs in `.scratch/` (gitignored). Never write to `/tmp` or paths outside the project, and never commit generated data into the repo root.

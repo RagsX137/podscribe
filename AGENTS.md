@@ -33,6 +33,15 @@ podscribe/
 benchmarks/bench_enhance.py    — Ollama model benchmarking harness (separate script, not installed)
 benchmarks/bench_transcribe.py — Whisper model bench on fixtures/asr (--asr-dir selects a clip set)
 benchmarks/bench_meeting.py    — bench all models on a real (media + .vtt) pair in a benchmark_data/ folder
+benchmarks/eval_enhance.py    — staged LLM eval harness (generate/check/judge/rate/report); never committed cached outputs
+benchmarks/eval_checks.py    — Layer-1 pure-function checks
+benchmarks/eval_judge.py      — Layer-2 LLM judge (Claude API for public; local Ollama for private fso)
+benchmarks/eval_rate.py       — Layer-3 blind A/B rating (TUI REPL; lazy-imports tui.py)
+benchmarks/eval_manifest.py   — manifest loader with digest-pinned contestants
+benchmarks/eval_cache.py      — JSON artifact cache keyed by (suite, meeting, model, run)
+benchmarks/eval_manifest.yaml — committed manifest (public IDs + time-ranges + private fso ref + contestants)
+benchmarks/eval_data/         — gitignored cache (audio transcripts, model outputs, judge verdicts, human ratings)
+benchmarks/fixtures/          — offline test fixtures (mocked-LLM YAML response for consolidate-parse)
 ```
 
 `.raw` is now CONTINUOUS (all frames, silence included), owned by `AudioCapture`
@@ -123,6 +132,20 @@ Effective glossary = `leadership_team.yaml` terms + per-pod `config.yaml` terms.
 `preserve_speakers` (bool, default `true`): resolution order pod-level `llm` > project-level `llm` > default. When true, `llm.build_enhance_prompt` prepends anti-hallucination + speaker-preservation preambles before the template.
 
 `podscribe.yaml` currently sets `llm.model: qwen3.6:27b` (Ollama tag). `consolidate` uses the same model by default but a separate `consolidate.prompt`. `god` command uses `god.model` with fallback to `llm.model`. KT enhance (`enhance --kt`) reuses the same `llm.model` with a KT-specific prompt (`load_kt_prompt` → `kt.prompt` in `podscribe.yaml`, else `KT_PROMPT_DEFAULT`).
+
+## LLM Enhance Eval Harness
+
+A staged regression harness for the `enhance` LLM stage. Lives at `benchmarks/eval_enhance.py` with five subcommands sharing a JSON cache under `benchmarks/eval_data/` (gitignored).
+
+- `generate` — runs all (model, meeting, run) combos through the full podscribe pipeline; resumable (skips existing cache).
+- `check` — Layer-1 deterministic checks over cached outputs.
+- `judge` — Layer-2 champion-anchored pairwise (Claude API for public; local Ollama for fso). Persists both position-swap verdicts separately. Asserts `judged + failed == attempted`.
+- `rate` — Layer-3 blind A/B REPL with appended ratings.
+- `report` — pure aggregation: per-model Layer-1 pass rates, win/tie/loss vs champion, judge failure rate, cost one-liner.
+
+Cache layout: `benchmarks/eval_data/<suite>__<meeting>__<model>__run<N>.json` (generate/check) and `*.verdict.json` (judge). Manifest at `benchmarks/eval_manifest.yaml` carries 3 public YouTube clips (≤15 min each, pinned time-ranges), 1 private fso ref, and 6 contestants pinned by `{tag, digest}`. `/api/tags` verifies digests on every run.
+
+Privacy: the fso private-suite transcript never reaches a hosted API; it is only judged by the local Ollama model. Documented at `docs/EVALS.md`.
 
 ## Tests
 

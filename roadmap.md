@@ -234,6 +234,8 @@ Ideas to explore:
 
 ## 3. LLM enhance (Ollama)
 
+> In progress: LLM enhance evaluation harness (plan: `docs/superpowers/plans/2026-07-04-enhance-eval-harness.md`). Regression-tracked eval of the `enhance` stage with deterministic checks + champion-anchored pairwise judge + blind A/B.
+
 Current `enhance` command sends transcript to Ollama for cleanup. Streaming and
 retry landed (F-3.2/3.3). Remaining ideas:
 
@@ -254,6 +256,8 @@ Current VAD segments speech into 1-3s chunks, each independently transcribed by 
 After recording, run an Ollama pass specifically to merge fragments and fix segmentation artifacts, independent of the existing enhance command.
 
 ## 6. Model accuracy tuning
+
+> In progress: LLM enhance evaluation harness (plan: `docs/superpowers/plans/2026-07-04-enhance-eval-harness.md`). Regression-tracked eval of the `enhance` stage with deterministic checks + champion-anchored pairwise judge + blind A/B.
 
 Compare `large-v3-turbo` vs full `large-v3` on the same audio for accuracy-latency trade-off. Consider smaller models (`base.en`) for test/iteration speed.
 
