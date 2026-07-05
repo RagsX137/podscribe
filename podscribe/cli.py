@@ -13,7 +13,7 @@ from typing import Optional
 from .config import get_effective_glossary, load_consolidate_prompt, load_god_model, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_god_model, save_project_config
 from rich.console import Console
 from .glossary import add_entry, format_glossary_prompt, remove_entry
-from .llm import ANTI_HALLUCINATION_PREAMBLE, build_consolidate_prompt, build_enhance_prompt, chat_stream, enhance_transcript, extract_structured_fields, ollama_model_info
+from .llm import ANTI_HALLUCINATION_PREAMBLE, build_consolidate_prompt, build_enhance_prompt, chat_stream, enhance_transcript, extract_structured_fields
 from .models import Segment, fmt_date
 from .providers.registry import build_provider
 from .storage import (
@@ -727,7 +727,12 @@ def cmd_enhance(args) -> int:
     print(f"Enhancing transcript for {pod.name}/{date_str}/{meeting.id}...")
     print(f"Enhanced summary will be saved to {pod.name}/{date_str}/{meeting.id}...")
     print(f"  Using Large Language Model: {llm_config['model']}")
-    print(f"  Ollama URL: http://localhost:11434")
+    try:
+        provider = build_provider(llm_config, model=llm_config["model"])
+        llm_url = getattr(provider, "base_url", "n/a")
+    except Exception:
+        llm_url = "n/a"
+    print(f"  LLM URL: {llm_url}")
     print()
 
     text, err = _run_enhance(prompt, llm_config)
@@ -978,7 +983,7 @@ def cmd_god(args) -> int:
         if not result:
             console.print(
                 f"[red]Failed to get response from model '{session.model}'. "
-                f"Check that Ollama is running and the model is pulled.[/red]"
+                f"Check the LLM provider is reachable and the model is available.[/red]"
             )
             return 1
         return 0

@@ -149,9 +149,9 @@ def render_header(pod: Pod, ollama_ok: bool) -> Text:
     # Right side — pad to fill terminal, then append right-aligned block
     right_parts = []
     if ollama_ok:
-        right_parts.append(f"[{C_MINT}]● ollama online[/{C_MINT}]")
+        right_parts.append(f"[{C_MINT}]● LLM online[/{C_MINT}]")
     else:
-        right_parts.append(f"[{C_DIM}]○ ollama offline[/{C_DIM}]")
+        right_parts.append(f"[{C_DIM}]○ LLM offline[/{C_DIM}]")
     right_parts += [
         f"  [reverse {C_DIM}] ? [/reverse {C_DIM}]",
         f"  [reverse {C_LILAC}] : [/reverse {C_LILAC}]",
@@ -925,7 +925,7 @@ def enhance_view(pod: Pod, meeting) -> int:
             return 130
         if result is None:
             console.print(Panel(
-                "Failed to reach Ollama. Is it running? Start with: ollama serve",
+                "Failed to reach LLM provider. Is the server running and the base URL correct?",
                 title="[red]enhance[/red]", border_style="red",
             ))
             return 1
@@ -1179,10 +1179,10 @@ def god_view(model: Optional[str] = None) -> int:
         console.print(f"[red]Failed to initialize God session: {e}[/red]")
         return 1
 
-    # Quick Ollama check
+    # Quick provider check
     if not probe_ollama():
         console.print(Panel(
-            "Ollama not reachable. Start with: ollama serve",
+            "LLM provider not reachable. Check the base URL and that the server is running.",
             title="[red]Error[/red]", border_style="red",
         ))
         return 1
