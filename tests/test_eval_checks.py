@@ -58,3 +58,45 @@ def test_speaker_preservation_flags_hallucinated_speaker():
     r = speaker_preservation(transcript, summary, glossary=[])
     assert r.passed is False
     assert "Bob" in r.violations
+
+
+def test_number_date_faithfulness_pass_existing_number():
+    from benchmarks.eval_checks import number_date_faithfulness
+    transcript = "We saw 2341 requests on July 15 2026."
+    summary = "There were 2341 requests on July 15 2026."
+    r = number_date_faithfulness(transcript, summary, glossary=[])
+    assert r.passed is True
+    assert r.violations == []
+
+
+def test_number_date_faithfulness_word_form_match():
+    from benchmarks.eval_checks import number_date_faithfulness
+    transcript = "We saw forty-two requests."
+    summary = "42 requests were observed."
+    r = number_date_faithfulness(transcript, summary, glossary=[])
+    assert r.passed is True
+
+
+def test_number_date_faithfulness_invented_number_flagged():
+    from benchmarks.eval_checks import number_date_faithfulness
+    transcript = "We saw 100 requests."
+    summary = "There were 99999 requests."
+    r = number_date_faithfulness(transcript, summary, glossary=[])
+    assert r.passed is False
+    assert "99999" in r.violations
+
+
+def test_number_date_faithfulness_rounding_strict_flag():
+    from benchmarks.eval_checks import number_date_faithfulness
+    transcript = "We saw 1234 requests."
+    summary = "About 1200 requests."
+    r = number_date_faithfulness(transcript, summary, glossary=[])
+    assert r.passed is False  # exact entity rule: 1200 is new
+
+
+def test_number_date_faithfulness_paraphrase_q2_not_flagged():
+    from benchmarks.eval_checks import number_date_faithfulness
+    transcript = "Q2 went well."
+    summary = "The second quarter went smoothly."
+    r = number_date_faithfulness(transcript, summary, glossary=[])
+    assert r.passed is True
