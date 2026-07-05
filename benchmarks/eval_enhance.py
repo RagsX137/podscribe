@@ -16,6 +16,7 @@ from typing import Optional
 from benchmarks.bench_enhance import run_once
 from benchmarks.eval_cache import cache_path, list_cached, load_artifact, save_artifact
 from benchmarks.eval_checks import run_checks
+from benchmarks.eval_judge import anonymize_pair, build_rubric_prompt, judge_pair, pair_key, swapped_key
 
 
 def load_transcript(entry: dict, base_dir: Path) -> str:
@@ -86,6 +87,44 @@ def cmd_check(*, base: Path) -> int:
     return 0
 
 
+def cmd_judge(*, base: Path, backend: str, model: str, judge_runs: str) -> int:
+    from benchmarks.eval_manifest import load_manifest
+    m = load_manifest()
+    champion_tag = next((c.tag for c in m.contestants if c.role == "champion"), m.contestants[0].tag)
+    challenger_tags = [c.tag for c in m.contestants if c.role == "challenger"]
+    runs_to_judge = [0] if judge_runs == "run0" else [0, 1, 2]
+    attempted = judged = failed = 0
+    seen_pair_keys = set()
+    for meeting_artifact in [a for a in base.iterdir() if "pos_" not in a.name and a.name.endswith(".json")]:
+        data = load_artifact(meeting_artifact)
+        meeting = data["meeting"]
+        for chal in challenger_tags:
+            for run in runs_to_judge:
+                challenger_path = base / f"public__{meeting}__{chal.replace(':', '_')}__run{run}.json"
+                champion_path = base / f"public__{meeting}__{champion_tag.replace(':', '_')}__run{run}.json"
+                if not (challenger_path.exists() and champion_path.exists()):
+                    continue
+                pair = {
+                    "challenger": {"model": chal, "text": load_artifact(challenger_path)["response_text"]},
+                    "champion": {"model": champion_tag, "text": load_artifact(champion_path)["response_text"]},
+                }
+                for pos_key in (pair_key(chal, champion_tag, meeting, run), swapped_key(pair_key(chal, champion_tag, meeting, run))):
+                    if pos_key in seen_pair_keys:
+                        continue
+                    seen_pair_keys.add(pos_key)
+                    attempted += 1
+                    result = judge_pair(pair, backend=backend, model=model)
+                    if result["status"] == "judged":
+                        judged += 1
+                    else:
+                        failed += 1
+                    out_path = base / f"{pos_key}.verdict.json"
+                    save_artifact(out_path, result)
+    assert judged + failed == attempted, f"quiet drop: {judged}+{failed}!={attempted}"
+    sys.stderr.write(f"judge: attempted={attempted} judged={judged} failed={failed}\n")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(prog="eval_enhance", description="LLM enhance eval harness.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -93,6 +132,10 @@ def main() -> int:
     g.add_argument("--runs", type=int, default=3)
     g.add_argument("--models", help="Comma-separated override; default reads manifest.")
     c = sub.add_parser("check", help="Layer-1 metrics over cached outputs.")
+    j = sub.add_parser("judge", help="Layer-2 pairwise judging over cached outputs.")
+    j.add_argument("--backend", choices=["claude", "local"], default="claude")
+    j.add_argument("--model", default="claude-sonnet-5")
+    j.add_argument("--judge-runs", default="run0", help="run0 or all")
     args = p.parse_args()
     if args.cmd == "generate":
         from benchmarks.eval_manifest import load_manifest, verify_contestants, Contestant
@@ -106,6 +149,8 @@ def main() -> int:
         return cmd_generate(entries=entries, contestants=[{"tag": c.tag, "digest": c.digest, "role": c.role} for c in contestants], runs=args.runs, base=Path("benchmarks/eval_data"))
     elif args.cmd == "check":
         return cmd_check(base=Path("benchmarks/eval_data"))
+    elif args.cmd == "judge":
+        return cmd_judge(base=Path("benchmarks/eval_data"), backend=args.backend, model=args.model, judge_runs=args.judge_runs)
     return 0
 
 

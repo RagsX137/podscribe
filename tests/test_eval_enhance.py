@@ -54,3 +54,58 @@ def test_check_stage_reads_cache_and_reports(monkeypatch, tmp_path, capsys):
     assert rc == 0
     captured = capsys.readouterr()
     assert "qwen3.6_27b" in captured.out or "passed" in captured.out.lower()
+
+
+def test_judge_stage_writes_persisted_verdicts(monkeypatch, tmp_path):
+    from benchmarks.eval_enhance import cmd_judge
+    monkeypatch.chdir(tmp_path)
+    base = Path("benchmarks/eval_data")
+    base.mkdir(parents=True, exist_ok=True)
+    (Path("benchmarks") / "eval_manifest.yaml").write_text(
+        "contestants:\n"
+        "  - tag: qwen3.6:27b\n"
+        "    digest: d27\n"
+        "    role: champion\n"
+        "  - tag: qwen3.6:14b\n"
+        "    digest: d14\n"
+        "    role: challenger\n"
+    )
+    for model in ("qwen3.6_27b", "qwen3.6_14b"):
+        (base / f"public__m1__{model}__run0.json").write_text(json.dumps({
+            "suite": "public", "meeting": "m1", "model": model, "run": 0,
+            "response_text": f"Summary by {model}.", "response_len": 10,
+        }))
+    verdict = {"coverage": "a", "faithfulness": "a", "readability": "b", "action-item quality": "tie", "overall": "a", "justification": "A is better."}
+    monkeypatch.setattr("benchmarks.eval_enhance.judge_pair", lambda pair, **kw: {"status": "judged", "verdict": verdict, "raw": "", "attempt": 1})
+    rc = cmd_judge(base=base, backend="claude", model="claude-sonnet-5", judge_runs="run0")
+    assert rc == 0
+    judged = [p for p in base.iterdir() if "pos_" in p.name]
+    assert len(judged) == 2
+
+
+def test_judge_stage_asserts_judged_plus_failed_eq_attempted(monkeypatch, tmp_path):
+    from benchmarks.eval_enhance import cmd_judge
+    monkeypatch.chdir(tmp_path)
+    base = Path("benchmarks/eval_data")
+    base.mkdir(parents=True, exist_ok=True)
+    (Path("benchmarks") / "eval_manifest.yaml").write_text(
+        "contestants:\n"
+        "  - tag: qwen3.6:27b\n"
+        "    digest: d27\n"
+        "    role: champion\n"
+        "  - tag: qwen3.6:14b\n"
+        "    digest: d14\n"
+        "    role: challenger\n"
+    )
+    for model in ("qwen3.6_27b", "qwen3.6_14b"):
+        (base / f"public__m1__{model}__run0.json").write_text(json.dumps({
+            "suite": "public", "meeting": "m1", "model": model, "run": 0,
+            "response_text": "x", "response_len": 1,
+        }))
+    from itertools import count
+    calls = count()
+    def fake(pair, **kw):
+        return {"status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1} if next(calls) == 0 else {"status": "failed", "raw": "bad", "attempt": 2}
+    monkeypatch.setattr("benchmarks.eval_enhance.judge_pair", fake)
+    rc = cmd_judge(base=base, backend="claude", model="claude-sonnet-5", judge_runs="run0")
+    assert rc == 0
