@@ -14,7 +14,13 @@ from benchmarks.eval_judge import (
 
 def test_pair_key_includes_challenger_champion_meeting_run():
     k = pair_key("qwen3.6:14b", "qwen3.6:27b", "m1", run=0)
-    assert "qwen3.6:14b" in k and "m1" in k and "run0" in k
+    assert "qwen3.6_14b" in k and "m1" in k and "run0" in k
+
+
+def test_pair_key_sanitizes_colon_and_slash_for_filenames():
+    k = pair_key("org/qwen:14b", "org/qwen:27b", "m1", run=0)
+    assert ":" not in k and "/" not in k
+    assert "org_qwen_14b" in k and "org_qwen_27b" in k
 
 
 def test_swapped_key_differs_from_pair_key():

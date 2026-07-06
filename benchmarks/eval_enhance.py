@@ -50,13 +50,16 @@ def cmd_generate(*, entries: list, contestants: list, runs: int, base: Path) -> 
                 path_key = cache_path(entry["suite"], entry["id"], c["tag"], run, base=base)
                 rel = path_key.name
                 if rel in existing:
-                    sys.stderr.write(f"  skip cached: {rel}\n")
-                    continue
+                    cached = load_artifact(path_key)
+                    if cached.get("digest") == c["digest"]:
+                        sys.stderr.write(f"  skip cached: {rel}\n")
+                        continue
+                    sys.stderr.write(f"  regenerate (digest changed): {rel}\n")
                 sys.stderr.write(f"  generate: {rel}\n")
                 result = run_once(c["tag"], prompt, label=rel, quiet=True)
                 payload = {
                     "suite": entry["suite"], "meeting": entry["id"],
-                    "model": c["tag"], "run": run,
+                    "model": c["tag"], "digest": c["digest"], "run": run,
                     "response_text": result.get("response_text") or result.get("response_preview"),
                     "response_len": result.get("response_len", 0),
                     "timing": {k: v for k, v in result.items() if k.startswith(("total", "warm", "load", "prompt", "eval", "wall", "in_", "out_"))},
@@ -69,6 +72,20 @@ def load_transcript_for_check(entry: dict, base_dir: Path) -> str:
     if entry["suite"] == "public":
         return (base_dir / f"{entry['meeting']}.transcript.md").read_text()
     return load_transcript(entry, base_dir)
+
+
+def _action_items_for(response_text: str) -> list:
+    """Best-effort extraction of the action-item list from a cached enhance
+    response so the `consistency` check can measure run-to-run action-item drift.
+
+    generate stores only the raw response_text; the structured action_items are
+    parsed here (the same YAML the consolidate stage reads). Unparseable output
+    yields an empty list — a genuine "no items" signal, not a crash.
+    """
+    from podscribe.llm import extract_structured_fields
+    fields = extract_structured_fields(response_text or "")
+    items = (fields or {}).get("action_items")
+    return items if isinstance(items, list) else []
 
 
 def cmd_check(*, base: Path) -> int:
@@ -93,7 +110,7 @@ def cmd_check(*, base: Path) -> int:
         entry = {"suite": suite, "meeting": meeting, "id": meeting}
         transcript = load_transcript_for_check(entry, base)
         runs = [
-            {"text": a.get("response_text", ""), "action_items": a.get("action_items", [])}
+            {"text": a.get("response_text", ""), "action_items": _action_items_for(a.get("response_text", ""))}
             for a in artifacts
         ]
         results = run_checks(
@@ -138,7 +155,12 @@ def _load_judgeable_pairs(base: Path, suite: str, champion_tag: str, challenger_
 
 def cmd_judge(*, base: Path, backend: str, model: Optional[str], judge_runs: str, suite: str) -> int:
     if suite == "private" and backend == "claude":
-        sys.exit("Refusing to send private suite to a cloud API. Use --backend local.")
+        sys.exit(
+            "Refusing to send the private suite to a cloud API. "
+            "Re-run with `--suite private --backend local` (judged locally by the "
+            "champion model). The private transcript never leaves this machine; "
+            "the cloud backend is refused, not silently downgraded."
+        )
     from benchmarks.eval_manifest import load_manifest
     m = load_manifest()
     champion_tag = next((c.tag for c in m.contestants if c.role == "champion"), m.contestants[0].tag)
@@ -170,6 +192,8 @@ def cmd_judge(*, base: Path, backend: str, model: Optional[str], judge_runs: str
                 result["meeting"] = meeting
                 result["run"] = run
                 result["suite"] = suite
+                result["backend"] = backend
+                result["judge_model"] = model
                 if result["status"] == "judged":
                     judged += 1
                 else:
@@ -316,9 +340,11 @@ def cmd_report(*, base: Path, suite: str, ratings_path: Optional[Path] = None) -
     attempted = judged = failed = 0
     axis_counts = {a: {"challenger": 0, "champion": 0, "tie": 0} for a in _AXES}
     per_model: dict = {}
+    backends_seen: set = set()
     for vpath in base.glob("*.verdict.json"):
         v = load_artifact(vpath)
         attempted += 1
+        backends_seen.add(v.get("backend"))
         if v.get("status") != "judged":
             failed += 1
             continue
@@ -354,7 +380,11 @@ def cmd_report(*, base: Path, suite: str, ratings_path: Optional[Path] = None) -
         d = per_model[chal]
         print(f"  {chal}: wins={d['wins']} ties={d['ties']} losses={d['losses']}")
     calls = judged + failed
-    print(f"# Cost: ~{calls} judge call(s) @ Sonnet pricing (~${calls * _SONNET_PER_CALL_USD:.2f} est.)")
+    known_backends = {b for b in backends_seen if b}
+    if known_backends and known_backends <= {"local"}:
+        print(f"# Cost: {calls} local judge call(s) — $0.00 (local Ollama, no API spend)")
+    else:
+        print(f"# Cost: ~{calls} judge call(s) @ Sonnet pricing (~${calls * _SONNET_PER_CALL_USD:.2f} est.)")
     agreement = None
     if ratings_path is not None:
         from benchmarks.eval_manifest import load_manifest

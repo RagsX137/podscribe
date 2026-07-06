@@ -14,7 +14,7 @@ def test_generate_skips_existing_cache(monkeypatch, tmp_path):
     base.mkdir(parents=True, exist_ok=True)
     existing_text = "cached-response"
     key = "public__meeting2__qwen3.6_14b__run0.json"
-    (base / key).write_text(json.dumps({"response_text": existing_text, "model": "qwen3.6:14b", "meeting": "meeting2", "run": 0}))
+    (base / key).write_text(json.dumps({"response_text": existing_text, "model": "qwen3.6:14b", "digest": "x", "meeting": "meeting2", "run": 0}))
 
     call_count = {"n": 0}
 
@@ -34,6 +34,35 @@ def test_generate_skips_existing_cache(monkeypatch, tmp_path):
     rc = cmd_generate(entries=entries, contestants=contestants, runs=1, base=base)
     assert rc == 0
     assert call_count["n"] == 0
+
+
+def test_generate_regenerates_when_pinned_digest_changes(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    base = Path("benchmarks/eval_data")
+    base.mkdir(parents=True, exist_ok=True)
+    key = "public__meeting2__qwen3.6_14b__run0.json"
+    (base / key).write_text(json.dumps({
+        "response_text": "stale", "model": "qwen3.6:14b", "digest": "old-digest",
+        "meeting": "meeting2", "run": 0,
+    }))
+
+    call_count = {"n": 0}
+
+    def fake_run_once(model, prompt, **kw):
+        call_count["n"] += 1
+        return {"response_text": "fresh", "response_preview": "", "response_len": 5, "total_s": 0}
+
+    monkeypatch.setattr("benchmarks.eval_enhance.run_once", fake_run_once)
+    monkeypatch.setattr("benchmarks.eval_enhance.load_transcript", lambda entry, base_dir: "fake transcript text")
+
+    entries = [{"id": "meeting2", "suite": "public"}]
+    contestants = [{"tag": "qwen3.6:14b", "digest": "new-digest", "role": "challenger"}]
+    rc = cmd_generate(entries=entries, contestants=contestants, runs=1, base=base)
+    assert rc == 0
+    assert call_count["n"] == 1
+    written = json.loads((base / key).read_text())
+    assert written["response_text"] == "fresh"
+    assert written["digest"] == "new-digest"
 
 
 def test_check_stage_reads_cache_and_reports(monkeypatch, tmp_path, capsys):
@@ -228,6 +257,53 @@ def test_report_computes_human_judge_agreement(monkeypatch, tmp_path, capsys):
     assert cmd_report(base=base, suite="public", ratings_path=ratings) == 0
     out = capsys.readouterr().out
     assert "Human" in out and "1/1" in out
+
+
+def test_action_items_for_extracts_list_from_yaml_response():
+    from benchmarks.eval_enhance import _action_items_for
+    response = (
+        "quick_summary: shipped it\n"
+        "action_items:\n"
+        "  - fix the flaky test\n"
+        "  - email the vendor\n"
+    )
+    assert _action_items_for(response) == ["fix the flaky test", "email the vendor"]
+
+
+def test_action_items_for_returns_empty_on_unparseable():
+    from benchmarks.eval_enhance import _action_items_for
+    assert _action_items_for("just some freeform prose, no yaml here") == []
+    assert _action_items_for("") == []
+
+
+def test_report_cost_line_is_free_for_local_backend(monkeypatch, tmp_path, capsys):
+    from benchmarks.eval_enhance import cmd_report
+    monkeypatch.chdir(tmp_path)
+    base = Path("benchmarks/eval_data")
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "v_a.verdict.json").write_text(json.dumps({
+        "status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1,
+        "backend": "local", "challenger": "qwen3.6:14b", "meeting": "m1", "position": "a_first",
+    }))
+    rc = cmd_report(base=base, suite="private")
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "$0.00" in out and "local" in out.lower()
+    assert "Sonnet" not in out
+
+
+def test_report_cost_line_uses_sonnet_for_claude_backend(monkeypatch, tmp_path, capsys):
+    from benchmarks.eval_enhance import cmd_report
+    monkeypatch.chdir(tmp_path)
+    base = Path("benchmarks/eval_data")
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "v_a.verdict.json").write_text(json.dumps({
+        "status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1,
+        "backend": "claude", "challenger": "qwen3.6:14b", "meeting": "m1", "position": "a_first",
+    }))
+    rc = cmd_report(base=base, suite="public")
+    assert rc == 0
+    assert "Sonnet" in capsys.readouterr().out
 
 
 def test_human_judge_agreement_uses_stored_fields_not_listing_order(monkeypatch, tmp_path):

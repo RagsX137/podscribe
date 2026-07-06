@@ -12,8 +12,12 @@ POS_A_FIRST = "pos_a_first"
 POS_B_FIRST = "pos_b_first"
 
 
+def _safe_tag(tag: str) -> str:
+    return tag.replace(":", "_").replace("/", "_")
+
+
 def pair_key(challenger: str, champion: str, meeting: str, run: int) -> str:
-    return f"{challenger}__vs__{champion}__{meeting}__run{run}__{POS_A_FIRST}"
+    return f"{_safe_tag(challenger)}__vs__{_safe_tag(champion)}__{meeting}__run{run}__{POS_A_FIRST}"
 
 
 def swapped_key(key: str) -> str:
