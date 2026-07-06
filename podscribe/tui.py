@@ -48,8 +48,6 @@ C_MINT  = "color(152)"
 C_DIM   = "color(244)"
 C_RED   = "color(203)"
 
-OLLAMA_URL = "http://localhost:11434"
-
 # readchar key codes
 KEY_UP    = "\x1b[A"
 KEY_DOWN  = "\x1b[B"
@@ -433,12 +431,32 @@ def read_key_timeout(timeout: float) -> Optional[str]:
         return read_key()
 
 
-def probe_ollama() -> bool:
-    """Return True if Ollama is reachable. 1s timeout. Wrapper for tests."""
+def _provider_for_pod(pod: Pod):
+    """Build the LLM provider for a pod's effective config, or None if unset.
+
+    Best-effort: returns None when no model is configured or the config is
+    invalid (e.g. openai provider with an unset api-key env var).
+    """
+    cfg = pod.llm or load_project_config().get("llm")
+    if not cfg or not cfg.get("model"):
+        return None
     try:
-        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=1)
-        return r.ok
-    except requests.RequestException:
+        from .providers.registry import build_provider
+        return build_provider(cfg, model=cfg.get("model"))
+    except ValueError:
+        return None
+
+
+def probe_provider(provider) -> bool:
+    """Return True if the given LLM provider is reachable. Wrapper for tests.
+
+    A None provider (unconfigured or misconfigured) reads as offline.
+    """
+    if provider is None:
+        return False
+    try:
+        return provider.reachable()
+    except Exception:
         return False
 
 
@@ -904,7 +922,11 @@ def enhance_view(pod: Pod, meeting) -> int:
     footer = {"tokens": 0, "tps": 0.0, "status": "streaming"}
 
     from .providers.registry import build_provider
-    provider = build_provider(llm_config)
+    try:
+        provider = build_provider(llm_config)
+    except ValueError as e:
+        console.print(Panel(str(e), title="[red]enhance[/red]", border_style="red"))
+        return 1
     info = provider.model_info()
     num_ctx = (info.get("model_info") or {}).get("llama.context_length", "?")
 
@@ -963,6 +985,10 @@ def enhance_view(pod: Pod, meeting) -> int:
                 title="[red]enhance[/red]", border_style="red",
             ))
             return 1
+        if footer["status"] == "streaming":
+            # Providers that don't emit token-usage stats (e.g. OpenAI-compatible)
+            # never fire on_stats, so flip the footer off "streaming" on success.
+            footer["status"] = f"done | {footer['tokens']} tokens streamed"
         _tick()
         summary_dir.mkdir(parents=True, exist_ok=True)
         enhanced_path.write_text(result)
@@ -1029,7 +1055,7 @@ def launch() -> int:
         main_idx=0,
         focused_pane="main",
     )
-    ollama_ok = probe_ollama()
+    ollama_ok = probe_provider(_provider_for_pod(pods[state.sidebar_idx]))
 
     def _current_pod() -> Pod:
         return pods[state.sidebar_idx]
@@ -1213,8 +1239,8 @@ def god_view(model: Optional[str] = None) -> int:
         console.print(f"[red]Failed to initialize God session: {e}[/red]")
         return 1
 
-    # Quick provider check
-    if not probe_ollama():
+    # Quick provider check (against the session's configured provider)
+    if not probe_provider(session.provider):
         console.print(Panel(
             "LLM provider not reachable. Check the base URL and that the server is running.",
             title="[red]Error[/red]", border_style="red",

@@ -954,7 +954,11 @@ def cmd_god(args) -> int:
     """Agentic mode: LLM brain with tool access."""
     if args.prompt:
         from .agent import GodSession
-        session = GodSession(model=args.model)
+        try:
+            session = GodSession(model=args.model)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 1
         console = Console()
         full_text: list = []
 

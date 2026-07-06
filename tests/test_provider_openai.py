@@ -66,6 +66,44 @@ def test_chat_emits_tool_calls_on_message(monkeypatch):
     assert got["tool_calls"][0]["function"]["name"] == "f"
 
 
+def test_chat_keeps_indexless_tool_calls_separate(monkeypatch):
+    """Servers that omit `index` must not collapse distinct calls into slot 0."""
+    tc1 = [{"id": "c1", "type": "function",
+            "function": {"name": "search", "arguments": "{}"}}]
+    tc2 = [{"id": "c2", "type": "function",
+            "function": {"name": "glossary", "arguments": "{}"}}]
+    lines = [_delta(tool_calls=tc1), _delta(tool_calls=tc2), "data: [DONE]"]
+
+    def fake_post(url, json=None, headers=None, stream=False, timeout=None):
+        return _SSEResp(lines)
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    got = {}
+    p = OpenAIProvider("m", base_url="http://x/v1")
+    p.chat([{"role": "user", "content": "x"}], tools=[{"type": "function"}],
+           on_message=lambda m: got.update(m))
+    names = [t["function"]["name"] for t in got["tool_calls"]]
+    assert names == ["search", "glossary"]
+
+
+def test_reachable_true_on_any_http_response(monkeypatch):
+    def fake_get(url, headers=None, timeout=None):
+        return _SSEResp([], status=401)  # server up but unauthorized
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    p = OpenAIProvider("m", base_url="https://api.example.com/v1", api_key="k")
+    assert p.reachable() is True
+
+
+def test_reachable_false_on_connection_error(monkeypatch):
+    def fake_get(url, headers=None, timeout=None):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    p = OpenAIProvider("m", base_url="https://api.example.com/v1")
+    assert p.reachable() is False
+
+
 def test_no_api_key_omits_auth_header(monkeypatch):
     captured = {}
 

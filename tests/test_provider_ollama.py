@@ -44,6 +44,31 @@ def test_generate_streams_tokens_and_stats(monkeypatch):
     assert captured["body"]["model"] == "qwen3.6"
 
 
+def test_reachable_hits_configured_base_url(monkeypatch):
+    """reachable() must probe the provider's own base_url, not localhost."""
+    captured = {}
+
+    class _OK:
+        ok = True
+
+    def fake_get(url, timeout=None):
+        captured["url"] = url
+        return _OK()
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    p = OllamaProvider("qwen3.6", base_url="http://box:11434")
+    assert p.reachable() is True
+    assert captured["url"] == "http://box:11434/api/tags"
+
+
+def test_reachable_false_on_connection_error(monkeypatch):
+    def fake_get(url, timeout=None):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    assert OllamaProvider("m", base_url="http://box:11434").reachable() is False
+
+
 def test_chat_accumulates_tool_calls(monkeypatch):
     lines = [
         json.dumps({"message": {"content": "thinking"}}),

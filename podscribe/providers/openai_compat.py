@@ -57,7 +57,16 @@ class OpenAIProvider:
                 parts.append(delta["content"])
                 on_token(delta["content"])
             for tc in delta.get("tool_calls", []) or []:
-                idx = tc.get("index", 0)
+                idx = tc.get("index")
+                if idx is None:
+                    # Spec-compliant streams always carry `index`; some servers
+                    # omit it. Then a new `id` (or the very first call) starts a
+                    # fresh slot, otherwise the delta extends the latest one —
+                    # avoids collapsing distinct calls into a single slot 0.
+                    if tc.get("id") or not tool_acc:
+                        idx = len(tool_acc)
+                    else:
+                        idx = max(tool_acc)
                 slot = tool_acc.setdefault(idx, {"function": {"name": "", "arguments": ""}})
                 fn = tc.get("function", {})
                 if tc.get("id"):
@@ -101,6 +110,14 @@ class OpenAIProvider:
             lambda r: self._consume(r, on_token, on_message),
             max_retries=max_retries, on_retry=on_retry,
         )
+
+    def reachable(self) -> bool:
+        """True if the server responds at all (any HTTP status = up)."""
+        try:
+            requests.get(f"{self.base_url}/models", headers=self._headers(), timeout=2)
+            return True
+        except requests.RequestException:
+            return False
 
     def model_info(self) -> dict:
         return {}

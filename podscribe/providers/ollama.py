@@ -96,6 +96,14 @@ class OllamaProvider:
 
         return stream_with_retry(make, consume, max_retries=max_retries, on_retry=on_retry)
 
+    def reachable(self) -> bool:
+        """True if the Ollama server answers /api/tags within 1s."""
+        try:
+            r = requests.get(f"{self.base_url}/api/tags", timeout=1)
+            return r.ok
+        except requests.RequestException:
+            return False
+
     def model_info(self) -> dict:
         key = (self.base_url, self.model)
         now = time.time()

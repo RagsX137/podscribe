@@ -23,9 +23,17 @@ _MAP_TEMPLATE = (
 
 
 def context_limit_chars(llm_config: dict) -> int:
-    """Approx transcript char budget for a single LLM pass."""
-    provider = build_provider(llm_config)
-    info = provider.model_info()
+    """Approx transcript char budget for a single LLM pass.
+
+    Best-effort: if the provider can't be built (misconfig) or exposes no
+    context metadata (e.g. OpenAI-compatible), fall back to
+    CONTEXT_FALLBACK_TOKENS. Any real misconfiguration surfaces cleanly from
+    the guarded run_llm call that follows, not as a traceback here.
+    """
+    try:
+        info = build_provider(llm_config).model_info()
+    except ValueError:
+        info = {}
     ctx = (info.get("model_info") or {}).get("llama.context_length")
     if not isinstance(ctx, int) or ctx <= 0:
         ctx = CONTEXT_FALLBACK_TOKENS

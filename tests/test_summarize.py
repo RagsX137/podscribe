@@ -2,7 +2,24 @@ from __future__ import annotations
 
 import pytest
 
-from podscribe.summarize import chunk_text, summarize_transcript
+from podscribe.summarize import (
+    CONTEXT_FALLBACK_TOKENS,
+    chunk_text,
+    context_limit_chars,
+    summarize_transcript,
+)
+
+
+def test_context_limit_chars_falls_back_on_misconfig(monkeypatch):
+    """A misconfigured provider must not raise here; fall back to the default
+    budget so the clean error surfaces from the guarded run_llm call instead."""
+    def boom(cfg, model=None):
+        raise ValueError("openai provider requires 'base_url'")
+
+    monkeypatch.setattr("podscribe.summarize.build_provider", boom)
+    budget = context_limit_chars({"provider": "openai", "model": "m"})
+    assert budget > 0  # equals the CONTEXT_FALLBACK_TOKENS-derived budget, not a crash
+    assert isinstance(CONTEXT_FALLBACK_TOKENS, int)
 
 
 def test_chunk_text_respects_max_and_overlap():

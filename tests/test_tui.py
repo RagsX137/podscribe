@@ -27,7 +27,7 @@ def test_launch_with_pod_and_q_exits_cleanly(tmp_path, monkeypatch):
     init_pod("sam-chen", display_name="Sam Chen")
     import podscribe.tui as tui
     monkeypatch.setattr(tui, "read_key", lambda: "q")
-    monkeypatch.setattr(tui, "probe_ollama", lambda: False)
+    monkeypatch.setattr(tui, "probe_provider", lambda p: False)
     rc = launch()
     assert rc == 0
 
@@ -44,7 +44,7 @@ def test_launch_tab_switches_focused_pane(tmp_path, monkeypatch):
         k = next(keys)
         return "\t" if k == "Tab" else k
     monkeypatch.setattr(tui, "read_key", fake_key)
-    monkeypatch.setattr(tui, "probe_ollama", lambda: False)
+    monkeypatch.setattr(tui, "probe_provider", lambda p: False)
     rc = tui.launch()
     assert rc == 0
 
@@ -917,7 +917,7 @@ def test_handle_slash_exit_raises_exit_sentinel(tmp_path, monkeypatch):
     import podscribe.agent as agent_mod
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(tui, "probe_ollama", lambda: True)
+    monkeypatch.setattr(tui, "probe_provider", lambda p: True)
 
     chars = list("/exit\r")
     char_iter = iter(chars)
@@ -933,6 +933,7 @@ def test_handle_slash_exit_raises_exit_sentinel(tmp_path, monkeypatch):
 
     class _StubSession:
         model = "test-model"
+        provider = None
         def add_system_context(self, _): pass
         def run_prompt(self, *a, **kw): return ""
 
