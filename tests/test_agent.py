@@ -122,6 +122,26 @@ def test_god_session_add_system_context():
     assert session.messages[1]["role"] == "system"
 
 
+def test_god_session_inherits_project_provider_when_god_only_sets_model(tmp_path, monkeypatch):
+    """A bare god.model must inherit the project llm provider, not revert to Ollama."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "podscribe.yaml").write_text(
+        "llm:\n"
+        "  provider: openai\n"
+        "  model: deepseek-chat\n"
+        "  base_url: https://api.deepseek.com/v1\n"
+        "  prompt_template: '{{transcript}}'\n"
+        "god:\n"
+        "  model: some-other-model\n"
+    )
+    from podscribe.providers.openai_compat import OpenAIProvider
+    session = GodSession()  # model resolved from god.model
+    assert session.model == "some-other-model"
+    assert isinstance(session.provider, OpenAIProvider)
+    assert session.provider.base_url == "https://api.deepseek.com/v1"
+    assert session.provider.model == "some-other-model"
+
+
 # ── agent_tools: list_pods ────────────────────────────────────────────────────
 
 def test_list_pods_empty(tmp_path, monkeypatch):

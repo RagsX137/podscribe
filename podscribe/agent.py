@@ -429,7 +429,10 @@ class GodSession:
         from .providers.registry import build_provider
         from .config import load_project_config
         cfg = load_project_config()
-        llm_cfg = dict((cfg.get("god") or {}) or (cfg.get("llm") or {}))
+        # Start from the shared llm config and overlay god-specific keys, so a
+        # bare `god.model` inherits the project provider/base_url/api_key_env
+        # instead of silently reverting to localhost Ollama.
+        llm_cfg = {**(cfg.get("llm") or {}), **(cfg.get("god") or {})}
         llm_cfg["model"] = resolved
         self.provider = build_provider(llm_cfg, model=resolved)
         self.tool_defs = _build_tool_defs()

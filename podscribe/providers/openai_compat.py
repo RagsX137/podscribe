@@ -79,14 +79,16 @@ class OpenAIProvider:
         on_stats: Callable[[dict], None] = lambda d: None,
         on_retry: Callable[[int, str], None] = lambda a, e: None,
     ) -> Optional[str]:
+        # No on_stats: OpenAI-style streaming returns no token-usage numbers,
+        # so firing it would emit a misleading all-zero metrics line (and, on
+        # failure, a spurious "done" line before the error). Ollama fires
+        # on_stats only on the success/done chunk; matched here by staying silent.
         messages = [{"role": "user", "content": prompt}]
-        result = stream_with_retry(
+        return stream_with_retry(
             lambda: self._post_chat(messages, None),
             lambda r: self._consume(r, on_token, lambda m: None),
             max_retries=max_retries, on_retry=on_retry,
         )
-        on_stats({})
-        return result
 
     def chat(
         self, messages: list, tools: Optional[list] = None, *, max_retries: int = 3,
