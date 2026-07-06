@@ -181,8 +181,8 @@ def test_report_stage_prints_summary_and_respects_invariant(monkeypatch, tmp_pat
     base.mkdir(parents=True, exist_ok=True)
     (base / "public__m1__qwen3.6_27b__run0.json").write_text(json.dumps({"suite": "public", "meeting": "m1", "model": "qwen3.6_27b", "run": 0, "response_text": "a", "response_len": 1}))
     (base / "public__m1__qwen3.6_14b__run0.json").write_text(json.dumps({"suite": "public", "meeting": "m1", "model": "qwen3.6_14b", "run": 0, "response_text": "b", "response_len": 1}))
-    (base / "public__m1__qwen3.6_14b__vs__qwen3.6_27b__m1__run0__pos_a_first.verdict.json").write_text(json.dumps({"status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1}))
-    (base / "public__m1__qwen3.6_14b__vs__qwen3.6_27b__m1__run0__pos_b_first.verdict.json").write_text(json.dumps({"status": "failed", "raw": "x", "attempt": 2}))
+    (base / "public__m1__qwen3.6_14b__vs__qwen3.6_27b__m1__run0__pos_a_first.verdict.json").write_text(json.dumps({"suite": "public", "status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1}))
+    (base / "public__m1__qwen3.6_14b__vs__qwen3.6_27b__m1__run0__pos_b_first.verdict.json").write_text(json.dumps({"suite": "public", "status": "failed", "raw": "x", "attempt": 2}))
     rc = cmd_report(base=base, suite="public")
     assert rc == 0
     captured = capsys.readouterr()
@@ -282,7 +282,7 @@ def test_report_cost_line_is_free_for_local_backend(monkeypatch, tmp_path, capsy
     base = Path("benchmarks/eval_data")
     base.mkdir(parents=True, exist_ok=True)
     (base / "v_a.verdict.json").write_text(json.dumps({
-        "status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1,
+        "suite": "private", "status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1,
         "backend": "local", "challenger": "qwen3.6:14b", "meeting": "m1", "position": "a_first",
     }))
     rc = cmd_report(base=base, suite="private")
@@ -298,7 +298,7 @@ def test_report_cost_line_uses_sonnet_for_claude_backend(monkeypatch, tmp_path, 
     base = Path("benchmarks/eval_data")
     base.mkdir(parents=True, exist_ok=True)
     (base / "v_a.verdict.json").write_text(json.dumps({
-        "status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1,
+        "suite": "public", "status": "judged", "verdict": {"overall": "a"}, "raw": "", "attempt": 1,
         "backend": "claude", "challenger": "qwen3.6:14b", "meeting": "m1", "position": "a_first",
     }))
     rc = cmd_report(base=base, suite="public")
@@ -317,7 +317,7 @@ def test_human_judge_agreement_uses_stored_fields_not_listing_order(monkeypatch,
     base.mkdir(parents=True, exist_ok=True)
     for pos, overall in (("a_first", "a"), ("b_first", "b")):
         (base / f"v_{pos}.verdict.json").write_text(json.dumps({
-            "status": "judged", "verdict": {"overall": overall},
+            "suite": "public", "status": "judged", "verdict": {"overall": overall},
             "position": pos, "challenger": "qwen3.6:14b", "meeting": "m1",
         }))
     ratings = base / "ratings.json"

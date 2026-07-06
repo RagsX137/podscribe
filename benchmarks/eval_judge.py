@@ -35,10 +35,8 @@ def anonymize_pair(pair: dict) -> dict:
                 tokens.add(part)
         for run in re.findall(r"[A-Za-z]{3,}", model):
             tokens.add(run)
-        for run in re.findall(r"[0-9]{2,}", model):
-            tokens.add(run)
         out = text
-        for tok in tokens:
+        for tok in sorted(tokens, key=len, reverse=True):
             out = re.sub(rf"\b{re.escape(tok)}\b", "[MODEL]", out, flags=re.IGNORECASE)
         return out
 

@@ -7,7 +7,6 @@ check, judge, rate, report are pure aggregation over cached outputs.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Optional
@@ -276,6 +275,8 @@ def _human_judge_agreement(base: Path, suite: str, champion_tag: str, challenger
     judge_votes: dict = {}
     for vpath in base.glob("*.verdict.json"):
         v = load_artifact(vpath)
+        if v.get("suite") != suite:
+            continue
         if v.get("status") != "judged":
             continue
         chal = v.get("challenger") or _challenger_from_verdict(vpath, v)
@@ -343,6 +344,8 @@ def cmd_report(*, base: Path, suite: str, ratings_path: Optional[Path] = None) -
     backends_seen: set = set()
     for vpath in base.glob("*.verdict.json"):
         v = load_artifact(vpath)
+        if v.get("suite") != suite:
+            continue
         attempted += 1
         backends_seen.add(v.get("backend"))
         if v.get("status") != "judged":
@@ -411,7 +414,7 @@ def main() -> int:
     j = sub.add_parser("judge", help="Layer-2 pairwise judging over cached outputs.")
     j.add_argument("--backend", choices=["claude", "local"], default="claude")
     j.add_argument("--model", default=None, help="Judge model; default claude-sonnet-5 for Claude, manifest champion for local.")
-    j.add_argument("--judge-runs", default="run0", help="run0 or all")
+    j.add_argument("--judge-runs", choices=["run0", "all"], default="run0", help="run0 or all")
     j.add_argument("--suite", choices=["public", "private"], default="public")
     r = sub.add_parser("rate", help="Layer-3 blind A/B REPL.")
     r.add_argument("--suite", choices=["public", "private"], default="public")
