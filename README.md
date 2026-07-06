@@ -93,20 +93,23 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the module-level diagram.
 
 ## 🚀 Quick start
 
-Requires Python 3.10+, Xcode Command Line Tools, and a working microphone.
+Requires Python 3.10+ and a working microphone. The ASR engine is a
+platform-specific extra, so pick the one for your hardware:
 
 ```bash
-xcode-select --install          # once, for the webrtcvad C extension
+xcode-select --install          # macOS only, for the webrtcvad C extension
 
 git clone <repo>
 cd podscribe
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+pip install -e '.[mlx]'         # Apple Silicon  — Whisper via mlx-whisper
+pip install -e '.[cuda]'        # NVIDIA / CUDA  — Whisper via faster-whisper (verified on RTX 5090)
 
 cp podscribe.yaml.example podscribe.yaml
 cp leadership_team.yaml.example leadership_team.yaml
 # edit leadership_team.yaml — add your team's names
-# edit podscribe.yaml — set your Ollama model
+# edit podscribe.yaml — set your LLM model
 ```
 
 Then:

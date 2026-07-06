@@ -29,6 +29,53 @@ import yaml
 # operating on one normalized (reference, hypothesis) pair.
 METRIC_NAMES: tuple[str, ...] = ("wer", "cer", "mer", "wil", "wip")
 
+
+def peak_rss_mb() -> float:
+    """Peak resident set size of this process, in MB. Cross-platform.
+
+    Uses resource.getrusage on POSIX (ru_maxrss is bytes on macOS, KB on
+    Linux) and the Win32 GetProcessMemoryInfo.PeakWorkingSetSize via ctypes
+    on Windows, so the benchmark reports memory on every platform.
+    """
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class _PMC(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.windll.kernel32
+        psapi = ctypes.windll.psapi
+        # Type the handle as pointer-sized; the GetCurrentProcess pseudo-handle
+        # (-1) is otherwise truncated to 32 bits and the call fails.
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.GetProcessMemoryInfo.argtypes = [
+            wintypes.HANDLE, ctypes.POINTER(_PMC), wintypes.DWORD
+        ]
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+        counters = _PMC()
+        counters.cb = ctypes.sizeof(_PMC)
+        if not psapi.GetProcessMemoryInfo(
+            kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb
+        ):
+            return 0.0
+        return counters.PeakWorkingSetSize / (1024.0 * 1024.0)
+
+    import resource
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return rss / (1024.0 * 1024.0) if sys.platform == "darwin" else rss / 1024.0
+
 # --- manifest --------------------------------------------------------------- #
 
 def load_manifest(asr_dir: Path) -> list[dict]:
@@ -209,7 +256,6 @@ def _run_child(model: str, clip_names: Optional[list[str]], asr_dir: Path,
     Exits 0 on success; on error prints {"error": ...} and exits 1.
     """
     try:
-        import resource
         import time
 
         import numpy as np
@@ -245,9 +291,6 @@ def _run_child(model: str, clip_names: Optional[list[str]], asr_dir: Path,
                 wall_s = time.perf_counter() - t0
                 hypothesis = " ".join(s["text"] for s in segments).strip()
                 metrics = normalize_pair_and_compute(reference, hypothesis)
-                # macOS ru_maxrss is in bytes; Linux is in KB. Convert to MB.
-                _rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-                peak_rss_mb = _rss / (1024.0 * 1024.0) if sys.platform == "darwin" else _rss / 1024.0
                 record = {
                     "model": model,
                     "clip": clip["name"],
@@ -256,7 +299,7 @@ def _run_child(model: str, clip_names: Optional[list[str]], asr_dir: Path,
                     "wall_s": wall_s,
                     "rtf": wall_s / duration if duration else 0.0,
                     "hypothesis": hypothesis,
-                    "peak_rss_mb": peak_rss_mb,
+                    "peak_rss_mb": peak_rss_mb(),
                     **metrics,
                 }
                 sys.stdout.write(_json.dumps(record) + "\n")
@@ -335,6 +378,16 @@ def _results_timestamp() -> str:
 
 def main(argv: Optional[list[str]] = None) -> int:
     import argparse
+
+    # The rendered table uses ↓/↑ arrows; force UTF-8 so the write doesn't blow
+    # up on Windows consoles that default to cp1252.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8")
+            except (ValueError, OSError):
+                pass
 
     # repo root = parent of benchmarks/
     repo_root = Path(__file__).resolve().parent.parent

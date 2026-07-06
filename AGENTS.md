@@ -153,13 +153,23 @@ pytest tests/ -k "not transcriber" -v        # skip the smoke test (offline)
 
 ## Dependencies
 
-Install order matters on macOS:
+The ASR engine is a platform-specific extra (not a core dependency), so the
+package installs on any OS; pick the backend for your hardware:
 ```
-xcode-select --install        # required for webrtcvad C extension
-pip install -e .              # installs all deps including pytest under [dev]
+xcode-select --install        # macOS only: required for webrtcvad C extension
+pip install -e '.[mlx]'       # Apple Silicon — Whisper via mlx-whisper
+pip install -e '.[cuda]'      # NVIDIA/CUDA  — Whisper via faster-whisper (CTranslate2)
+pip install -e '.[dev]'       # pytest + jiwer (add to any of the above)
 ```
 
-`mlx-whisper` uses Apple MLX (no separate install). Model downloads cached under `~/.cache/huggingface/`.
+Model downloads cached under `~/.cache/huggingface/`. Notes:
+- On **Windows**, `.[cuda]` also pulls the `nvidia-cublas-cu12` / `nvidia-cudnn-cu12`
+  runtime wheels; CTranslate2 does not bundle the CUDA 12 runtime there, and
+  `whisper_faster._add_cuda_dll_dirs()` adds those wheels' DLLs to the loader
+  search path at model-load time. Verified on an RTX 5090 (Blackwell sm_120).
+- If CUDA can't initialize, `whisper-faster` emits a `RuntimeWarning` and falls
+  back to CPU int8 (slower) rather than failing — check for that warning if GPU
+  transcription seems slow.
 
 ## Gotchas
 

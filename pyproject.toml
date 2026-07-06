@@ -13,8 +13,12 @@ license = {text = "MIT"}
 
 # NOTE: `ingest --asr` and the media benchmarks require ffmpeg on PATH
 # (`brew install ffmpeg`). Not a pip dependency.
+#
+# The ASR engine is a platform-specific extra, not a core dependency, so the
+# package installs on any OS. Install the backend for your hardware:
+#   Apple Silicon:  pip install -e '.[mlx]'      (Whisper via mlx-whisper)
+#   NVIDIA/CUDA:    pip install -e '.[cuda]'      (Whisper via faster-whisper)
 dependencies = [
-    "mlx-whisper>=0.4.0",
     "webrtcvad>=2.0.10",
     "sounddevice>=0.4.6",
     "rich>=13.7",
@@ -31,7 +35,15 @@ diarize = [
     "torch>=2.3",
     "torchaudio>=2.3",
 ]
-cuda = ["faster-whisper>=1.0"]
+mlx = ["mlx-whisper>=0.4.0"]
+# CTranslate2 (via faster-whisper) needs the CUDA 12 runtime. On Windows it is
+# not bundled, so pull the cublas/cudnn wheels; the backend adds them to the
+# DLL search path at load time. Verified on an RTX 5090 (Blackwell sm_120).
+cuda = [
+    "faster-whisper>=1.0",
+    "nvidia-cublas-cu12>=12.3; platform_system == 'Windows'",
+    "nvidia-cudnn-cu12>=9.0; platform_system == 'Windows'",
+]
 parakeet-mlx = ["parakeet-mlx>=0.1"]
 parakeet-cuda = ["nemo_toolkit[asr]>=2.0"]
 

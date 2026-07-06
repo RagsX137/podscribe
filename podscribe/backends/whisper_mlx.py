@@ -20,7 +20,7 @@ class WhisperMLXBackend:
         except ImportError as e:
             raise ImportError(
                 "mlx-whisper is required for the whisper-mlx backend. "
-                "Install with: pip install mlx-whisper"
+                "Install with: pip install -e '.[mlx]'"
             ) from e
 
         audio = prepare_audio(audio)

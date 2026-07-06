@@ -10,10 +10,13 @@ import readchar
 import requests
 import select
 import sys
-import termios
 import threading
-import tty
 from io import StringIO
+
+try:
+    import termios  # POSIX terminal control; absent on Windows.
+except ImportError:  # pragma: no cover - Windows
+    termios = None
 from rich.columns import Columns
 from rich.console import Console, Group
 from rich.containers import Lines
@@ -618,7 +621,14 @@ def _listen_for_stop(
     SIGINT to run_record_session's signal handler.
     Watches *wake_fd* (read-end of a pipe) so the main thread can
     unblock select() and cause a clean exit.
+
+    On Windows (no termios, and select() only accepts sockets) this
+    delegates to a msvcrt polling loop; the caller still uses stop_event
+    to signal exit.
     """
+    if termios is None:  # Windows
+        _listen_for_stop_windows(capture, stop_event)
+        return
     try:
         fd = sys.stdin.fileno()
     except (OSError, AttributeError):
@@ -649,6 +659,30 @@ def _listen_for_stop(
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_term)
             except (ValueError, OSError, termios.error):
                 pass
+
+
+def _listen_for_stop_windows(capture, stop_event: threading.Event) -> None:
+    """Windows stop listener: poll the console for 's'/'S' via msvcrt.
+
+    Windows has no termios and select() only works on sockets, so we poll
+    msvcrt.kbhit() until the caller sets stop_event. Ctrl+C still delivers
+    the usual KeyboardInterrupt to the main thread as a fallback.
+    """
+    try:
+        import msvcrt
+    except ImportError:  # pragma: no cover - non-Windows without termios
+        stop_event.wait()
+        return
+    while not stop_event.is_set():
+        if msvcrt.kbhit():
+            try:
+                ch = msvcrt.getwch()
+            except Exception:
+                ch = ""
+            if ch in ("s", "S"):
+                capture.stop()
+                return
+        stop_event.wait(0.05)
 
 
 # ---------------------------------------------------------------------------

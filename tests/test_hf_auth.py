@@ -1,5 +1,6 @@
 """Tests for HF token resolution. Stdlib only; no network, no pyannote."""
 import getpass
+import sys
 
 import pytest
 
@@ -37,7 +38,9 @@ def test_save_hf_token_mode_0600_and_parent_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(hf_auth, "HF_TOKEN_PATH", token_path)
     hf_auth.save_hf_token("secret-token")
     assert token_path.read_text() == "secret-token"
-    assert (token_path.stat().st_mode & 0o077) == 0
+    if sys.platform != "win32":
+        # POSIX file-mode bits are meaningless on Windows.
+        assert (token_path.stat().st_mode & 0o077) == 0
 
 
 def test_prompt_saves_and_returns_on_success(tmp_path, monkeypatch):

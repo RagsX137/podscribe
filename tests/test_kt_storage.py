@@ -26,7 +26,7 @@ def test_kt_session_round_trip(tmp_path, monkeypatch):
     when = datetime(2026, 7, 3, 9, 0, 0)
     m = start_kt_session(pod, when=when)
     assert m.type == "kt"
-    assert "kt/transcripts" in str(m.transcript_path)
+    assert "kt/transcripts" in m.transcript_path.as_posix()
 
     write_kt_transcript(m, [(1.0, "hello"), (70.5, "world")])
     finalize_kt_session(
