@@ -10,10 +10,13 @@ import readchar
 import requests
 import select
 import sys
-import termios
 import threading
-import tty
 from io import StringIO
+
+try:
+    import termios  # POSIX terminal control; absent on Windows.
+except ImportError:  # pragma: no cover - Windows
+    termios = None
 from rich.columns import Columns
 from rich.console import Console, Group
 from rich.containers import Lines
@@ -26,7 +29,7 @@ from rich.text import Text
 
 from .cli import _resolve_meeting
 from .config import load_last_pod, load_project_config, save_last_pod
-from .llm import build_enhance_prompt, enhance_transcript, ollama_model_info
+from .llm import build_enhance_prompt, enhance_transcript
 from .models import Pod, fmt_date
 from .storage import (
     list_meetings,
@@ -44,8 +47,6 @@ C_LILAC = "color(183)"
 C_MINT  = "color(152)"
 C_DIM   = "color(244)"
 C_RED   = "color(203)"
-
-OLLAMA_URL = "http://localhost:11434"
 
 # readchar key codes
 KEY_UP    = "\x1b[A"
@@ -149,9 +150,9 @@ def render_header(pod: Pod, ollama_ok: bool) -> Text:
     # Right side — pad to fill terminal, then append right-aligned block
     right_parts = []
     if ollama_ok:
-        right_parts.append(f"[{C_MINT}]● ollama online[/{C_MINT}]")
+        right_parts.append(f"[{C_MINT}]● LLM online[/{C_MINT}]")
     else:
-        right_parts.append(f"[{C_DIM}]○ ollama offline[/{C_DIM}]")
+        right_parts.append(f"[{C_DIM}]○ LLM offline[/{C_DIM}]")
     right_parts += [
         f"  [reverse {C_DIM}] ? [/reverse {C_DIM}]",
         f"  [reverse {C_LILAC}] : [/reverse {C_LILAC}]",
@@ -430,12 +431,32 @@ def read_key_timeout(timeout: float) -> Optional[str]:
         return read_key()
 
 
-def probe_ollama() -> bool:
-    """Return True if Ollama is reachable. 1s timeout. Wrapper for tests."""
+def _provider_for_pod(pod: Pod):
+    """Build the LLM provider for a pod's effective config, or None if unset.
+
+    Best-effort: returns None when no model is configured or the config is
+    invalid (e.g. openai provider with an unset api-key env var).
+    """
+    cfg = pod.llm or load_project_config().get("llm")
+    if not cfg or not cfg.get("model"):
+        return None
     try:
-        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=1)
-        return r.ok
-    except requests.RequestException:
+        from .providers.registry import build_provider
+        return build_provider(cfg, model=cfg.get("model"))
+    except ValueError:
+        return None
+
+
+def probe_provider(provider) -> bool:
+    """Return True if the given LLM provider is reachable. Wrapper for tests.
+
+    A None provider (unconfigured or misconfigured) reads as offline.
+    """
+    if provider is None:
+        return False
+    try:
+        return provider.reachable()
+    except Exception:
         return False
 
 
@@ -618,7 +639,14 @@ def _listen_for_stop(
     SIGINT to run_record_session's signal handler.
     Watches *wake_fd* (read-end of a pipe) so the main thread can
     unblock select() and cause a clean exit.
+
+    On Windows (no termios, and select() only accepts sockets) this
+    delegates to a msvcrt polling loop; the caller still uses stop_event
+    to signal exit.
     """
+    if termios is None:  # Windows
+        _listen_for_stop_windows(capture, stop_event)
+        return
     try:
         fd = sys.stdin.fileno()
     except (OSError, AttributeError):
@@ -649,6 +677,30 @@ def _listen_for_stop(
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_term)
             except (ValueError, OSError, termios.error):
                 pass
+
+
+def _listen_for_stop_windows(capture, stop_event: threading.Event) -> None:
+    """Windows stop listener: poll the console for 's'/'S' via msvcrt.
+
+    Windows has no termios and select() only works on sockets, so we poll
+    msvcrt.kbhit() until the caller sets stop_event. Ctrl+C still delivers
+    the usual KeyboardInterrupt to the main thread as a fallback.
+    """
+    try:
+        import msvcrt
+    except ImportError:  # pragma: no cover - non-Windows without termios
+        stop_event.wait()
+        return
+    while not stop_event.is_set():
+        if msvcrt.kbhit():
+            try:
+                ch = msvcrt.getwch()
+            except Exception:
+                ch = ""
+            if ch in ("s", "S"):
+                capture.stop()
+                return
+        stop_event.wait(0.05)
 
 
 # ---------------------------------------------------------------------------
@@ -702,7 +754,10 @@ def record_view(pod: Pod, args) -> int:
         if len(waveform) > WAVEFORM_WIDTH:
             del waveform[: len(waveform) - WAVEFORM_WIDTH]
 
-    transcriber = Transcriber(model=getattr(args, "model", "large-v3-turbo"))
+    transcriber = Transcriber(
+        model=getattr(args, "model", "large-v3-turbo"),
+        backend=getattr(args, "backend", "auto"),
+    )
     capture = AudioCapture(
         vad_aggressiveness=getattr(args, "vad_aggressiveness", 2),
         device=getattr(args, "device", None),
@@ -866,7 +921,13 @@ def enhance_view(pod: Pod, meeting) -> int:
     tokens: list[str] = ["(waiting for first token)"]
     footer = {"tokens": 0, "tps": 0.0, "status": "streaming"}
 
-    info = ollama_model_info(llm_config["model"])
+    from .providers.registry import build_provider
+    try:
+        provider = build_provider(llm_config)
+    except ValueError as e:
+        console.print(Panel(str(e), title="[red]enhance[/red]", border_style="red"))
+        return 1
+    info = provider.model_info()
     num_ctx = (info.get("model_info") or {}).get("llama.context_length", "?")
 
     def _on_token(t: str) -> None:
@@ -909,7 +970,8 @@ def enhance_view(pod: Pod, meeting) -> int:
 
         try:
             result = enhance_transcript(
-                llm_config["model"], prompt,
+                provider.model, prompt,
+                provider=provider,
                 on_token=_on_token_live, on_stats=_on_stats, on_retry=_on_retry,
             )
         except KeyboardInterrupt:
@@ -919,10 +981,14 @@ def enhance_view(pod: Pod, meeting) -> int:
             return 130
         if result is None:
             console.print(Panel(
-                "Failed to reach Ollama. Is it running? Start with: ollama serve",
+                "Failed to reach LLM provider. Is the server running and the base URL correct?",
                 title="[red]enhance[/red]", border_style="red",
             ))
             return 1
+        if footer["status"] == "streaming":
+            # Providers that don't emit token-usage stats (e.g. OpenAI-compatible)
+            # never fire on_stats, so flip the footer off "streaming" on success.
+            footer["status"] = f"done | {footer['tokens']} tokens streamed"
         _tick()
         summary_dir.mkdir(parents=True, exist_ok=True)
         enhanced_path.write_text(result)
@@ -989,7 +1055,7 @@ def launch() -> int:
         main_idx=0,
         focused_pane="main",
     )
-    ollama_ok = probe_ollama()
+    ollama_ok = probe_provider(_provider_for_pod(pods[state.sidebar_idx]))
 
     def _current_pod() -> Pod:
         return pods[state.sidebar_idx]
@@ -1008,7 +1074,9 @@ def launch() -> int:
             llm_ctx: Optional[str] = None
             if llm_model:
                 try:
-                    info = ollama_model_info(llm_model)
+                    from .providers.registry import build_provider
+                    provider = build_provider(llm_cfg, model=llm_model)
+                    info = provider.model_info()
                     llm_ctx = str((info.get("model_info") or {}).get("llama.context_length", "?"))
                 except Exception:
                     llm_ctx = "?"
@@ -1171,10 +1239,10 @@ def god_view(model: Optional[str] = None) -> int:
         console.print(f"[red]Failed to initialize God session: {e}[/red]")
         return 1
 
-    # Quick Ollama check
-    if not probe_ollama():
+    # Quick provider check (against the session's configured provider)
+    if not probe_provider(session.provider):
         console.print(Panel(
-            "Ollama not reachable. Start with: ollama serve",
+            "LLM provider not reachable. Check the base URL and that the server is running.",
             title="[red]Error[/red]", border_style="red",
         ))
         return 1

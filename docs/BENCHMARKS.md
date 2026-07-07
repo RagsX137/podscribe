@@ -49,6 +49,50 @@ under a gitignored path (`pods/…/benchmark_data/`); only the aggregate metrics
 above are committed. To reproduce with your own media + reference, see
 [Adding a real-meeting clip](#adding-a-real-meeting-clip).
 
+### Whisper vs Parakeet (cross-family, 2026-07-06)
+
+A separate run on the **same** 22-minute meeting, adding NVIDIA's Parakeet
+family for a cross-architecture comparison. All four rows use the same audio,
+the same reference, and the same instrumentation (jiwer normalizer for accuracy;
+`getrusage(RUSAGE_SELF).ru_maxrss` + `perf_counter` for RSS/RTF), so compare rows
+*within this table* (not against the 2026-07-02 numbers above — different run,
+warmer/colder caches).
+
+**Read the Parakeet row with one caveat: it is not a clean harness match.** The
+whisper rows ran through the normal `Transcriber` path; `parakeet-mlx` was decoded
+via a separate chunked side-path (120s chunks, 15s overlap) because the backend
+OOMs on the full clip (**#10**, see below). Its low memory is therefore partly a
+*consequence* of chunking rather than a like-for-like measurement, and chunk seams
+can nudge its WER. Treat the **accuracy ranking as sound** and Parakeet's
+**RTF/RSS as indicative, not harness-matched** — a true apples-to-apples number
+needs the #10 chunking fix so it can run through `bench_meeting.py` unassisted.
+
+| Model | Params | Mean RTF (↓) | Peak RSS (MB) | Mean WER (↓) | Mean CER (↓) | Mean MER (↓) | Mean WIL (↓) | Mean WIP (↑) |
+|---|---|---|---|---|---|---|---|---|
+| `base` | ~74 M | 0.006 | 727 | 0.139 | 0.091 | 0.132 | 0.176 | 0.824 |
+| `large-v3-turbo` | ~809 M | 0.026 | 2035 | **0.107** | **0.076** | **0.103** | **0.127** | **0.873** |
+| `large` | ~1550 M | 0.121 | 3721 | 0.189 | 0.135 | 0.179 | 0.225 | 0.775 |
+| `parakeet-mlx` (chunked) | ~600 M | 0.013 | 1197 | 0.118 | 0.086 | 0.114 | 0.140 | 0.860 |
+
+`large-v3-turbo` remains the accuracy leader. **`parakeet-mlx`** is a strong
+second — within ~1 WER point of turbo at roughly **half the memory** and **2×
+the decode speed** — making it the best accuracy-per-resource option on Apple
+Silicon. Full `large` is again the worst trade here (slowest, heaviest, *and*
+least accurate — it hallucinates on the quiet/overlapping stretches).
+
+The `parakeet-nemo` (CUDA) backend was **not runnable** on this Apple Silicon
+host; it decodes the same `parakeet-tdt-0.6b-v2` weights as `parakeet-mlx`, so
+the mlx row is the fair cross-platform proxy for its accuracy.
+
+> **Parakeet long-audio caveat (`parakeet-mlx` chunking).** The `parakeet-mlx`
+> backend currently transcribes a clip in a single pass with no internal
+> chunking, and a full-length real meeting **OOMs the Metal allocator**
+> (`kIOGPUCommandBufferCallbackErrorOutOfMemory`) — the raw `bench_meeting.py`
+> run crashed on `parakeet` for exactly this reason. The row above was produced
+> with chunked decode (`transcribe(..., chunk_duration=120, overlap_duration=15)`).
+> Wiring that chunking into `podscribe/backends/parakeet_mlx.py` so long
+> recordings don't OOM is a tracked backend follow-up.
+
 ## Synthetic-fixture results
 
 | Model | Params | Mean RTF (↓) | Peak RSS (MB) | Mean WER (↓) | Mean CER (↓) | Mean MER (↓) | Mean WIL (↓) | Mean WIP (↑) |

@@ -13,8 +13,9 @@ from typing import Optional
 from .config import get_effective_glossary, load_consolidate_prompt, load_god_model, load_leadership_glossary, load_preserve_speakers, load_project_config, save_consolidate_prompt, save_god_model, save_project_config
 from rich.console import Console
 from .glossary import add_entry, format_glossary_prompt, remove_entry
-from .llm import ANTI_HALLUCINATION_PREAMBLE, build_consolidate_prompt, build_enhance_prompt, chat_stream, enhance_transcript, extract_structured_fields, ollama_model_info
+from .llm import ANTI_HALLUCINATION_PREAMBLE, build_consolidate_prompt, build_enhance_prompt, chat_stream, enhance_transcript, extract_structured_fields
 from .models import Segment, fmt_date
+from .providers.registry import build_provider
 from .storage import (
     _read_pod_log_rows,
     append_log_row,
@@ -67,7 +68,7 @@ def _resolve_meeting(meetings, prefix, pod_name):
 
 
 def _run_enhance(
-    prompt: str, model: str,
+    prompt: str, llm_config: dict,
 ) -> tuple[Optional[str], Optional[str]]:
     """Run LLM enhance. Returns (text, None) on success, (None, error) on failure.
 
@@ -75,9 +76,13 @@ def _run_enhance(
     final '✓ done in Ns | prompt X + response Y tokens @ Z tok/s' metrics line
     (both to stderr). The core just streams and fires on_token/on_stats.
     """
-    info = ollama_model_info(model)
+    try:
+        provider = build_provider(llm_config)
+    except ValueError as e:
+        return None, str(e)
+    info = provider.model_info()
     num_ctx = (info.get("model_info") or {}).get("llama.context_length", "?")
-    sys.stderr.write(f"Calling Model:{model}...\n")
+    sys.stderr.write(f"Calling Model:{provider.model}...\n")
     sys.stderr.write(f"Context window size : {num_ctx} tokens\n")
     sys.stderr.flush()
 
@@ -93,9 +98,9 @@ def _run_enhance(
         )
         sys.stderr.flush()
 
-    result = enhance_transcript(model, prompt, on_stats=_on_stats)
+    result = enhance_transcript(provider.model, prompt, provider=provider, on_stats=_on_stats)
     if result is None:
-        return None, "Failed to reach Ollama. Is it running? Start with: ollama serve"
+        return None, "LLM request failed. Check the provider/base_url and that the server is reachable."
     return result, None
 
 
@@ -245,7 +250,7 @@ def cmd_record(args) -> int:
     effective_glossary = get_effective_glossary(pod)
     glossary_prompt = format_glossary_prompt(effective_glossary) if effective_glossary else None
     meeting = start_meeting(pod, meeting_type=meeting_type)
-    transcriber = Transcriber(model=args.model)
+    transcriber = Transcriber(model=args.model, backend=args.backend)
     capture = AudioCapture(
         vad_aggressiveness=args.vad_aggressiveness,
         device=args.device,
@@ -321,7 +326,7 @@ def cmd_ingest(args) -> int:
         source = "asr"
         model = args.model
         try:
-            segments, duration_sec = _ingest_via_asr(video, model)
+            segments, duration_sec = _ingest_via_asr(video, model, args.backend)
         except (RuntimeError, ImportError) as e:
             print(str(e), file=sys.stderr)
             return 1
@@ -356,7 +361,7 @@ def cmd_ingest(args) -> int:
     return 0
 
 
-def _ingest_via_asr(video, model):
+def _ingest_via_asr(video, model, backend="auto"):
     """Decode `video` and transcribe with mlx-whisper. Returns (segments, duration_sec)."""
     import os
     import tempfile
@@ -378,7 +383,7 @@ def _ingest_via_asr(video, model):
             tmp.unlink()
         except OSError:
             pass
-    raw = Transcriber(model=model).transcribe(audio)
+    raw = Transcriber(model=model, backend=backend).transcribe(audio)
     segments = [(s["start"], s["text"]) for s in raw]
     return segments, duration_sec
 
@@ -397,6 +402,12 @@ def cmd_ask(args) -> int:
         print("LLM not configured. Set `podscribe config llm set <model> '<template>'`.", file=sys.stderr)
         return 1
 
+    try:
+        provider = build_provider(llm_config)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
     sessions = list_kt_sessions(pod)
     if not sessions:
         print(f"No KT sessions for pod '{args.pod}'. Run `ingest` first.", file=sys.stderr)
@@ -412,20 +423,21 @@ def cmd_ask(args) -> int:
         + "\n\nAnswer ONLY from the KT transcript below. If it is not covered, "
         "say so.\n\nKT transcript:\n" + transcript
     )
-    model = llm_config["model"]
+    model = provider.model
 
     def ask_once(question: str) -> bool:
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": question},
         ]
-        result = chat_stream(model, messages, on_token=lambda t: sys.stdout.write(t))
+        result = chat_stream(model, messages, provider=provider,
+                             on_token=lambda t: sys.stdout.write(t))
         sys.stdout.write("\n")
         sys.stdout.flush()
         if not result:
             print(
                 f"Failed to get a response from model '{model}'. "
-                f"Check that Ollama is running and the model is pulled.",
+                f"Check the provider/base_url and that the server is reachable.",
                 file=sys.stderr,
             )
             return False
@@ -715,10 +727,15 @@ def cmd_enhance(args) -> int:
     print(f"Enhancing transcript for {pod.name}/{date_str}/{meeting.id}...")
     print(f"Enhanced summary will be saved to {pod.name}/{date_str}/{meeting.id}...")
     print(f"  Using Large Language Model: {llm_config['model']}")
-    print(f"  Ollama URL: http://localhost:11434")
+    try:
+        provider = build_provider(llm_config, model=llm_config["model"])
+        llm_url = getattr(provider, "base_url", "n/a")
+    except Exception:
+        llm_url = "n/a"
+    print(f"  LLM URL: {llm_url}")
     print()
 
-    text, err = _run_enhance(prompt, llm_config["model"])
+    text, err = _run_enhance(prompt, llm_config)
     if err is not None:
         print(err, file=sys.stderr)
         return 1
@@ -760,7 +777,7 @@ def _enhance_kt(pod, session_prefix) -> int:
     preserve_speakers = load_preserve_speakers(pod)
     text, err = summarize_transcript(
         transcript,
-        model=llm_config["model"],
+        llm_config=llm_config,
         prompt_template=load_kt_prompt(),
         glossary=effective_glossary,
         preserve_speakers=preserve_speakers,
@@ -785,17 +802,31 @@ def cmd_config_llm_show(args) -> int:
     if not cfg:
         print("No project-level LLM config set.")
         return 0
+    print(f"provider: {cfg.get('provider', 'ollama')}")
     print(f"model: {cfg.get('model', '(none)')}")
+    if cfg.get("base_url"):
+        print(f"base_url: {cfg['base_url']}")
+    if cfg.get("api_key_env"):
+        print(f"api_key_env: {cfg['api_key_env']}")
     print(f"prompt_template: {cfg.get('prompt_template', '(none)')}")
     return 0
 
 
 def cmd_config_llm_set(args) -> int:
-    """Set project-level LLM config."""
+    """Set project-level LLM config (provider/base_url/api_key_env optional)."""
     cfg = load_project_config()
-    cfg["llm"] = {"model": args.model, "prompt_template": args.prompt_template}
+    llm: dict = {
+        "provider": args.provider or "ollama",
+        "model": args.model,
+        "prompt_template": args.prompt_template,
+    }
+    if args.base_url:
+        llm["base_url"] = args.base_url
+    if args.api_key_env:
+        llm["api_key_env"] = args.api_key_env
+    cfg["llm"] = llm
     save_project_config(cfg)
-    print(f"Project LLM config set: {args.model}")
+    print(f"Project LLM config set: {args.provider or 'ollama'}:{args.model}")
     return 0
 
 
@@ -923,7 +954,11 @@ def cmd_god(args) -> int:
     """Agentic mode: LLM brain with tool access."""
     if args.prompt:
         from .agent import GodSession
-        session = GodSession(model=args.model)
+        try:
+            session = GodSession(model=args.model)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 1
         console = Console()
         full_text: list = []
 
@@ -952,7 +987,7 @@ def cmd_god(args) -> int:
         if not result:
             console.print(
                 f"[red]Failed to get response from model '{session.model}'. "
-                f"Check that Ollama is running and the model is pulled.[/red]"
+                f"Check the LLM provider is reachable and the model is available.[/red]"
             )
             return 1
         return 0
@@ -995,8 +1030,7 @@ def run_consolidate(
     if not llm_config or not llm_config.get("model"):
         print("LLM not configured for this pod. Set up LLM config first.", file=sys.stderr)
         return 1
-    model_name = llm_config["model"]
-    text, err = _run_enhance(prompt, model_name)
+    text, err = _run_enhance(prompt, llm_config)
     if err is not None:
         print(err, file=sys.stderr)
         return 1
@@ -1173,6 +1207,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_rec = sub.add_parser("record", help="Live record and transcribe a meeting.")
     p_rec.add_argument("pod", help="Pod name")
     p_rec.add_argument("--model", default="large-v3-turbo", help="Whisper model (default: large-v3-turbo)")
+    p_rec.add_argument(
+        "--backend",
+        default="auto",
+        choices=["auto", "whisper-mlx", "whisper-faster", "parakeet-mlx", "parakeet-nemo"],
+        help="ASR backend (default: auto — Apple Silicon→mlx, else faster-whisper/NeMo)",
+    )
     p_rec.add_argument("--vad-aggressiveness", type=int, default=2, choices=[0, 1, 2, 3], help="VAD strictness (0=loose, 3=strict; default 2)")
     p_rec.add_argument("--device", type=int, default=None, help="Input device index (default: system default)")
     p_rec.add_argument(
@@ -1201,6 +1241,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ing.add_argument("--transcript", default=None, help="Path to a .vtt/.srt (default: sibling next to the video)")
     p_ing.add_argument("--asr", action="store_true", help="Force local mlx-whisper ASR (default: use the .vtt/.srt if present)")
     p_ing.add_argument("--model", default="large-v3-turbo", help="Whisper model for --asr (default: large-v3-turbo)")
+    p_ing.add_argument(
+        "--backend",
+        default="auto",
+        choices=["auto", "whisper-mlx", "whisper-faster", "parakeet-mlx", "parakeet-nemo"],
+        help="ASR backend for --asr (default: auto)",
+    )
     p_ing.set_defaults(func=cmd_ingest)
 
     # ask (KT Q&A)
@@ -1350,6 +1396,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_llm_set = llm_sub.add_parser("set", help="Set project LLM config.")
     p_llm_set.add_argument("model", help="Ollama model name (e.g. qwen3.6)")
     p_llm_set.add_argument("prompt_template", help="Prompt template with {{transcript}} placeholder")
+    p_llm_set.add_argument("--provider", choices=["ollama", "openai"], default=None,
+                           help="LLM provider (default: ollama)")
+    p_llm_set.add_argument("--base-url", dest="base_url", default=None,
+                           help="Server base URL (e.g. https://api.deepseek.com/v1)")
+    p_llm_set.add_argument("--api-key-env", dest="api_key_env", default=None,
+                           help="Name of the env var holding the API key (never stored)")
     p_llm_set.set_defaults(func=cmd_config_llm_set)
 
     p_cfg_cons = cfg_sub.add_parser("consolidate", help="Manage consolidate prompt.")

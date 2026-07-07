@@ -88,6 +88,7 @@ in the meeting JSON gates `diarize`.
 - **Meeting ID: `YYYY-MM-DD-HHMMSS-<pod-name>`** (seconds = 6 digits, NOT 4)
 - `MEETING_TYPES` — full set: `1on1`, `skip-level`, `interview`, `standup`, `retro`, `planning`, `sprint-review`, `all-hands`, `team-sync`, `design-review`, `incident`, `post-mortem`, `brainstorm`, `customer`, `vendor`, `cross-team`, `other`; validated by `parse_meeting_type` (lowercased)
 - mlx-whisper model names: short names resolved by `transcriber.MODEL_MAP` are only `base`, `turbo`, `large-v3-turbo`; any other value (including full HF paths) passes through unchanged
+- `Transcriber` is a thin facade over pluggable ASR backends in `podscribe/backends/` (whisper-mlx default on Apple Silicon, whisper-faster on NVIDIA/CPU, parakeet-mlx / parakeet-nemo optional). `--backend auto` selects by `(model, platform)`. Deferred features live in `docs/ROADMAP.md`.
 - Glossary: list of `{"term": str, "category": str}` injected as Whisper `initial_prompt`
 - LLM config: `{"model": str, "prompt_template": str, "preserve_speakers"?: bool}`; templates support `{{glossary}}`, `{{transcript}}`, and `{{summary}}` placeholders
 
@@ -175,13 +176,23 @@ pytest tests/ -k "not transcriber" -v        # skip the smoke test (offline)
 
 ## Dependencies
 
-Install order matters on macOS:
+The ASR engine is a platform-specific extra (not a core dependency), so the
+package installs on any OS; pick the backend for your hardware:
 ```
-xcode-select --install        # required for webrtcvad C extension
-pip install -e .              # installs all deps including pytest under [dev]
+xcode-select --install        # macOS only: required for webrtcvad C extension
+pip install -e '.[mlx]'       # Apple Silicon — Whisper via mlx-whisper
+pip install -e '.[cuda]'      # NVIDIA/CUDA  — Whisper via faster-whisper (CTranslate2)
+pip install -e '.[dev]'       # pytest + jiwer (add to any of the above)
 ```
 
-`mlx-whisper` uses Apple MLX (no separate install). Model downloads cached under `~/.cache/huggingface/`.
+Model downloads cached under `~/.cache/huggingface/`. Notes:
+- On **Windows**, `.[cuda]` also pulls the `nvidia-cublas-cu12` / `nvidia-cudnn-cu12`
+  runtime wheels; CTranslate2 does not bundle the CUDA 12 runtime there, and
+  `whisper_faster._add_cuda_dll_dirs()` adds those wheels' DLLs to the loader
+  search path at model-load time. Verified on an RTX 5090 (Blackwell sm_120).
+- If CUDA can't initialize, `whisper-faster` emits a `RuntimeWarning` and falls
+  back to CPU int8 (slower) rather than failing — check for that warning if GPU
+  transcription seems slow.
 
 ## Gotchas
 

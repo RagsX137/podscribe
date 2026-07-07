@@ -1,4 +1,15 @@
+import sys
+
+import pytest
+
 from podscribe.tui import launch
+
+# The stdin stop-listener tests below drive raw POSIX termios/pipe/select
+# behaviour that has no equivalent on Windows (which uses a msvcrt poll loop).
+posix_only = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX termios/select stdin handling; Windows uses a msvcrt poll loop",
+)
 
 
 def test_launch_no_pods_prints_panel_and_exits_0(tmp_path, monkeypatch, capsys):
@@ -16,7 +27,7 @@ def test_launch_with_pod_and_q_exits_cleanly(tmp_path, monkeypatch):
     init_pod("sam-chen", display_name="Sam Chen")
     import podscribe.tui as tui
     monkeypatch.setattr(tui, "read_key", lambda: "q")
-    monkeypatch.setattr(tui, "probe_ollama", lambda: False)
+    monkeypatch.setattr(tui, "probe_provider", lambda p: False)
     rc = launch()
     assert rc == 0
 
@@ -33,7 +44,7 @@ def test_launch_tab_switches_focused_pane(tmp_path, monkeypatch):
         k = next(keys)
         return "\t" if k == "Tab" else k
     monkeypatch.setattr(tui, "read_key", fake_key)
-    monkeypatch.setattr(tui, "probe_ollama", lambda: False)
+    monkeypatch.setattr(tui, "probe_provider", lambda p: False)
     rc = tui.launch()
     assert rc == 0
 
@@ -535,6 +546,7 @@ def test_record_view_waveform_on_level_passed_to_capture(tmp_path, monkeypatch):
 
 # ── _listen_for_stop unit tests ─────────────────────────────────────
 
+@posix_only
 def test_listen_for_stop_s_key_calls_capture_stop():
     """Pressing 's' in the pipe causes capture.stop() to be called."""
     import os
@@ -581,6 +593,7 @@ def test_listen_for_stop_s_key_calls_capture_stop():
     mock_capture.stop.assert_called_once()
 
 
+@posix_only
 def test_listen_for_stop_uppercase_S_calls_capture_stop():
     """Pressing 'S' (uppercase) also stops recording."""
     import os
@@ -620,6 +633,7 @@ def test_listen_for_stop_uppercase_S_calls_capture_stop():
     mock_capture.stop.assert_called_once()
 
 
+@posix_only
 def test_listen_for_stop_non_s_key_ignored():
     """Non-'s' keypresses do not call capture.stop()."""
     import os
@@ -668,6 +682,7 @@ def test_listen_for_stop_non_s_key_ignored():
     mock_capture.stop.assert_not_called()
 
 
+@posix_only
 def test_listen_for_stop_wake_fd_exits_without_stop():
     """Writing to wake_fd causes the thread to exit cleanly without capture.stop()."""
     import os
@@ -706,6 +721,7 @@ def test_listen_for_stop_wake_fd_exits_without_stop():
     mock_capture.stop.assert_not_called()
 
 
+@posix_only
 def test_listen_for_stop_stop_event_exits_thread():
     """Setting stop_event causes the thread to exit within select timeout."""
     import os
@@ -744,6 +760,7 @@ def test_listen_for_stop_stop_event_exits_thread():
     mock_capture.stop.assert_not_called()
 
 
+@posix_only
 def test_listen_for_stop_non_tty_stdin_exits_gracefully():
     """If sys.stdin has no fileno() (e.g. StringIO), thread exits immediately."""
     import io
@@ -776,6 +793,7 @@ def test_listen_for_stop_non_tty_stdin_exits_gracefully():
     mock_capture.stop.assert_not_called()
 
 
+@posix_only
 def test_listen_for_stop_closed_fds_exits_without_crash():
     """Closing fds while the thread is running must not crash the thread."""
     import os
@@ -815,6 +833,7 @@ def test_listen_for_stop_closed_fds_exits_without_crash():
     assert not t.is_alive(), "thread should exit cleanly when fds are closed under it"
 
 
+@posix_only
 def test_set_input_raw_preserves_isig():
     """_set_input_raw must NOT clear ISIG so Ctrl+C still delivers SIGINT."""
     import sys
@@ -898,7 +917,7 @@ def test_handle_slash_exit_raises_exit_sentinel(tmp_path, monkeypatch):
     import podscribe.agent as agent_mod
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(tui, "probe_ollama", lambda: True)
+    monkeypatch.setattr(tui, "probe_provider", lambda p: True)
 
     chars = list("/exit\r")
     char_iter = iter(chars)
@@ -914,6 +933,7 @@ def test_handle_slash_exit_raises_exit_sentinel(tmp_path, monkeypatch):
 
     class _StubSession:
         model = "test-model"
+        provider = None
         def add_system_context(self, _): pass
         def run_prompt(self, *a, **kw): return ""
 

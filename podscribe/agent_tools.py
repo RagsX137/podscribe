@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from .config import get_effective_glossary, load_project_config
+from .config import get_effective_glossary, load_project_config, resolve_llm_config
 from .glossary import add_entry, format_glossary_prompt, remove_entry
 from .models import Segment, fmt_date
 from .storage import (
@@ -311,7 +311,7 @@ def enhance_meeting(pod_name: str, meeting_id: str = "latest") -> str:
     if err:
         return err
 
-    llm_config = pod.llm if pod.llm else load_project_config().get("llm")
+    llm_config = resolve_llm_config(pod)
     if not llm_config or not llm_config.get("model") or not llm_config.get("prompt_template"):
         return "LLM not configured. Set up with `podscribe config llm set`."
 
@@ -320,7 +320,7 @@ def enhance_meeting(pod_name: str, meeting_id: str = "latest") -> str:
         return f"Transcript too short ({len(transcript.strip())} chars)."
 
     from .config import load_preserve_speakers
-    from .llm import build_enhance_prompt, enhance_transcript
+    from .llm import build_enhance_prompt
     glossary = get_effective_glossary(pod)
     preserve = load_preserve_speakers(pod)
     prompt = build_enhance_prompt(
@@ -331,7 +331,7 @@ def enhance_meeting(pod_name: str, meeting_id: str = "latest") -> str:
     summary_dir = pod.summaries_dir_for(date_str)
     enhanced_path = summary_dir / f"{meeting.id}.md"
 
-    text, enhance_err = _run_enhance(prompt, llm_config["model"])
+    text, enhance_err = _run_enhance(prompt, llm_config)
     if enhance_err:
         return enhance_err
 
@@ -340,12 +340,17 @@ def enhance_meeting(pod_name: str, meeting_id: str = "latest") -> str:
     return f"Enhanced transcript saved to {enhanced_path}"
 
 
-def _run_enhance(prompt: str, model: str) -> tuple[Optional[str], Optional[str]]:
-    """Run LLM enhance, returning (text, None) or (None, error)."""
+def _run_enhance(prompt: str, llm_config: dict) -> tuple[Optional[str], Optional[str]]:
+    """Run LLM enhance via a provider, returning (text, None) or (None, error)."""
+    from .providers.registry import build_provider
+    try:
+        provider = build_provider(llm_config)
+    except ValueError as e:
+        return None, str(e)
     from .llm import enhance_transcript
-    result = enhance_transcript(model, prompt)
+    result = enhance_transcript(provider.model, prompt, provider=provider)
     if result is None:
-        return None, "Failed to reach Ollama. Is it running? Start with: ollama serve"
+        return None, "LLM request failed. Check the provider/base_url and that the server is reachable."
     return result, None
 
 
@@ -366,15 +371,14 @@ def consolidate_meeting(pod_name: str, meeting_id: str = "latest", no_log: bool 
 
     enhanced_text = enhanced_path.read_text()
     from .config import load_consolidate_prompt
-    from .llm import build_consolidate_prompt, enhance_transcript, extract_structured_fields
+    from .llm import build_consolidate_prompt, extract_structured_fields
     prompt_template = load_consolidate_prompt()
     prompt = build_consolidate_prompt(prompt_template, enhanced_text)
 
-    llm_config = pod.llm if pod.llm else load_project_config().get("llm")
+    llm_config = resolve_llm_config(pod)
     if not llm_config or not llm_config.get("model"):
         return {"error": "LLM not configured."}
-    model_name = llm_config["model"]
-    text, cons_err = _run_enhance(prompt, model_name)
+    text, cons_err = _run_enhance(prompt, llm_config)
     if cons_err:
         return {"error": cons_err}
 

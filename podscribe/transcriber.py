@@ -1,12 +1,17 @@
-"""Whisper transcription wrapper around mlx-whisper (Apple Silicon MLX)."""
+"""Whisper/Parakeet transcription facade over pluggable, platform-aware backends."""
 from __future__ import annotations
 
 from typing import List
 
 import numpy as np
 
+from .backends.registry import REGISTRY
+from .backends.select import resolve_backend
+
 DEFAULT_MODEL = "large-v3-turbo"
 
+# Retained for backward-compatible imports; canonical mapping now lives in
+# podscribe/backends/select.py.
 MODEL_MAP = {
     "base": "mlx-community/whisper-base-mlx",
     "large": "mlx-community/whisper-large-v3-mlx",
@@ -16,56 +21,46 @@ MODEL_MAP = {
 
 
 def resolve_model(name: str) -> str:
-    """Map short Whisper model names to HF MLX repo IDs.
-
-    Full HF paths (e.g. 'mlx-community/whisper-large-v3-mlx') pass through.
-    """
+    """Map a short MLX Whisper name to its HF repo (back-compat shim)."""
     if "/" in name:
         return name
     return MODEL_MAP.get(name, name)
 
 
-class Transcriber:
-    """Lazy-loaded Whisper model via mlx-whisper (Apple Silicon MLX).
+def _make_backend(backend_id: str, repo_id: str):
+    """Instantiate a backend via its registry spec (lazy-imports the module)."""
+    try:
+        spec = REGISTRY[backend_id]
+    except KeyError:
+        raise ValueError(f"unknown backend id '{backend_id}'")
+    return spec.load(repo_id)
 
-    Model is cached by mlx-whisper internally, so repeated transcribe()
-    calls with the same model name reuse the loaded weights.
+
+class Transcriber:
+    """Facade: resolves a backend from (model, backend) and delegates transcribe().
+
+    The backend engine is lazy-loaded, so constructing a Transcriber is cheap
+    and only the selected engine's dependency must be installed.
     """
 
     def __init__(
         self,
         model: str = DEFAULT_MODEL,
+        backend: str = "auto",
         n_threads: int = 0,
         print_progress: bool = False,
     ):
-        self.model_name = resolve_model(model)
+        self.backend_id, self.model_name = resolve_backend(model, backend)
+        self._backend = None
+
+    def _ensure_backend(self):
+        if self._backend is None:
+            self._backend = _make_backend(self.backend_id, self.model_name)
+        return self._backend
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, **kwargs) -> List[dict]:
-        """Transcribe a mono float32 audio segment (16kHz).
+        """Transcribe a mono float32 16kHz segment.
 
-        Returns list of {"start": float_sec, "end": float_sec, "text": str}.
-        Times are relative to the start of the input segment.
+        Returns list of {"start", "end", "text"} with segment-relative times.
         """
-        try:
-            import mlx_whisper
-        except ImportError as e:
-            raise ImportError(
-                "mlx-whisper is required. Install with: pip install mlx-whisper"
-            ) from e
-
-        if audio.ndim > 1:
-            audio = audio.reshape(-1)
-        if audio.size == 0:
-            return []
-
-        result = mlx_whisper.transcribe(
-            audio,
-            path_or_hf_repo=self.model_name,
-            **kwargs,
-        )
-        segments = []
-        for s in result.get("segments", []):
-            text = (s.get("text", "") or "").strip()
-            if text:
-                segments.append({"start": s["start"], "end": s["end"], "text": text})
-        return segments
+        return self._ensure_backend().transcribe(audio, sample_rate=sample_rate, **kwargs)

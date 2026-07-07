@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional, Tuple
 
-from .llm import build_enhance_prompt, ollama_model_info
+from .llm import build_enhance_prompt
+from .providers.registry import build_provider
 
 CONTEXT_FALLBACK_TOKENS = 8192
 CONTEXT_MARGIN = 0.5      # reserve half the window for prompt scaffolding + output
@@ -21,9 +22,18 @@ _MAP_TEMPLATE = (
 )
 
 
-def context_limit_chars(model: str) -> int:
-    """Approx transcript char budget for a single LLM pass."""
-    info = ollama_model_info(model)
+def context_limit_chars(llm_config: dict) -> int:
+    """Approx transcript char budget for a single LLM pass.
+
+    Best-effort: if the provider can't be built (misconfig) or exposes no
+    context metadata (e.g. OpenAI-compatible), fall back to
+    CONTEXT_FALLBACK_TOKENS. Any real misconfiguration surfaces cleanly from
+    the guarded run_llm call that follows, not as a traceback here.
+    """
+    try:
+        info = build_provider(llm_config).model_info()
+    except ValueError:
+        info = {}
     ctx = (info.get("model_info") or {}).get("llama.context_length")
     if not isinstance(ctx, int) or ctx <= 0:
         ctx = CONTEXT_FALLBACK_TOKENS
@@ -48,24 +58,24 @@ def chunk_text(text: str, max_chars: int, overlap_chars: int) -> List[str]:
 def summarize_transcript(
     transcript: str,
     *,
-    model: str,
+    llm_config: dict,
     prompt_template: str,
     glossary: list,
     preserve_speakers: bool,
-    run_llm: Callable[[str, str], Tuple[Optional[str], Optional[str]]],
+    run_llm: Callable[[str, dict], Tuple[Optional[str], Optional[str]]],
 ) -> Tuple[Optional[str], Optional[str]]:
     """Summarize `transcript`. Single pass if it fits, else map-reduce.
 
-    run_llm(prompt, model) -> (text, err). On the first map/reduce error the
-    partials are abandoned and (None, err) is returned.
+    run_llm(prompt, llm_config) -> (text, err). On the first map/reduce error
+    the partials are abandoned and (None, err) is returned.
     """
-    budget = context_limit_chars(model)
+    budget = context_limit_chars(llm_config)
     if len(transcript) <= budget:
         prompt = build_enhance_prompt(
             prompt_template, glossary, transcript,
             preserve_speakers=preserve_speakers,
         )
-        return run_llm(prompt, model)
+        return run_llm(prompt, llm_config)
 
     chunks = chunk_text(transcript, budget, OVERLAP_CHARS)
     partials: List[str] = []
@@ -73,7 +83,7 @@ def summarize_transcript(
         prompt = build_enhance_prompt(
             _MAP_TEMPLATE, glossary, chunk, preserve_speakers=preserve_speakers,
         )
-        text, err = run_llm(prompt, model)
+        text, err = run_llm(prompt, llm_config)
         if err is not None:
             return None, err
         partials.append(text or "")
@@ -82,4 +92,4 @@ def summarize_transcript(
     reduce_prompt = build_enhance_prompt(
         prompt_template, glossary, combined, preserve_speakers=preserve_speakers,
     )
-    return run_llm(reduce_prompt, model)
+    return run_llm(reduce_prompt, llm_config)

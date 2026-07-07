@@ -63,7 +63,7 @@ def test_enhance_transcript_success():
         final_stats={"prompt_eval_count": 5, "eval_count": 3,
                      "total_duration": 1_000_000_000, "eval_duration": 500_000_000},
     )
-    with patch("podscribe.llm.requests.post", return_value=resp) as mock_post:
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp) as mock_post:
         result = enhance_transcript("llama3.2", "fix this")
         assert result == "Hello world"
         # streamed + no retry
@@ -74,7 +74,7 @@ def test_enhance_transcript_success():
 
 
 def test_enhance_transcript_connection_error():
-    with patch("podscribe.llm.requests.post", side_effect=requests.ConnectionError):
+    with patch("podscribe.providers.ollama.requests.post", side_effect=requests.ConnectionError):
         result = enhance_transcript("llama3.2", "fix this")
         assert result is None
 
@@ -84,7 +84,7 @@ def test_enhance_transcript_http_error():
     bad_resp = MagicMock()
     bad_resp.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 500")
     bad_resp.status_code = 500
-    with patch("podscribe.llm.requests.post", return_value=bad_resp) as mock_post:
+    with patch("podscribe.providers.ollama.requests.post", return_value=bad_resp) as mock_post:
         result = enhance_transcript("llama3.2", "fix this")
         assert result is None
         # 3 attempts
@@ -257,7 +257,7 @@ def test_enhance_streams_and_returns_full_text():
         final_stats={"prompt_eval_count": 10, "eval_count": 5,
                      "total_duration": 2_000_000_000, "eval_duration": 1_000_000_000},
     )
-    with patch("podscribe.llm.requests.post", return_value=resp):
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp):
         result = enhance_transcript("qwen3.6:27b", "go")
         assert result == "Sam will review the design"
 
@@ -274,8 +274,8 @@ def test_enhance_retries_on_5xx(capfd):
     def track_retry(attempt, err):
         retries.append(attempt)
 
-    with patch("podscribe.llm.requests.post", side_effect=[bad, bad, good]) as mock_post:
-        with patch("podscribe.llm.time.sleep"):  # don't actually wait
+    with patch("podscribe.providers.ollama.requests.post", side_effect=[bad, bad, good]) as mock_post:
+        with patch("podscribe.providers.base.time.sleep"):  # don't actually wait
             result = enhance_transcript("qwen3.6:27b", "go", on_retry=track_retry)
             assert result == "ok"
             assert mock_post.call_count == 3
@@ -286,9 +286,9 @@ def test_enhance_retries_on_5xx(capfd):
 def test_enhance_no_retry_on_4xx():
     """4xx response: no retry, return None immediately."""
     bad = MagicMock()
-    bad.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 400")
     bad.status_code = 400
-    with patch("podscribe.llm.requests.post", return_value=bad) as mock_post:
+    bad.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 400", response=bad)
+    with patch("podscribe.providers.ollama.requests.post", return_value=bad) as mock_post:
         result = enhance_transcript("qwen3.6:27b", "go")
         assert result is None
         assert mock_post.call_count == 1
@@ -301,7 +301,7 @@ def test_enhance_core_prints_nothing_to_stderr(capfd):
         final_stats={"prompt_eval_count": 7, "eval_count": 1,
                      "total_duration": 1_000_000_000, "eval_duration": 100_000_000},
     )
-    with patch("podscribe.llm.requests.post", return_value=resp):
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp):
         enhance_transcript("qwen3.6:27b", "go")
     captured = capfd.readouterr()
     assert "Calling Model" not in captured.err
@@ -310,7 +310,7 @@ def test_enhance_core_prints_nothing_to_stderr(capfd):
 
 def test_enhance_uses_30_minute_timeout():
     resp = make_streaming_response(["x"], final_stats={"prompt_eval_count": 1, "eval_count": 1})
-    with patch("podscribe.llm.requests.post", return_value=resp) as mock_post:
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp) as mock_post:
         enhance_transcript("qwen3.6:27b", "go")
     assert mock_post.call_args.kwargs["timeout"] == 1800
 
@@ -330,8 +330,8 @@ def test_enhance_transcript_cleans_up_on_stream_error():
     tokens: list = []
     stats: list = []
 
-    with patch("podscribe.llm.requests.post", return_value=resp):
-        with patch("podscribe.llm.time.sleep"):
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp):
+        with patch("podscribe.providers.base.time.sleep"):
             result = enhance_transcript(
                 "qwen3.6:27b", "go", max_retries=1,
                 on_token=tokens.append, on_stats=stats.append,
@@ -343,8 +343,8 @@ def test_enhance_transcript_cleans_up_on_stream_error():
 
 def test_enhance_high_max_retries_doesnt_crash():
     """max_retries > len(delays) should not cause IndexError on the backoff."""
-    with patch("podscribe.llm.requests.post", side_effect=requests.ConnectionError):
-        with patch("podscribe.llm.time.sleep"):
+    with patch("podscribe.providers.ollama.requests.post", side_effect=requests.ConnectionError):
+        with patch("podscribe.providers.base.time.sleep"):
             result = enhance_transcript(
                 "qwen3.6:27b", "go", max_retries=6
             )
@@ -360,7 +360,7 @@ def test_enhance_transcript_fires_on_token_and_on_stats():
     )
     tokens: list = []
     stats: list = []
-    with patch("podscribe.llm.requests.post", return_value=resp):
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp):
         result = enhance_transcript(
             "qwen3.6:27b", "go",
             on_token=tokens.append, on_stats=stats.append,
@@ -408,7 +408,7 @@ def test_chat_stream_text_response():
     tokens: list = []
     msgs: list = []
 
-    with patch("podscribe.llm.requests.post", return_value=resp) as mock_post:
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp) as mock_post:
         result = chat_stream(
             "qwen3.6:27b",
             [{"role": "user", "content": "say hi"}],
@@ -438,7 +438,7 @@ def test_chat_stream_tool_call():
     tokens: list = []
     msgs: list = []
 
-    with patch("podscribe.llm.requests.post", return_value=resp):
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp):
         result = chat_stream(
             "qwen3.6:27b",
             [{"role": "user", "content": "list pods"}],
@@ -457,13 +457,13 @@ def test_chat_stream_passes_tools():
     """Tools list is included in the request payload."""
     resp = make_chat_stream_response(["ok"])
     tools = [{"type": "function", "function": {"name": "list_pods"}}]
-    with patch("podscribe.llm.requests.post", return_value=resp) as mock_post:
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp) as mock_post:
         chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}], tools=tools)
     assert mock_post.call_args.kwargs["json"]["tools"] == tools
 
 
 def test_chat_stream_connection_error():
-    with patch("podscribe.llm.requests.post", side_effect=requests.ConnectionError):
+    with patch("podscribe.providers.ollama.requests.post", side_effect=requests.ConnectionError):
         result = chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}])
     assert result is None
 
@@ -475,8 +475,8 @@ def test_chat_stream_retries_on_5xx():
     bad.iter_lines = MagicMock(return_value=iter([]))
     good = make_chat_stream_response(["ok"])
 
-    with patch("podscribe.llm.requests.post", side_effect=[bad, bad, good]) as mock_post:
-        with patch("podscribe.llm.time.sleep"):
+    with patch("podscribe.providers.ollama.requests.post", side_effect=[bad, bad, good]) as mock_post:
+        with patch("podscribe.providers.base.time.sleep"):
             result = chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}])
     assert result == "ok"
     assert mock_post.call_count == 3
@@ -489,8 +489,8 @@ def test_chat_stream_5xx_all_attempts_fail():
     bad.status_code = 503
     bad.iter_lines = MagicMock(return_value=iter([]))
 
-    with patch("podscribe.llm.requests.post", return_value=bad) as mock_post:
-        with patch("podscribe.llm.time.sleep"):
+    with patch("podscribe.providers.ollama.requests.post", return_value=bad) as mock_post:
+        with patch("podscribe.providers.base.time.sleep"):
             result = chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}])
     assert result is None
     assert mock_post.call_count == 3
@@ -498,10 +498,10 @@ def test_chat_stream_5xx_all_attempts_fail():
 
 def test_chat_stream_no_retry_on_4xx():
     bad = MagicMock()
-    bad.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 400")
     bad.status_code = 400
+    bad.raise_for_status.side_effect = requests.exceptions.HTTPError("HTTP 400", response=bad)
 
-    with patch("podscribe.llm.requests.post", return_value=bad) as mock_post:
+    with patch("podscribe.providers.ollama.requests.post", return_value=bad) as mock_post:
         result = chat_stream("qwen3.6:27b", [{"role": "user", "content": "hi"}])
     assert result is None
     assert mock_post.call_count == 1
@@ -516,8 +516,8 @@ def test_chat_stream_cleans_up_on_stream_error():
     tokens: list = []
     msgs: list = []
 
-    with patch("podscribe.llm.requests.post", return_value=resp):
-        with patch("podscribe.llm.time.sleep"):
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp):
+        with patch("podscribe.providers.base.time.sleep"):
             result = chat_stream(
                 "qwen3.6:27b", [{"role": "user", "content": "hi"}], max_retries=1,
                 on_token=tokens.append, on_message=msgs.append,
@@ -530,6 +530,7 @@ def test_chat_stream_cleans_up_on_stream_error():
 def test_ollama_model_info_caches_within_ttl(monkeypatch):
     """Within the TTL, ollama_model_info returns the cached dict without HTTP."""
     from podscribe import llm
+    from podscribe.providers import ollama as ollama_mod
 
     calls = {"n": 0}
 
@@ -540,9 +541,9 @@ def test_ollama_model_info_caches_within_ttl(monkeypatch):
         resp.json = MagicMock(return_value={"model_info": {"llama.context_length": 8192}})
         return resp
 
-    monkeypatch.setattr(llm.requests, "post", fake_post)
-    monkeypatch.setattr(llm, "_info_cache", {})
-    monkeypatch.setattr(llm.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(ollama_mod.requests, "post", fake_post)
+    monkeypatch.setattr(ollama_mod, "_info_cache", {})
+    monkeypatch.setattr(ollama_mod.time, "time", lambda: 1000.0)
 
     info1 = llm.ollama_model_info("qwen3.6:27b")
     assert info1 == {"model_info": {"llama.context_length": 8192}}
@@ -557,6 +558,7 @@ def test_ollama_model_info_caches_within_ttl(monkeypatch):
 def test_ollama_model_info_refetches_after_ttl_expiry(monkeypatch):
     """After the TTL elapses, ollama_model_info refetches."""
     from podscribe import llm
+    from podscribe.providers import ollama as ollama_mod
 
     clock = {"t": 1000.0}
     calls = {"n": 0}
@@ -568,9 +570,9 @@ def test_ollama_model_info_refetches_after_ttl_expiry(monkeypatch):
         resp.json = MagicMock(return_value={"model_info": {"llama.context_length": 8192}})
         return resp
 
-    monkeypatch.setattr(llm.requests, "post", fake_post)
-    monkeypatch.setattr(llm, "_info_cache", {})
-    monkeypatch.setattr(llm.time, "time", lambda: clock["t"])
+    monkeypatch.setattr(ollama_mod.requests, "post", fake_post)
+    monkeypatch.setattr(ollama_mod, "_info_cache", {})
+    monkeypatch.setattr(ollama_mod.time, "time", lambda: clock["t"])
 
     llm.ollama_model_info("qwen3.6:27b")
     assert calls["n"] == 1

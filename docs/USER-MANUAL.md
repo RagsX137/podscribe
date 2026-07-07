@@ -5,8 +5,9 @@ Transcribe your 1:1s and team meetings locally on your Mac. Each person you meet
 ## Quick start (5 minutes)
 
 ```bash
-# 1. Install
-pip install -e .
+# 1. Install (pick the ASR engine for your hardware)
+pip install -e '.[mlx]'     # Apple Silicon
+pip install -e '.[cuda]'    # NVIDIA / CUDA
 
 # 2. Create a pod for someone you meet with
 podscribe init sam-chen --display-name "Sam Chen" --role "Senior Engineer"
