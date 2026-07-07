@@ -814,9 +814,18 @@ def cmd_config_llm_show(args) -> int:
 
 def cmd_config_llm_set(args) -> int:
     """Set project-level LLM config (provider/base_url/api_key_env optional)."""
+    provider = args.provider or "ollama"
+    if args.base_url:
+        from urllib.parse import urlparse
+        if urlparse(args.base_url).scheme not in ("http", "https"):
+            print("--base-url must include http:// or https://", file=sys.stderr)
+            return 1
+    if provider == "openai" and not args.base_url:
+        print("--base-url is required for --provider openai (e.g. https://api.deepseek.com/v1)", file=sys.stderr)
+        return 1
     cfg = load_project_config()
     llm: dict = {
-        "provider": args.provider or "ollama",
+        "provider": provider,
         "model": args.model,
         "prompt_template": args.prompt_template,
     }
@@ -826,7 +835,7 @@ def cmd_config_llm_set(args) -> int:
         llm["api_key_env"] = args.api_key_env
     cfg["llm"] = llm
     save_project_config(cfg)
-    print(f"Project LLM config set: {args.provider or 'ollama'}:{args.model}")
+    print(f"Project LLM config set: {provider}:{args.model}")
     return 0
 
 

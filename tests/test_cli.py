@@ -1901,3 +1901,23 @@ def test_config_llm_set_defaults_provider_ollama(tmp_path, monkeypatch):
     llm = load_project_config()["llm"]
     assert llm["provider"] == "ollama"
     assert "base_url" not in llm  # omit unset optional fields
+
+
+def test_config_llm_set_rejects_base_url_without_scheme(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    args = argparse.Namespace(
+        model="deepseek-chat", prompt_template="{{transcript}}",
+        provider="openai", base_url="api.deepseek.com/v1", api_key_env=None,
+    )
+    assert cmd_config_llm_set(args) == 1
+    assert not (tmp_path / "podscribe.yaml").exists()
+
+
+def test_config_llm_set_rejects_openai_without_base_url(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    args = argparse.Namespace(
+        model="gpt-4o", prompt_template="{{transcript}}",
+        provider="openai", base_url=None, api_key_env=None,
+    )
+    assert cmd_config_llm_set(args) == 1
+    assert not (tmp_path / "podscribe.yaml").exists()
