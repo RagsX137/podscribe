@@ -4,12 +4,24 @@ from __future__ import annotations
 import os
 import tempfile
 import wave
+import warnings
 from pathlib import Path
 from typing import List
 
 import numpy as np
 
 from .base import normalize_segments, prepare_audio
+
+# parakeet-mlx decodes a clip in a single pass when chunk_duration is None, which
+# OOMs the Metal allocator on full-length meetings (#10). Chunked decode bounds
+# peak memory; 120s/15s matches the tuned values used for the benchmark run.
+_CHUNK_DURATION = 120.0
+_OVERLAP_DURATION = 15.0
+
+# Only these kwargs are meaningful to parakeet-mlx's transcribe(); anything
+# else (e.g. whisper's initial_prompt) is silently dropped below, so we warn
+# instead of letting a typo or a future caller vanish without a trace.
+_KNOWN_KWARGS = {"chunk_duration", "overlap_duration"}
 
 
 def _write_temp_wav(audio: np.ndarray, sample_rate: int) -> Path:
@@ -49,9 +61,30 @@ class ParakeetMLXBackend:
         if audio.size == 0:
             return []
         model = self._load()
+        # Only forward parakeet-mlx's own chunking knobs; whisper-only kwargs
+        # (e.g. initial_prompt) would raise a TypeError here.
+        unknown = set(kwargs) - _KNOWN_KWARGS
+        if unknown:
+            warnings.warn(
+                f"parakeet-mlx backend ignores kwargs: {sorted(unknown)}",
+                stacklevel=2,
+            )
+        # dict.get(key, default) only applies the default when the key is
+        # absent, so an explicit chunk_duration=None would pass None straight
+        # through to model.transcribe() and re-introduce the single-pass OOM.
+        chunk_duration = kwargs.get("chunk_duration")
+        if chunk_duration is None:
+            chunk_duration = _CHUNK_DURATION
+        overlap_duration = kwargs.get("overlap_duration")
+        if overlap_duration is None:
+            overlap_duration = _OVERLAP_DURATION
         wav = _write_temp_wav(audio, sample_rate)
         try:
-            result = model.transcribe(str(wav))
+            result = model.transcribe(
+                str(wav),
+                chunk_duration=chunk_duration,
+                overlap_duration=overlap_duration,
+            )
         finally:
             try:
                 wav.unlink()
