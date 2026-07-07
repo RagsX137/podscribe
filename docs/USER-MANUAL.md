@@ -95,6 +95,24 @@ Each entry shows the date, time, type (if set), and duration (if finalized). Nav
 
 The Glossary, LLM config, and Consolidate prompt submenus are **read-write** — you can add/remove glossary terms, set the LLM model and prompt template, and set the consolidate prompt directly from the launcher without dropping to the CLI.
 
+### TUI keymap
+
+The launcher and any TTY CLI invocation (`podscribe <pod> record/enhance/consolidate`) share the same `rich.live` panels.
+
+| key | action |
+|---|---|
+| `j` / `k` | move down / up |
+| `Tab` | switch pane (PODS ↔ main) |
+| `r` | record new meeting |
+| `e` | enhance selected meeting |
+| `c` | consolidate selected meeting |
+| `Enter` | view transcript |
+| `/` | search |
+| `:` | command palette |
+| `q` | quit |
+
+Status bar colour: **lilac** = NORMAL · **pink** = recording/streaming · **peach** = command palette. In god mode: `Esc` toggles pane focus, `/exit` leaves, arrow keys scroll, `/list` shows slash commands.
+
 ### What doesn't work / limitations
 
 - Record has **no pause/resume/marker** keys — Ctrl+C stops and finalizes, same as the CLI. (See `Recommended_fixes.md` §9 for the planned approach.)

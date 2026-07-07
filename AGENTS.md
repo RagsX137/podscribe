@@ -15,7 +15,12 @@ podscribe/
 ├── cli.py          — argparse + rewrite_argv + all cmd handlers
 ├── tui.py          — interactive TUI: launcher + live views (lazy-imported)
 ├── audio.py        — sounddevice InputStream + webrtcvad, 16kHz mono float32
-├── transcriber.py  — mlx_whisper.transcribe wrapper (Apple MLX)
+├── transcriber.py  — facade over pluggable ASR backends (see backends/); short-name model map
+├── backends/       — pluggable ASR engines: whisper-mlx (default), whisper-faster (CUDA),
+│                    parakeet-mlx, parakeet-nemo; registry + select pick by (model, platform)
+├── providers/      — pluggable LLM providers (see "LLM providers" below): ollama (native /api/*)
+│                    + openai_compat (/v1/chat/completions SSE; covers OpenAI, Groq, OpenRouter,
+│                    DeepSeek, GLM, Kimi, Minimax, Qwen, LM Studio, vLLM, Ollama /v1 shim)
 ├── diarizer.py     — pyannote.audio speaker diarization (lazy-imported; [diarize] extra)
 ├── hf_auth.py      — HuggingFace token resolution (~/.config/podscribe/hf_token, mode 0o600)
 ├── media.py        — ffmpeg decode-to-f32 + timestamp-preserving VTT/SRT cue parser (shared w/ benchmarks)
@@ -24,9 +29,13 @@ podscribe/
 ├── models.py       — Pod, Meeting, Segment dataclasses + ID/name/type helpers
 ├── config.py       — load/save pod config.yaml + project podscribe.yaml + leadership_team.yaml
 ├── glossary.py     — glossary add/remove/format for Whisper initial_prompt
-├── llm.py          — requests-based Ollama client (enhance + consolidate + chat_stream); streaming + retries
-├── agent.py        — GodSession: agentic loop; uses llm.chat_stream + tool dispatch
+├── llm.py          — prompt building (anti-hallucination + speaker-preservation preambles) + thin shim over
+│                    providers.registry.build_provider; `enhance_transcript`/`build_consolidate_prompt`+
+│                    `extract_structured_fields`/`chat_stream` delegate to the resolved Provider (Ollama or OpenAI-compatible)
+├── agent.py        — GodSession: agentic loop; resolves a Provider via providers.registry.build_provider,
+│                    drives it through llm.chat_stream + tool dispatch
 ├── agent_tools.py  — tool implementations (list_pods, show_meeting, start_recording, etc.)
+├── fs_tools.py     — read-only, cwd-sandboxed filesystem/code-intelligence tools for god mode
 ├── search.py       — cross-pod keyword search (rg backend, Python fallback)
 └── export.py       — tar.gz export/import of pods/ + root YAMLs (path-traversal safe)
 
@@ -59,8 +68,8 @@ in the meeting JSON gates `diarize`.
 | `list` | `list <pod>` filters to one pod. Flags: `--all` (global CSV), `--since` (e.g. `7d`/`24h`/`2026-06-15`), `--recent N`, `--type`; renders a markdown table. `--kt` lists KT sessions instead (requires a pod — no global KT rollup); table columns are `id \| date \| duration` only. |
 | `show <pod> <id-prefix\|latest>` | Reads from `.md` transcript file. Flag: `--kt` targets KT sessions only (resolves within the `kt/` subtree). |
 | `context` | Subcommands: `add`, `remove`, `list`; glossary merged from `leadership_team.yaml` + per-pod `config.yaml` |
-| `enhance` | Requires Ollama at localhost:11434 + `llm` section in pod or project config. Flag: `--kt` summarizes a KT session (from the `kt/` subtree) instead of a meeting. |
-| `consolidate` (alias `cons`) | Requires Ollama; extracts structured YAML from enhanced summary and appends/rewrites a row in `meetings.csv`. `--no-log`/`-n` skips the CSV update. Prompts on existing row before rewriting. |
+| `enhance` | Requires a reachable LLM provider (default Ollama at localhost:11434) + `llm` section in pod or project config. Flag: `--kt` summarizes a KT session (from the `kt/` subtree) instead of a meeting. |
+| `consolidate` (alias `cons`) | Requires a reachable LLM provider; extracts structured YAML from enhanced summary and appends/rewrites a row in `meetings.csv`. `--no-log`/`-n` skips the CSV update. Prompts on existing row before rewriting. |
 | `ask` | Scoped KT Q&A: `podscribe <pod> ask <id\|latest> [question...]`. Grounded in one KT transcript (kt/ subtree only); REPL when no question. |
 | `diarize` | Post-hoc diarization via pyannote.audio (`pip install -e '.[diarize]'` + HF token). Writes `.diarized.md`; `show`/`enhance` prefer it. Refuses non-continuous recordings. Defaults to Apple MPS/Metal when available (CPU fallback). Flags: `--num-speakers`, `--cpu`, `--relogin`. |
 | `search <query>` | Fixed-string match across transcripts. Flags: `--pod`, `--since`, `--type`, `--color`, `--kt` (search KT sessions instead of meetings; default excludes kt/). Uses `rg` if on PATH, else Python fallback. |
@@ -74,12 +83,12 @@ in the meeting JSON gates `diarize`.
 
 ## CLI quirks
 
-- **Pod-first syntax**: `podscribe <pod> record` → rewritten to `record <pod>` by `rewrite_argv` in [`cli.py`](podscribe/cli.py:966)
+- **Pod-first syntax**: `podscribe <pod> record` → rewritten to `record <pod>` by `rewrite_argv` in [`cli.py`](podscribe/cli.py)
 - **Aliases**: `start` → `record`, `summarize` → `enhance`, `cons` → `consolidate`
 - `rewrite_argv` logic: if `argv[0]` is not a known command and `argv[1]` is, it swaps them. Aliases are also resolved on `argv[0]` before the swap check.
 - **`--model` default is `large-v3-turbo`** (maps to `mlx-community/whisper-large-v3-turbo`)
 - `cmd_record` and `cmd_enhance`/`cmd_consolidate` both check `sys.stdout.isatty() and sys.stderr.isatty()` and delegate to TUI views if true — plain execution requires non-TTY or redirection.
-- README is current; it is a reliable source of command/flag examples.
+- README is largely current but lags the code in spots — verify against source before relying on it.
 
 ## Models
 
@@ -90,7 +99,16 @@ in the meeting JSON gates `diarize`.
 - mlx-whisper model names: short names resolved by `transcriber.MODEL_MAP` are only `base`, `turbo`, `large-v3-turbo`; any other value (including full HF paths) passes through unchanged
 - `Transcriber` is a thin facade over pluggable ASR backends in `podscribe/backends/` (whisper-mlx default on Apple Silicon, whisper-faster on NVIDIA/CPU, parakeet-mlx / parakeet-nemo optional). `--backend auto` selects by `(model, platform)`. Deferred features live in `docs/ROADMAP.md`.
 - Glossary: list of `{"term": str, "category": str}` injected as Whisper `initial_prompt`
-- LLM config: `{"model": str, "prompt_template": str, "preserve_speakers"?: bool}`; templates support `{{glossary}}`, `{{transcript}}`, and `{{summary}}` placeholders
+- LLM config: `{"provider"?: str, "model": str, "prompt_template": str, "preserve_speakers"?: bool, "base_url"?: str, "api_key_env"?: str}`; templates support `{{glossary}}`, `{{transcript}}`, and `{{summary}}` placeholders. `provider` defaults to `"ollama"`; `"openai"` enables any OpenAI-compatible endpoint (see `providers/` above).
+
+## LLM providers
+
+The LLM pipeline (`enhance`, `consolidate`, `god`, `enhance --kt`, `summarize`) talks to a pluggable `Provider` resolved from the `llm` config dict via `providers.registry.build_provider(cfg, model)`.
+
+- `provider: "ollama"` (default) — native Ollama `/api/generate`, `/api/chat`, `/api/show`.
+- `provider: "openai"` — OpenAI-compatible `/v1/chat/completions` with SSE streaming (handles OpenAI, Groq, OpenRouter, DeepSeek, GLM, Kimi, Minimax, Qwen, LM Studio, vLLM, and even Ollama's own `/v1` shim). Requires `base_url`; auth via `api_key_env` (an env-var name, not the key itself).
+
+Resolution order of the `llm` config: pod-level `pods/<pod>/config.yaml` > project-level `podscribe.yaml`. `preserve_speakers` resolution order is the same. Callers should go through `build_provider(...)` rather than re-implementing HTTP — `llm.enhance`/`consolidate`/`chat_stream` are legacy thin wrappers that already do this.
 
 ## Storage layout
 
@@ -132,7 +150,7 @@ Effective glossary = `leadership_team.yaml` terms + per-pod `config.yaml` terms.
 
 `preserve_speakers` (bool, default `true`): resolution order pod-level `llm` > project-level `llm` > default. When true, `llm.build_enhance_prompt` prepends anti-hallucination + speaker-preservation preambles before the template.
 
-`podscribe.yaml` currently sets `llm.model: qwen3.6:27b` (Ollama tag). `consolidate` uses the same model by default but a separate `consolidate.prompt`. `god` command uses `god.model` with fallback to `llm.model`. KT enhance (`enhance --kt`) reuses the same `llm.model` with a KT-specific prompt (`load_kt_prompt` → `kt.prompt` in `podscribe.yaml`, else `KT_PROMPT_DEFAULT`).
+`podscribe.yaml` currently sets `llm.model: qwen3.6:35b-mlx` (Ollama tag). `consolidate` uses the same model by default but a separate `consolidate.prompt`. `god` command uses `god.model` with fallback to `llm.model`. KT enhance (`enhance --kt`) reuses the same `llm.model` with a KT-specific prompt (`load_kt_prompt` → `kt.prompt` in `podscribe.yaml`, else `KT_PROMPT_DEFAULT`).
 
 ## LLM Enhance Eval Harness
 
@@ -198,12 +216,12 @@ Model downloads cached under `~/.cache/huggingface/`. Notes:
 
 - **Audio modules lazy-imported** in `cmd_record` — `audio.py` and `transcriber.py` (and their heavy deps) are not loaded for non-recording commands.
 - **`.raw` audio kept by default** (`keep_audio=True`); use `record --no-keep-audio` to delete after finalize. **Required for diarization** — `cmd_diarize` refuses meetings whose JSON sidecar lacks `audio_layout: "continuous"`.
-- **Ollama must be running** (`ollama serve`) for both `enhance` and `consolidate`. `consolidate` requires an existing enhanced summary (run `enhance` first).
+- **The configured LLM provider must be reachable** for `enhance`, `consolidate`, and `god`. With the default `provider: ollama` that means `ollama serve` at `localhost:11434`; with `provider: openai` it means the configured `base_url` is up and `api_key_env` is exported. `consolidate` requires an existing enhanced summary (run `enhance` first).
 - **`consolidate` is what writes `meetings.csv`**, not `enhance`. `enhance` only writes the enhanced markdown to `summaries/`.
 - **`pods/` is gitignored**, so pod data is never committed; run commands from the repo root so the relative `pods/` path resolves.
 - **`list_meetings` skips** any meeting whose JSON sidecar is missing or malformed (no error raised).
 - **KT sessions live under `pods/<pod>/kt/`** and are excluded from `list`/`search`/`list_meetings` by default; use `--kt` to target them. `search` default explicitly excludes `kt/` (it would otherwise mislabel the pod as `"kt"` instead of the real pod — `_make_match_from_path` special-cases `kt/transcripts/...` paths to recover the true pod name). `list --kt` requires a pod argument (unlike plain `list`, there's no global KT rollup) and goes through `storage.list_kt_sessions`/`Meeting` objects directly rather than `meetings.csv`, since KT sessions never write to that CSV.
-- **`god` command is a full agentic loop** (`agent.py` + `agent_tools.py`): it uses `/api/chat` (not `/api/generate`) via `llm.chat_stream`, supports tool calling, and maintains session history inside `GodSession`.
+- **`god` command is a full agentic loop** (`agent.py` + `agent_tools.py`): it goes through `providers.registry.build_provider` (uses `/api/chat` for Ollama, `/v1/chat/completions` for the OpenAI provider), supports tool calling, and maintains session history inside `GodSession`.
 - **TUI palette** is 256-color synthwave (`C_PEACH`, `C_PINK`, `C_LILAC`, `C_MINT`, `C_DIM`, `C_RED`) defined as constants in `tui.py` — use these for any new TUI output.
 - **`export` deliberately skips `podscribe.yaml`** on import to avoid overwriting local LLM config.
 - **Diarize provenance**: `cmd_diarize` requires `HF_TOKEN` (or interactive prompt in a TTY) + the `[diarize]` extras; MPS is tried first with a one-shot CPU retry on MPS op failure. `.raw` must be a valid RIFF/WAV (probed via `wave.open`); a truncated file produces a clear `ValueError`, not a pyannote traceback.

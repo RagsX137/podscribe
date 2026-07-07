@@ -11,11 +11,11 @@
 
 <p align="center">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white">
-  <img alt="Platform" src="https://img.shields.io/badge/Platform-Apple_Silicon-silver?logo=apple&logoColor=white">
+  <img alt="Platform" src="https://img.shields.io/badge/Platform-Apple_Si_·_NVIDIA_·_CPU-silver?logo=apple&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
   <img alt="Tests" src="https://img.shields.io/badge/Tests-600%2B_offline-success">
   <img alt="Whisper" src="https://img.shields.io/badge/Whisper-mlx--v3--turbo-purple">
-  <img alt="Ollama" src="https://img.shields.io/badge/LLM-Ollama-orange">
+  <img alt="LLM" src="https://img.shields.io/badge/LLM-Ollama_·_OpenAI--compat-orange">
   <img alt="VAD" src="https://img.shields.io/badge/VAD-WebRTC-teal">
 </p>
 
@@ -35,13 +35,24 @@
 
 ---
 
+## 📑 Contents
+
+- [Highlights](#-highlights) · [How it works](#-how-it-works) · [Quick start](#-quick-start)
+- [The flow](#-the-flow) · [Knowledge-Transfer videos](#-knowledge-transfer-videos) · [Benchmarks](#-benchmarks)
+- [Commands](#-commands) · [TUI](#-tui)
+- [Storage layout](#-storage-layout) · [Models & backends](#-models--backends) · [Cross-platform backends](#cross-platform-backends)
+- [LLM config](#-llm-config) · [Providers](#-providers) · [VAD tuning](#-vad-tuning)
+- [Privacy](#-privacy) · [Troubleshooting](#-troubleshooting) · [Project structure](#-project-structure) · [Tests](#-tests)
+
+---
+
 ## ✨ Highlights
 
 <table>
   <tr>
     <td width="50%" valign="top">
       <h3>🔒 Private by design</h3>
-      <p>All transcription runs on-device. <strong>No cloud, no network calls</strong> during record or enhance. <code>pods/</code> is gitignored — transcripts never leave your machine.</p>
+      <p>All transcription runs on-device — <strong>no cloud, no network calls</strong> during <code>record</code>. The LLM <code>enhance</code>/<code>consolidate</code>/<code>god</code> pipeline defaults to local Ollama; any OpenAI-compatible endpoint (Groq, OpenRouter, DeepSeek, GLM, Kimi, …) is opt-in. <code>pods/</code> is gitignored — transcripts never leave your machine.</p>
     </td>
     <td width="50%" valign="top">
       <h3>🤖 Agentic god-mode</h3>
@@ -50,8 +61,8 @@
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>⚡ Apple-Silicon optimized</h3>
-      <p>Backed by <code>mlx-whisper</code> (MLX) and WebRTC VAD. Runs in real time on a MacBook, no GPU rig required.</p>
+      <h3>⚡ Cross-platform ASR</h3>
+      <p>Pluggable backends: <code>mlx-whisper</code> on Apple Silicon, <code>faster-whisper</code> on NVIDIA CUDA (or CPU int8), optional <code>parakeet</code> on both. One CLI, three platforms.</p>
     </td>
     <td width="50%" valign="top">
       <h3>🧪 Battle-tested</h3>
@@ -77,9 +88,9 @@
 ```mermaid
 flowchart LR
   MIC[Mic 16kHz] --> VAD[WebRTC VAD]
-  VAD --> WHIS[mlx-whisper]
-  WHIS --> STORE[storage .md .json .raw]
-  STORE --> ENH[enhance Ollama]
+  VAD --> ASR[ASR backend<br/>mlx-whisper · faster-whisper · parakeet]
+  ASR --> STORE[storage .md .json .raw]
+  STORE --> ENH[enhance LLM]
   ENH --> CONS[consolidate meetings.csv]
   CLI[CLI / TUI] -.controls.-> VAD
   CLI -.controls.-> ENH
@@ -103,13 +114,15 @@ git clone <repo>
 cd podscribe
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
-pip install -e '.[mlx]'         # Apple Silicon  — Whisper via mlx-whisper
-pip install -e '.[cuda]'        # NVIDIA / CUDA  — Whisper via faster-whisper (verified on RTX 5090)
+pip install -e '.[mlx]'         # Apple Silicon  — Whisper via mlx-whisper (or parakeet: .[parakeet-mlx])
+pip install -e '.[cuda]'        # NVIDIA / CUDA  — Whisper via faster-whisper (or parakeet: .[parakeet-cuda])
+                                # CPU-only install? .[cuda] works too — int8 fallback, no GPU needed
 
 cp podscribe.yaml.example podscribe.yaml
 cp leadership_team.yaml.example leadership_team.yaml
 # edit leadership_team.yaml — add your team's names
-# edit podscribe.yaml — set your LLM model
+# edit podscribe.yaml — set your LLM model (local Ollama by default;
+#   see "Providers" to point at an OpenAI-compatible endpoint instead)
 ```
 
 Then:
@@ -131,8 +144,8 @@ record  →  enhance  →  consolidate
 | step | what it does | requires |
 |---|---|---|
 | `record` | live mic → VAD → Whisper → `.md` transcript, crash-safe | mic, mlx-whisper |
-| `enhance` | LLM cleanup pass → `.md` summary in `summaries/` | Ollama |
-| `consolidate` | extract structured fields → row in `meetings.csv` | Ollama, enhanced summary |
+| `enhance` | LLM cleanup pass → `.md` summary in `summaries/` | an LLM provider |
+| `consolidate` | extract structured fields → row in `meetings.csv` | an LLM provider, enhanced summary |
 
 Each step is independent. Run only what you need.
 
@@ -149,7 +162,7 @@ ingest  →  enhance --kt  →  ask
 | step | what it does | requires |
 |---|---|---|
 | `ingest <video>` | video + sibling `.vtt`/`.srt` → KT session | sibling transcript file (or `--asr` + ffmpeg for ASR path) |
-| `enhance --kt` | LLM summary of KT session → `summaries/` | Ollama |
+| `enhance --kt` | LLM summary of KT session → `summaries/` | an LLM provider |
 | `ask <id>` | Q&A grounded in ONE KT transcript | none (text-only) |
 
 Each KT session lives in `pods/<pod>/kt/` — separate from meetings. The `--asr` path forces local mlx-whisper transcription, creates a coexisting session, and never overwrites a `.vtt`-derived one.
@@ -193,122 +206,26 @@ Apple Silicon · on-device · reproducible via `python benchmarks/bench_transcri
 
 ## ⌨️ Commands
 
-```
-podscribe                              # TUI launcher (TTY only)
-podscribe god [prompt]                 # agentic mode · 20+ tools · REPL or one-shot
-```
+Podscribe uses a **pod-first** syntax (`podscribe <pod> <command>`) — `podscribe sam-chen record` is the same as `podscribe record sam-chen`. Aliases: `start`→`record`, `summarize`→`enhance`, `cons`→`consolidate`.
 
-### pod management
+| command | one-liner |
+|---|---|
+| `init <name>` | create a pod (kebab-case; `--display-name`, `--role`, `--cadence`, `--notes`) |
+| `record` | live mic → VAD → Whisper → `.md` transcript (Ctrl+C / `s` to stop) |
+| `list` | meetings table (`--all`, `--since 7d`, `--recent N`, `--type 1on1`, `--kt`) |
+| `show <id\|latest>` | print a transcript (`--kt` for KT sessions) |
+| `search <query>` | fixed-string search across transcripts (`--pod`, `--since`, `--type`, `--color`, `--kt`) |
+| `enhance` | LLM cleanup → `summaries/<id>.md` (alias `summarize`; `--kt` for KT) |
+| `consolidate` | structured fields → `meetings.csv` row (alias `cons`; needs `enhance` first) |
+| `ingest <video>` | KT video + sibling `.vtt`/`.srt` → KT session (`--asr` forces local Whisper) |
+| `ask <id\|latest>` | Q&A grounded in one KT transcript |
+| `diarize` | post-hoc speaker diarization → `.diarized.md` (needs continuous `.raw`) |
+| `god [prompt]` | agentic mode: 20+ tools, REPL or one-shot |
+| `context` | glossary add/remove/list (merges `leadership_team.yaml` + per-pod) |
+| `export` / `import` | tar.gz backup / restore of `pods/` + root YAMLs |
+| `config llm\|consolidate\|god` | project-level config (`--provider`, `--base-url`, `--api-key-env`) |
 
-```
-podscribe init <name>                  # kebab-case name, e.g. sam-chen
-  --display-name "Sam Chen"
-  --role "Senior Engineer"
-  --cadence weekly
-  --notes "private notes"
-
-podscribe list                         # all pods · all meetings
-podscribe list <pod>                   # one pod
-podscribe list --all                   # uses global pods/meetings.csv
-podscribe list --since 7d              # last 7 days  (also: 24h · 2026-06-15)
-podscribe list --recent 5              # N most recent
-podscribe list --type 1on1             # filter by type
-```
-
-### recording
-
-```
-podscribe record <pod>                 # alias: start
-  --model large-v3-turbo               # default; see Models below
-  --vad-aggressiveness 2               # 0 loose → 3 strict; default 2
-  --device N                           # input device index
-  --no-keep-audio                      # delete .raw after recording (default: keep)
-  --type 1on1                          # optional; creates type/ subdir
-
-podscribe <pod> record                 # pod-first syntax also works
-```
-
-Press `s` or Ctrl+C to stop. Transcript is written incrementally — a crash loses at most one segment.
-
-### reading
-
-```
-podscribe show <pod> latest
-podscribe show <pod> 2026-06-22        # ID prefix
-podscribe search "Project Atlas"       # all pods · fixed-string match
-podscribe search "auth" --pod sam-chen
-podscribe search "blocker" --since 7d
-podscribe search "x" --type 1on1 --color
-```
-
-Search uses `rg` if on PATH, falls back to Python. Output: `pod:DD-MMM-YYYY:<id>:[HH:MM:SS] line`.
-
-### LLM pipeline
-
-```
-podscribe enhance <pod>                # alias: summarize · defaults to latest
-podscribe enhance <pod> <id-prefix>
-podscribe consolidate <pod>            # alias: cons · requires enhanced summary
-podscribe consolidate <pod> <id-prefix> --no-log   # skip CSV update
-```
-
-Requires `ollama serve` at `http://localhost:11434`.
-
-### `diarize`
-
-Post-hoc speaker diarization for a recorded meeting. Requires `pyannote.audio` and a HuggingFace token.
-
-```bash
-pip install -e ".[diarize]"            # opt-in extra (torch, pyannote.audio)
-podscribe diarize <pod> [meeting]      # meeting ID prefix or "latest" (default)
-podscribe diarize <pod> --num-speakers 2   # pin a speaker count
-podscribe diarize <pod> --cpu               # force CPU (default: Apple MPS/Metal when available)
-podscribe diarize <pod> --relogin           # re-prompt for HF token
-```
-
-**First-run HF token.** Accept the model license at
-`huggingface.co/pyannote/speaker-diarization-community-1` (the pipeline may prompt
-for a few gated sub-models on first download — accept each), then create a read
-token at `huggingface.co/settings/tokens`. First `diarize` run in a TTY prompts
-for it, saved to `~/.config/podscribe/hf_token` (mode 0o600). `$HF_TOKEN` overrides.
-
-**Output.** Writes a `.diarized.md` sidecar; `show`/`enhance` prefer it. Labels are
-generic (`Speaker 0`, `Speaker 1`, …). Only meetings recorded with continuous
-audio (this version onward) can be diarized — older recordings are refused.
-
-### context (glossary)
-
-```
-podscribe context <pod> add "Alice Smith" --category person
-podscribe context <pod> add "Project Atlas" --category project
-podscribe context <pod> remove "Alice Smith"
-podscribe context <pod> list
-```
-
-Glossary terms are injected as Whisper `initial_prompt` during `record` and embedded in the LLM prompt during `enhance`/`consolidate`. Effective glossary = `leadership_team.yaml` (global) + per-pod `config.yaml`.
-
-### config
-
-```
-podscribe config llm show
-podscribe config llm set <model> <prompt-template>
-podscribe config consolidate show
-podscribe config consolidate set <prompt>
-podscribe config god show
-podscribe config god set <model>
-```
-
-### backup
-
-```
-podscribe export --out pods-backup.tar.gz
-podscribe export --out -                          # stdout
-podscribe import pods-backup.tar.gz
-podscribe import --force pods-backup.tar.gz       # overwrite existing pods
-podscribe import --dry-run pods-backup.tar.gz     # show, don't write
-```
-
-`export` bundles `pods/`, `leadership_team.yaml`, `podscribe.yaml`. Excludes `.raw`, `.env`, `__pycache__/`, `.venv/`. `import` skips `podscribe.yaml` to preserve local LLM config.
+Full flag reference, the interactive **TUI** keymap, and the **god-mode** tool list live in the [`docs/USER-MANUAL.md`](docs/USER-MANUAL.md).
 
 ---
 
@@ -331,61 +248,17 @@ SCREEN 1  —  NORMAL MODE  ·  DASHBOARD VIEW
  NORMAL   sam-chen  ·  12 meetings  ·  last 3d ago
 ```
 
-| key | action |
-|---|---|
-| `j` / `k` | move down / up |
-| `Tab` | switch pane (PODS ↔ main) |
-| `r` | record new meeting |
-| `e` | enhance selected meeting |
-| `c` | consolidate selected meeting |
-| `Enter` | view transcript |
-| `/` | search |
-| `:` | command palette |
-| `q` | quit |
-
-Status bar colour: **lilac** = NORMAL · **pink** = recording/streaming · **peach** = command palette.
-
----
-
-## 🧠 God mode
-
-```
-podscribe god                          # interactive REPL (TUI)
-podscribe god "what did sam say about the API last week?"
-podscribe god --model llama3.2:3b
-```
-
-Two-pane view: left = conversation, right = tool call log. The agent has access to all pod data and can record, enhance, consolidate, and search on your behalf. Capped at 10 tool-calling turns per prompt. Type `/exit` to quit the REPL.
+**God mode** (`podscribe god`) is a two-pane agentic REPL — left = conversation, right = tool call log. The agent has 20+ tools and access to all pod data. Full keymap and god-mode tool list: [`docs/USER-MANUAL.md`](docs/USER-MANUAL.md).
 
 ---
 
 ## 📂 Storage layout
 
-```
-leadership_team.yaml                       — global glossary (gitignored)
-podscribe.yaml                             — LLM + god config (gitignored)
-pods/
-├── meetings.csv                           — global rollup (all pods)
-└── <pod-name>/
-    ├── config.yaml                        — metadata · glossary · optional llm
-    ├── meetings.csv                       — per-pod rollup (written by consolidate)
-    ├── transcripts/
-    │   └── DD-MMM-YYYY/
-    │       └── [<type>/]                  — e.g. 1on1/ (optional, when --type used)
-    │           ├── <meeting-id>.md        — incremental transcript · [HH:MM:SS] lines
-    │           ├── <meeting-id>.json      — metadata sidecar
-    │           └── <meeting-id>.raw       — raw audio (kept by default)
-    └── summaries/
-        └── DD-MMM-YYYY/
-            └── <meeting-id>.md            — enhanced output (written by enhance)
-```
-
-Meeting ID format: `YYYY-MM-DD-HHMMSS-<pod-name>` (e.g. `2026-06-27-143012-sam-chen`).  
-2-level and 3-level transcript layouts coexist; `list` and `search` discover both.
+One tree per pod: `pods/<name>/{config.yaml, meetings.csv, transcripts/, summaries/, kt/}`. Meeting ID format: `YYYY-MM-DD-HHMMSS-<pod>`. Transcripts (`[HH:MM:SS] text`) and `.raw` audio are written incrementally; summaries land in `summaries/`. Full tree + 2-level/3-level layout note: [`docs/USER-MANUAL.md`](docs/USER-MANUAL.md#file-structure).
 
 ---
 
-## 🧩 Models
+## 🧩 Models & backends
 
 Default: `large-v3-turbo` (~500 MB, cached in `~/.cache/huggingface/` after first use).
 
@@ -395,7 +268,22 @@ Default: `large-v3-turbo` (~500 MB, cached in `~/.cache/huggingface/` after firs
 | `turbo` | `mlx-community/whisper-large-v3-turbo` |
 | `large-v3-turbo` | `mlx-community/whisper-large-v3-turbo` |
 
-Any other value passes through to `mlx-whisper` unchanged — full HF paths work.
+Any other value passes through to the backend unchanged — full HF paths work.
+
+### Cross-platform backends
+
+`Transcriber` is a facade over pluggable ASR engines in `podscribe/backends/`. `--backend auto` (default) picks by `(model, platform)`; you can also pin one with `--backend <name>`.
+
+| `--backend` | extra | platform | engine | notes |
+|---|---|---|---|---|
+| `whisper-mlx` | `.[mlx]` | Apple Silicon | `mlx-whisper` | default on arm64 macOS |
+| `whisper-faster` | `.[cuda]` | NVIDIA / CPU | `faster-whisper` (CTranslate2) | default on x86_64; CUDA int8/fp8 on GPU, CPU int8 fallback |
+| `parakeet-mlx` | `.[parakeet-mlx]` | Apple Silicon | `parakeet-mlx` | optional; fast TDT Bean model |
+| `parakeet-nemo` | `.[parakeet-cuda]` | NVIDIA | `nemo_toolkit[asr]` | optional |
+
+**Windows CUDA note.** On Windows, `.[cuda]` also pulls `nvidia-cublas-cu12` / `nvidia-cudnn-cu12` wheels — CTranslate2 doesn't bundle the CUDA 12 runtime there, and `_add_cuda_dll_dirs()` adds those wheels' DLLs to the loader search path at model-load time. Verified on an RTX 5090 (Blackwell sm_120).
+
+**CPU fallback.** If CUDA can't initialize, `whisper-faster` emits a `RuntimeWarning` and falls back to CPU int8 (slower) rather than failing — check for that warning if GPU transcription seems slow.
 
 ---
 
@@ -405,7 +293,10 @@ Lives in `podscribe.yaml` (project-level) or per-pod `config.yaml`. Pod-level ta
 
 ```yaml
 llm:
+  provider: ollama              # "ollama" (default) or "openai" (any OpenAI-compatible endpoint)
   model: qwen2.5:7b
+  base_url: http://localhost:11434   # omit for default Ollama; required for provider: openai
+  api_key_env: OPENAI_API_KEY        # env-var NAME (not the key) — openai provider only
   preserve_speakers: true        # default true; prepends speaker-preservation preamble
   prompt_template: |
     You are cleaning up a raw meeting transcript. {{glossary}}
@@ -415,6 +306,43 @@ llm:
 
 `consolidate` uses a separate prompt under `consolidate.prompt` (supports `{{summary}}`).  
 `god` uses `god.model`, falling back to `llm.model`.
+
+---
+
+## 🌐 Providers
+
+The `enhance` / `consolidate` / `god` / `enhance --kt` / `summarize` pipeline talks to a pluggable provider resolved from the `llm` config. Two are built in:
+
+| `provider` | wire | notes |
+|---|---|---|
+| `ollama` (default) | native `/api/generate`, `/api/chat`, `/api/show` | zero-config local; `ollama serve` at `localhost:11434` |
+| `openai` | OpenAI-compatible `/v1/chat/completions` (SSE streaming) | requires `base_url`; auth via `api_key_env` (an env-var **name**) |
+
+The `openai` provider speaks the OpenAI chat schema, so any of these work by pointing `--base-url` at them:
+
+| service | example `--base-url` |
+|---|---|
+| OpenAI | `https://api.openai.com/v1` |
+| Groq | `https://api.groq.com/openai/v1` |
+| OpenRouter | `https://openrouter.ai/api/v1` |
+| DeepSeek | `https://api.deepseek.com/v1` |
+| GLM (Zhipu) | `https://open.bigmodel.cn/api/paas/v4` |
+| Kimi (Moonshot) | `https://api.moonshot.cn/v1` |
+| Minimax | `https://api.minimax.chat/v1` |
+| Qwen (DashScope) | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| LM Studio | `http://localhost:1234/v1` |
+| vLLM | `http://localhost:8000/v1` |
+| Ollama `/v1` shim | `http://localhost:11434/v1` |
+
+**Quick switch** — point the project at a hosted model without touching YAML:
+
+```bash
+export GROQ_API_KEY=...
+podscribe config llm set llama3.1:70b "$PROMPT" --provider openai --base-url https://api.groq.com/openai/v1 --api-key-env GROQ_API_KEY
+podscribe enhance <pod> latest
+```
+
+Privacy: with `provider: ollama` nothing leaves your machine. With `provider: openai` the transcript text is sent to the configured `base_url` — choose accordingly.
 
 ---
 
@@ -451,35 +379,13 @@ Start at `2`. Garbage/hallucinated segments on pauses → raise to `3`. Words cl
 **Hallucinations on pauses** — VAD too loose; raise aggressiveness.  
 **Wrong input device** — `python -c "import sounddevice; print(sounddevice.query_devices())"` then `--device N`.  
 **Crashed mid-meeting** — transcript is written incrementally; run `podscribe show <pod> latest`.  
-**Ollama not reachable** — `ollama serve` must be running for `enhance`, `consolidate`, and `god`.
+**LLM provider not reachable** — `enhance`, `consolidate`, and `god` need a reachable LLM. Default: `ollama serve` at `localhost:11434`. For `provider: openai`, check your `--base-url` and that the env var named by `--api-key-env` is exported.
 
 ---
 
 ## 🗺️ Project structure
 
-Single-package layout, no nested packages — every module has one job.
-
-```
-podscribe/
-├── cli.py          — argparse + command handlers (entrypoint)
-├── tui.py          — interactive modal TUI (lazy-loaded)
-├── agent.py        — god-mode agentic loop
-├── agent_tools.py  — tool implementations for the agent
-├── audio.py        — sounddevice mic + webrtcvad capture
-├── transcriber.py  — mlx-whisper wrapper
-├── storage.py      — pods/<name>/ transcripts, summaries, CSV
-├── config.py       — pod / project / leadership-team config
-├── glossary.py     — Whisper initial_prompt glossary
-├── llm.py          — Ollama client (enhance/consolidate/chat)
-├── models.py       — Pod / Meeting / Segment dataclasses
-├── search.py       — rg-backed cross-pod search
-├── export.py       — tar.gz backup / restore
-└── fs_tools.py     — filesystem tools for the agent
-tests/              — 600+ tests, all offline-safe (monkeypatch + tmp_path)
-benchmarks/         — bench_transcribe.py + bench_enhance.py + results/
-fixtures/asr/       — labeled audio clips for WER benchmarks
-docs/               — ARCHITECTURE.md · BENCHMARKS.md · USER-MANUAL.md · adr/
-```
+Single-package layout, no nested packages — every module has one job. See [`AGENTS.md`](AGENTS.md) for the full module map (every file + one-line purpose) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system diagram.
 
 ---
 
@@ -487,10 +393,12 @@ docs/               — ARCHITECTURE.md · BENCHMARKS.md · USER-MANUAL.md · ad
 
 ```bash
 pytest tests/ -v                      # all tests (600+; count varies with installed engines)
-pytest tests/ -k "not transcriber"    # skip network smoke test (recommended for CI)
+pytest tests/ -k "not transcriber"    # skip the network smoke test (recommended for CI)
+pytest tests/test_storage.py -v       # single file
+pytest tests/ -k "test_init_pod" -v   # single test by name
 ```
 
-Offline tests need no mic or model. The single smoke test (`test_transcriber_accepts_initial_prompt`) downloads a real Whisper model.
+Offline tests need no mic, model, or network. The single smoke test (`test_transcriber_accepts_initial_prompt`) downloads a real Whisper model; `test_diarize_smoke` needs an HF token.
 
 ---
 
