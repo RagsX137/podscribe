@@ -13,7 +13,7 @@
   <img alt="Python" src="https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white">
   <img alt="Platform" src="https://img.shields.io/badge/Platform-Apple_Silicon-silver?logo=apple&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
-  <img alt="Tests" src="https://img.shields.io/badge/Tests-357_offline-success">
+  <img alt="Tests" src="https://img.shields.io/badge/Tests-600%2B_offline-success">
   <img alt="Whisper" src="https://img.shields.io/badge/Whisper-mlx--v3--turbo-purple">
   <img alt="Ollama" src="https://img.shields.io/badge/LLM-Ollama-orange">
   <img alt="VAD" src="https://img.shields.io/badge/VAD-WebRTC-teal">
@@ -55,7 +55,7 @@
     </td>
     <td width="50%" valign="top">
       <h3>🧪 Battle-tested</h3>
-      <p><strong>357 offline tests</strong> — no mic, no model download, no network. <code>pip install -e . && pytest</code> just works out of the box.</p>
+      <p><strong>600+ offline tests</strong> — no mic, no model download, no network. <code>pip install -e . && pytest</code> just works out of the box.</p>
     </td>
   </tr>
   <tr>
@@ -475,7 +475,7 @@ podscribe/
 ├── search.py       — rg-backed cross-pod search
 ├── export.py       — tar.gz backup / restore
 └── fs_tools.py     — filesystem tools for the agent
-tests/              — 357 tests, all offline-safe (monkeypatch + tmp_path)
+tests/              — 600+ tests, all offline-safe (monkeypatch + tmp_path)
 benchmarks/         — bench_transcribe.py + bench_enhance.py + results/
 fixtures/asr/       — labeled audio clips for WER benchmarks
 docs/               — ARCHITECTURE.md · BENCHMARKS.md · USER-MANUAL.md · adr/
@@ -486,7 +486,7 @@ docs/               — ARCHITECTURE.md · BENCHMARKS.md · USER-MANUAL.md · ad
 ## 🧪 Tests
 
 ```bash
-pytest tests/ -v                      # all tests (357 collected)
+pytest tests/ -v                      # all tests (600+; count varies with installed engines)
 pytest tests/ -k "not transcriber"    # skip network smoke test (recommended for CI)
 ```
 
