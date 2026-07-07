@@ -8,6 +8,10 @@ class _SSEResp:
         self._lines = lines
         self.status_code = status
 
+    @property
+    def ok(self):
+        return self.status_code < 400
+
     def raise_for_status(self):
         if self.status_code >= 400:
             err = requests.HTTPError(str(self.status_code)); err.response = self
@@ -86,13 +90,30 @@ def test_chat_keeps_indexless_tool_calls_separate(monkeypatch):
     assert names == ["search", "glossary"]
 
 
-def test_reachable_true_on_any_http_response(monkeypatch):
+def test_reachable_true_on_404_no_models_endpoint(monkeypatch):
+    """Some OpenAI-compatible gateways don't implement /models — still "up"."""
     def fake_get(url, headers=None, timeout=None):
-        return _SSEResp([], status=401)  # server up but unauthorized
+        return _SSEResp([], status=404)
 
     monkeypatch.setattr(requests, "get", fake_get)
     p = OpenAIProvider("m", base_url="https://api.example.com/v1", api_key="k")
+    ok, reason = p.reachable_detail()
     assert p.reachable() is True
+    assert ok is True
+    assert "404" in reason
+
+
+def test_reachable_false_on_401_unauthorized(monkeypatch):
+    """401/403 means the server is up but misconfigured — not "reachable"."""
+    def fake_get(url, headers=None, timeout=None):
+        return _SSEResp([], status=401)
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    p = OpenAIProvider("m", base_url="https://api.example.com/v1", api_key="k")
+    ok, reason = p.reachable_detail()
+    assert p.reachable() is False
+    assert ok is False
+    assert "401" in reason
 
 
 def test_reachable_false_on_connection_error(monkeypatch):
@@ -102,6 +123,28 @@ def test_reachable_false_on_connection_error(monkeypatch):
     monkeypatch.setattr(requests, "get", fake_get)
     p = OpenAIProvider("m", base_url="https://api.example.com/v1")
     assert p.reachable() is False
+    ok, reason = p.reachable_detail()
+    assert ok is False
+    assert "unreachable" in reason
+
+
+def test_consume_raises_on_error_frame(monkeypatch):
+    """An SSE `{"error": ...}` frame must trigger a retry, not a silent empty result."""
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    error_line = "data: " + json.dumps({"error": {"message": "rate_limit_exceeded"}})
+    calls = []
+
+    def fake_post(url, json=None, headers=None, stream=False, timeout=None):
+        calls.append(1)
+        return _SSEResp([error_line, "data: [DONE]"])
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    retries = []
+    p = OpenAIProvider("m", base_url="http://x/v1")
+    out = p.generate("hi", max_retries=2, on_retry=lambda a, e: retries.append(e))
+    assert out is None
+    assert len(calls) == 2  # retried once before giving up
+    assert "rate_limit_exceeded" in retries[0]
 
 
 def test_no_api_key_omits_auth_header(monkeypatch):

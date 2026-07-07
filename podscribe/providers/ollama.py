@@ -39,6 +39,8 @@ class OllamaProvider:
                     chunk = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if "error" in chunk:
+                    raise requests.RequestException(str(chunk["error"]))
                 if chunk.get("done"):
                     stats = {
                         "prompt_eval_count": chunk.get("prompt_eval_count", 0),
@@ -79,6 +81,8 @@ class OllamaProvider:
                     chunk = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                if "error" in chunk:
+                    raise requests.RequestException(str(chunk["error"]))
                 msg = chunk.get("message", {})
                 if msg.get("content"):
                     parts.append(msg["content"])
@@ -98,11 +102,18 @@ class OllamaProvider:
 
     def reachable(self) -> bool:
         """True if the Ollama server answers /api/tags within 1s."""
+        ok, _ = self.reachable_detail()
+        return ok
+
+    def reachable_detail(self) -> tuple[bool, str]:
+        """(ok, reason) pair for status displays."""
         try:
             r = requests.get(f"{self.base_url}/api/tags", timeout=1)
-            return r.ok
-        except requests.RequestException:
-            return False
+        except requests.RequestException as e:
+            return False, f"unreachable: {e}"
+        if r.ok:
+            return True, "ok"
+        return False, f"error (HTTP {r.status_code})"
 
     def model_info(self) -> dict:
         key = (self.base_url, self.model)

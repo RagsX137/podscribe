@@ -137,7 +137,7 @@ def _dur_fmt(sec: Optional[float]) -> str:
     return f"{m}m"
 
 
-def render_header(pod: Pod, ollama_ok: bool) -> Text:
+def render_header(pod: Pod, ollama_ok: bool, ollama_reason: str = "") -> Text:
     """Full-width header: left = breadcrumb, right = ollama + key pills."""
     t = Text(overflow="ellipsis", no_wrap=True)
     # Left side
@@ -151,6 +151,8 @@ def render_header(pod: Pod, ollama_ok: bool) -> Text:
     right_parts = []
     if ollama_ok:
         right_parts.append(f"[{C_MINT}]● LLM online[/{C_MINT}]")
+    elif ollama_reason:
+        right_parts.append(f"[{C_DIM}]○ LLM offline ({ollama_reason})[/{C_DIM}]")
     else:
         right_parts.append(f"[{C_DIM}]○ LLM offline[/{C_DIM}]")
     right_parts += [
@@ -458,6 +460,16 @@ def probe_provider(provider) -> bool:
         return provider.reachable()
     except Exception:
         return False
+
+
+def probe_provider_detail(provider) -> tuple[bool, str]:
+    """Like probe_provider but with the reason, for status messages."""
+    if provider is None:
+        return False, "no provider configured"
+    try:
+        return provider.reachable_detail()
+    except Exception as e:
+        return False, str(e)
 
 
 # ---------------------------------------------------------------------------
@@ -1055,7 +1067,7 @@ def launch() -> int:
         main_idx=0,
         focused_pane="main",
     )
-    ollama_ok = probe_provider(_provider_for_pod(pods[state.sidebar_idx]))
+    ollama_ok, ollama_reason = probe_provider_detail(_provider_for_pod(pods[state.sidebar_idx]))
 
     def _current_pod() -> Pod:
         return pods[state.sidebar_idx]
@@ -1080,7 +1092,7 @@ def launch() -> int:
                     llm_ctx = str((info.get("model_info") or {}).get("llama.context_length", "?"))
                 except Exception:
                     llm_ctx = "?"
-            header    = render_header(pod, ollama_ok)
+            header    = render_header(pod, ollama_ok, ollama_reason)
             status    = render_status_bar(state, pod, meetings=meetings,
                                           llm_model=llm_model, llm_ctx=llm_ctx)
             sidebar_panel = render_sidebar(state, pods)
@@ -1240,9 +1252,10 @@ def god_view(model: Optional[str] = None) -> int:
         return 1
 
     # Quick provider check (against the session's configured provider)
-    if not probe_provider(session.provider):
+    ok, reason = probe_provider_detail(session.provider)
+    if not ok:
         console.print(Panel(
-            "LLM provider not reachable. Check the base URL and that the server is running.",
+            f"LLM provider not reachable: {reason}",
             title="[red]Error[/red]", border_style="red",
         ))
         return 1

@@ -44,6 +44,41 @@ def test_generate_streams_tokens_and_stats(monkeypatch):
     assert captured["body"]["model"] == "qwen3.6"
 
 
+def test_generate_raises_and_retries_on_error_frame(monkeypatch):
+    """A mid-stream {"error": ...} frame must trigger a retry, not a silent empty result."""
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    error_line = json.dumps({"error": "model runner has unexpectedly stopped"})
+    calls = []
+
+    def fake_post(url, json=None, stream=False, timeout=None):
+        calls.append(1)
+        return _StreamResp([error_line])
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    retries = []
+    p = OllamaProvider("qwen3.6")
+    out = p.generate("hi", max_retries=2, on_retry=lambda a, e: retries.append(e))
+    assert out is None
+    assert len(calls) == 2  # retried once before giving up
+    assert "unexpectedly stopped" in retries[0]
+
+
+def test_chat_raises_and_retries_on_error_frame(monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    error_line = json.dumps({"error": "model runner has unexpectedly stopped"})
+    calls = []
+
+    def fake_post(url, json=None, stream=False, timeout=None):
+        calls.append(1)
+        return _StreamResp([error_line])
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    p = OllamaProvider("qwen3.6")
+    out = p.chat([{"role": "user", "content": "hi"}], max_retries=2)
+    assert out is None
+    assert len(calls) == 2
+
+
 def test_reachable_hits_configured_base_url(monkeypatch):
     """reachable() must probe the provider's own base_url, not localhost."""
     captured = {}
@@ -67,6 +102,16 @@ def test_reachable_false_on_connection_error(monkeypatch):
 
     monkeypatch.setattr(requests, "get", fake_get)
     assert OllamaProvider("m", base_url="http://box:11434").reachable() is False
+
+
+def test_reachable_detail_surfaces_connection_error_reason(monkeypatch):
+    def fake_get(url, timeout=None):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    ok, reason = OllamaProvider("m", base_url="http://box:11434").reachable_detail()
+    assert ok is False
+    assert "unreachable" in reason
 
 
 def test_chat_accumulates_tool_calls(monkeypatch):

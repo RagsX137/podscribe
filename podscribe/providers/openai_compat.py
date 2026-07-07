@@ -51,6 +51,10 @@ class OpenAIProvider:
                 chunk = json.loads(data)
             except json.JSONDecodeError:
                 continue
+            if "error" in chunk:
+                err = chunk["error"]
+                msg = err.get("message", "upstream error") if isinstance(err, dict) else str(err)
+                raise requests.RequestException(msg)
             choices = chunk.get("choices") or [{}]
             delta = choices[0].get("delta", {})
             if delta.get("content"):
@@ -113,11 +117,25 @@ class OpenAIProvider:
 
     def reachable(self) -> bool:
         """True if the server responds at all (any HTTP status = up)."""
+        ok, _ = self.reachable_detail()
+        return ok
+
+    def reachable_detail(self) -> tuple[bool, str]:
+        """(ok, reason) pair for status displays.
+
+        Most statuses (including 404 from gateways with no /models endpoint)
+        count as "up" — only a connection failure or 401/403 (bad api key)
+        means the provider can't actually be used.
+        """
         try:
-            requests.get(f"{self.base_url}/models", headers=self._headers(), timeout=2)
-            return True
-        except requests.RequestException:
-            return False
+            r = requests.get(f"{self.base_url}/models", headers=self._headers(), timeout=2)
+        except requests.RequestException as e:
+            return False, f"unreachable: {e}"
+        if r.status_code in (401, 403):
+            return False, f"misconfigured (HTTP {r.status_code}, check api key)"
+        if r.ok:
+            return True, "ok"
+        return True, f"up (HTTP {r.status_code})"
 
     def model_info(self) -> dict:
         return {}

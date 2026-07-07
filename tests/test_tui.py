@@ -27,7 +27,7 @@ def test_launch_with_pod_and_q_exits_cleanly(tmp_path, monkeypatch):
     init_pod("sam-chen", display_name="Sam Chen")
     import podscribe.tui as tui
     monkeypatch.setattr(tui, "read_key", lambda: "q")
-    monkeypatch.setattr(tui, "probe_provider", lambda p: False)
+    monkeypatch.setattr(tui, "probe_provider_detail", lambda p: (False, "no provider configured"))
     rc = launch()
     assert rc == 0
 
@@ -44,7 +44,7 @@ def test_launch_tab_switches_focused_pane(tmp_path, monkeypatch):
         k = next(keys)
         return "\t" if k == "Tab" else k
     monkeypatch.setattr(tui, "read_key", fake_key)
-    monkeypatch.setattr(tui, "probe_provider", lambda p: False)
+    monkeypatch.setattr(tui, "probe_provider_detail", lambda p: (False, "no provider configured"))
     rc = tui.launch()
     assert rc == 0
 
@@ -437,6 +437,10 @@ def test_render_header_shows_ollama_status():
 
     hdr_off = render_header(pod, ollama_ok=False)
     assert "offline" in hdr_off
+
+    hdr_off_reason = render_header(pod, ollama_ok=False, ollama_reason="misconfigured (HTTP 401, check api key)")
+    assert "offline" in hdr_off_reason
+    assert "401" in hdr_off_reason
 
 
 def test_render_dashboard_shows_pod_name(tmp_path):
@@ -917,7 +921,7 @@ def test_handle_slash_exit_raises_exit_sentinel(tmp_path, monkeypatch):
     import podscribe.agent as agent_mod
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(tui, "probe_provider", lambda p: True)
+    monkeypatch.setattr(tui, "probe_provider_detail", lambda p: (True, "ok"))
 
     chars = list("/exit\r")
     char_iter = iter(chars)
@@ -943,3 +947,26 @@ def test_handle_slash_exit_raises_exit_sentinel(tmp_path, monkeypatch):
     # /exit must return 0, not 130 (which a bare KI would give)
     rc = tui.god_view(model="test-model")
     assert rc == 0
+
+
+def test_god_view_shows_reachable_reason_when_provider_down(tmp_path, monkeypatch, capsys):
+    """god_view's provider-down error should surface *why*, not a generic message."""
+    import podscribe.tui as tui
+    import podscribe.agent as agent_mod
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        tui, "probe_provider_detail",
+        lambda p: (False, "misconfigured (HTTP 401, check api key)"),
+    )
+
+    class _StubSession:
+        model = "test-model"
+        provider = None
+
+    monkeypatch.setattr(agent_mod, "GodSession", lambda model=None: _StubSession())
+
+    rc = tui.god_view(model="test-model")
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "401" in out
