@@ -64,7 +64,7 @@ in the meeting JSON gates `diarize`.
 | `ask` | Scoped KT Q&A: `podscribe <pod> ask <id\|latest> [question...]`. Grounded in one KT transcript (kt/ subtree only); REPL when no question. |
 | `diarize` | Post-hoc diarization via pyannote.audio (`pip install -e '.[diarize]'` + HF token). Writes `.diarized.md`; `show`/`enhance` prefer it. Refuses non-continuous recordings. Defaults to Apple MPS/Metal when available (CPU fallback). Flags: `--num-speakers`, `--cpu`, `--relogin`. |
 | `search <query>` | Fixed-string match across transcripts. Flags: `--pod`, `--since`, `--type`, `--color`, `--kt` (search KT sessions instead of meetings; default excludes kt/). Uses `rg` if on PATH, else Python fallback. |
-| `god [prompt]` | Agentic mode: no prompt → TUI REPL; `--model` override stored as `god.model` in `podscribe.yaml` |
+| `god [prompt]` | Agentic mode: no prompt → TUI REPL; `--model` override applies to that invocation only (use `config god set` to persist) |
 | `export` | Bundles `pods/`, `leadership_team.yaml`, `podscribe.yaml` into tar.gz. `--out -` → stdout. Excludes `.raw`, `.env`, `__pycache__/`, `.pytest_cache/`, `.venv/`. |
 | `import <archive>` | Restores an export tarball. `--force` overwrites existing pods; `--dry-run` prints only. Refuses path-traversal/symlink members. Skips root-level `podscribe.yaml`. |
 | `podscribe` (no args) | TTY-only; opens the remembered-pod launcher menu with Record/Enhance/Consolidate/Others. Falls back to a help message in non-TTY contexts. |
@@ -157,7 +157,7 @@ pytest tests/ -k "test_init_pod" -v          # single test by name
 pytest tests/ -k "not transcriber" -v        # skip the smoke test (offline)
 ```
 
-- 456 tests collected (455 offline + 1 smoke that needs network / gated models). All offline tests need no mic or model.
+- 600+ tests (exact count depends on which optional engines are installed); all but one are offline — a single smoke test needs network / gated models. Run `pytest tests/ --collect-only -q | tail -1` for the current total. All offline tests need no mic or model.
 - **Filesystem isolation**: every test uses `monkeypatch.chdir(tmp_path)` — tests rely on relative `pods/` path resolving inside `tmp_path`. Omitting this will corrupt real pod data.
 - `test_transcriber.py::test_transcriber_accepts_initial_prompt` downloads a real Whisper model — skip with `-k "not transcriber"` when offline.
 - `test_diarizer.py::test_diarize_smoke` runs real pyannote.audio — gated behind an HF token (`HF_TOKEN` env or `~/.config/podscribe/hf_token`), skipped otherwise. Cached HF weights work offline with `HF_HUB_OFFLINE=1`.

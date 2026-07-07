@@ -64,8 +64,11 @@ via a separate chunked side-path (120s chunks, 15s overlap) because the backend
 OOMs on the full clip (**#10**, see below). Its low memory is therefore partly a
 *consequence* of chunking rather than a like-for-like measurement, and chunk seams
 can nudge its WER. Treat the **accuracy ranking as sound** and Parakeet's
-**RTF/RSS as indicative, not harness-matched** — a true apples-to-apples number
-needs the #10 chunking fix so it can run through `bench_meeting.py` unassisted.
+**RTF/RSS as indicative, not harness-matched** for *this recorded run*. The #10
+chunking fix has since landed (chunked decode is now the backend default), so a
+fresh `bench_meeting.py` run decodes `parakeet-mlx` through the normal
+`Transcriber` path unassisted — re-run it to replace these numbers with a true
+apples-to-apples measurement.
 
 | Model | Params | Mean RTF (↓) | Peak RSS (MB) | Mean WER (↓) | Mean CER (↓) | Mean MER (↓) | Mean WIL (↓) | Mean WIP (↑) |
 |---|---|---|---|---|---|---|---|---|
@@ -84,14 +87,17 @@ The `parakeet-nemo` (CUDA) backend was **not runnable** on this Apple Silicon
 host; it decodes the same `parakeet-tdt-0.6b-v2` weights as `parakeet-mlx`, so
 the mlx row is the fair cross-platform proxy for its accuracy.
 
-> **Parakeet long-audio caveat (`parakeet-mlx` chunking).** The `parakeet-mlx`
-> backend currently transcribes a clip in a single pass with no internal
-> chunking, and a full-length real meeting **OOMs the Metal allocator**
+> **Parakeet long-audio caveat (`parakeet-mlx` chunking) — resolved (#10).**
+> `parakeet-mlx` used to transcribe a clip in a single pass with no internal
+> chunking, and a full-length real meeting **OOMed the Metal allocator**
 > (`kIOGPUCommandBufferCallbackErrorOutOfMemory`) — the raw `bench_meeting.py`
-> run crashed on `parakeet` for exactly this reason. The row above was produced
-> with chunked decode (`transcribe(..., chunk_duration=120, overlap_duration=15)`).
-> Wiring that chunking into `podscribe/backends/parakeet_mlx.py` so long
-> recordings don't OOM is a tracked backend follow-up.
+> run crashed on `parakeet` for exactly this reason, so the row above was
+> produced with a manual chunked side-path
+> (`transcribe(..., chunk_duration=120, overlap_duration=15)`).
+> [podscribe/backends/parakeet_mlx.py](../podscribe/backends/parakeet_mlx.py)
+> now applies those same defaults on every call (`_CHUNK_DURATION` /
+> `_OVERLAP_DURATION`, overridable via `transcribe` kwargs), so long recordings
+> decode through the normal `Transcriber` path without OOMing.
 
 ## Synthetic-fixture results
 

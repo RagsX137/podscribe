@@ -17,7 +17,7 @@ The three-stage flow is `record → enhance → consolidate`, each independent.
 ```bash
 pip install -e '.[mlx,dev]'               # Apple Silicon engine + pytest/jiwer
 pip install -e '.[cuda,dev]'              # NVIDIA/CUDA engine + pytest/jiwer
-pytest tests/ -v                          # all tests (~513: 503 pass, 10 skipped)
+pytest tests/ -v                          # all tests (600+; count varies with installed engines, 1 network smoke test)
 pytest tests/ -k "not transcriber" -v     # skip the one network smoke test (use offline/CI)
 pytest tests/test_storage.py -v           # single file
 pytest tests/ -k "test_init_pod" -v       # single test by name
