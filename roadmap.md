@@ -8,9 +8,11 @@ Split into **priority — active remaining items** (next up, ordered by value-fo
 
 Ordered by value-for-effort (highest first). `P-` items are the original showcase
 work; `F-` items are ported from `Recommended_fixes.md` (numeration preserved for
-traceability), and `R-` items are fixes added after a codebase review (rejected
-review claims are noted in the watchlist so they aren't re-flagged). Completed
-items are listed at the bottom for reference.
+traceability); `R-` items are fixes added after a codebase review; and `D-` items
+are the residuals from the cross-platform-backends + multi-LLM-providers
+devil's-advocate review (numeration maps to that review's section/finding numbers).
+Rejected review claims are noted in the watchlist / rejected sections so they aren't
+re-flagged. Completed items are listed at the bottom for reference.
 
 ### Tier 1 — Quick wins (high value · low effort)
 
@@ -39,6 +41,31 @@ items are listed at the bottom for reference.
   both modules import numpy at top level, slowing `podscribe --help` / `list` /
   `init` (paths that never touch audio). `sounddevice`/`webrtcvad`/`mlx_whisper`
   are already lazy; finish the sweep. ~30 min, mostly mechanical.
+- **D-21 `stream_with_retry` leaks the response on the retry path**
+  (`providers/base.py`) — when a stream raises mid-body and is retried, the failed
+  `requests.Response` is never `close()`d, leaking the underlying connection until
+  GC. Wrap the consume in `try/finally: resp.close()`. Trivial, correct. ~15 min.
+- **D-15 Unify `reachable()` timeouts** — Ollama probes with a 1s timeout, OpenAI
+  with 2s (`providers/ollama.py`, `providers/openai_compat.py:131`). A cold Ollama
+  can miss the 1s window and flash a false "offline". Standardize on 2s. ~10 min.
+- **D-6A Surface the provider build error in the TUI status** (`tui.py:445-449`) —
+  `_provider_for_pod` swallows `build_provider`'s `ValueError` and renders
+  `○ LLM offline (no provider configured)`, which is wrong when the user *did*
+  configure `openai` but typo'd `--api-key-env`. Capture the message at the swallow
+  site and thread it through as the reason. The one in-scope residual from the
+  review worth doing directly. ~30 min.
+- **D-3 Write config files `0o600`** — `podscribe.yaml` / per-pod `config.yaml`
+  are created world-readable; they can carry an `api_key_env` name (and users
+  sometimes inline secrets). `os.chmod(path, 0o600)` after the atomic write, or
+  pre-set the tempfile mode. Cheap defense-in-depth. ~20 min.
+- **D-14 `cmd_ask` surfaces the real failure reason** — pairs with the §2 SSE-error
+  fix: `cmd_ask` still collapses a failed chat into a generic "check the provider
+  is reachable" banner even when the retry loop captured a specific upstream error.
+  Thread the last `on_retry` reason into the printed message. ~30 min.
+- **D-22 Make Ollama `keep_alive` configurable** (`providers/ollama.py`) — hardcoded
+  `keep_alive: -1` pins the model in VRAM forever after a single `enhance`. Expose
+  it (config default `-1`, but allow a duration) so a laptop can release the model.
+  ~30 min.
 
 ### Tier 2 — Core workflow transformations (high value · medium effort)
 
@@ -64,6 +91,29 @@ items are listed at the bottom for reference.
   pattern. Pairs with the broader VAD-tuning agenda in Future #2; do this one
   first since it's the only knob a lead can *use today* for a noisy room.
   ~1 hr.
+- **D-8 Honor (or cleanly skip) glossary conditioning per backend** — parakeet
+  backends don't take an `initial_prompt`, so glossary conditioning is dropped;
+  #9 made the drop *noisy* (a `UserWarning` per segment during a god-mode parakeet
+  recording) but not *absent*. Surface a `SUPPORTS_INITIAL_PROMPT: bool` class flag
+  on each backend and guard the prompt computation in both record loops
+  (`cli.py`, `agent_tools.py`) so unsupported backends skip it silently. Closes the
+  warning spam and the parakeet conditioning UX gap in one move. ~half-day.
+- **D-12 Guard `GodSession._step` against repeated tool errors** (`agent.py`) — a
+  tool that keeps failing loops the agent, burning paid-provider tokens with no
+  progress. Track consecutive identical tool errors and abort with a clear message
+  after N (e.g. 3). Matters most for the OpenAI/paid path. ~2 hr.
+- **D-16 Provider-aware `context_limit_chars`** (`summarize.py`) — falls back to an
+  8192-token budget for OpenAI providers, forcing needless chunking on large-context
+  models (128k+). Key the budget off the configured model / provider metadata
+  instead of a single conservative constant. ~2-3 hr.
+- **D-20 Progress feedback for non-TTY OpenAI `enhance`** — OpenAI-style streaming
+  never fires `on_stats` (no token-usage numbers), so a non-TTY `enhance` gives a
+  hanging "streaming…" feel with no heartbeat. Emit a lightweight elapsed/character
+  progress signal on the OpenAI path so batch users see it's alive. ~2 hr.
+- **D-17 Bound `_add_cuda_dll_dirs` PATH mutation** (CUDA setup) — prepends to
+  `os.environ["PATH"]` unconditionally; repeated in-process calls (tests, a
+  long-lived god session) grow PATH without limit. Make it idempotent (skip if the
+  dir is already present). CUDA-only, low blast radius. ~1 hr.
 
 ### Tier 3 — The manager's real job (high value · medium-high effort)
 
@@ -159,6 +209,19 @@ items are listed at the bottom for reference.
   audio write) and `is_recording_active()` guards against sub-second tear-down.
   Cheap insurance anyway: add a `-(%04d)` counter when a path already exists.
   Low priority; contradicts the review's P0 framing.
+- **D-6B `--api-key-env` set-time smoke-check** — *intentionally not done.* The
+  review suggested `config llm set` reject an `--api-key-env` naming an unset
+  environment variable. But the var need not exist in the shell that runs the
+  config command (you persist config once, export the key in your runtime shell),
+  so smoke-checking at set-time would raise false failures. Left as-is; revisit
+  only if a real "silently unusable config" report shows up.
+- **D-9 Unify the three backend kwarg contracts** — `whisper_mlx` passes `**kwargs`
+  straight through, `whisper_faster` reads `initial_prompt` only, `parakeet_mlx`
+  now warns on unknown kwargs. A facade-level `Transcriber.transcribe` schema would
+  make a typo'd kwarg fail uniformly instead of per-backend (TypeError vs warn vs
+  drop). Structural, not a bug — parakeet's warn-on-unknown already closes the
+  silent-drop class for the backend most likely to lose conditioning. Defer until
+  a fourth backend or a real cross-backend typo bites.
 
 ### Review claims rejected (do not implement — keep here as a paper trail)
 
@@ -179,6 +242,17 @@ items are listed at the bottom for reference.
   break the documented flow.
 - **"Batch CSV writes"** — `append_log_row` is called once per `consolidate`;
   `import` uses file extraction, not the row API. There is nothing to batch.
+- **D-13 "Windows Ctrl+C during record aborts without finalizing"** —
+  `run_record_session` (`cli.py:210-216`) finalizes inside a `finally:`, so a
+  `KeyboardInterrupt` (however SIGINT unwinds on Windows) still runs
+  `finalize_meeting`. God-mode records in a daemon thread with no signal handler at
+  all, also unaffected. The finalize is guaranteed by the `finally`, not the
+  handler.
+- **D-19 "`is_apple_silicon()` misses Rosetta-on-ARM"** — `select.py:10` keys on
+  native `platform.machine() == "arm64"` deliberately. A Python running under
+  Rosetta reports `x86_64` and genuinely *cannot* load MLX (native-arm64 only), so
+  falling off the Apple-Silicon backend path is the correct outcome, not a missed
+  case.
 
 ---
 
