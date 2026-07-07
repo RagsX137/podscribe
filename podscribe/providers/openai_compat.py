@@ -124,8 +124,8 @@ class OpenAIProvider:
         """(ok, reason) pair for status displays.
 
         Most statuses (including 404 from gateways with no /models endpoint)
-        count as "up" — only a connection failure or 401/403 (bad api key)
-        means the provider can't actually be used.
+        count as "up" — a connection failure, 401/403 (bad api key), or a 5xx
+        (server not serving) means the provider can't actually be used.
         """
         try:
             r = requests.get(f"{self.base_url}/models", headers=self._headers(), timeout=2)
@@ -135,6 +135,11 @@ class OpenAIProvider:
             return False, f"misconfigured (HTTP {r.status_code}, check api key)"
         if r.ok:
             return True, "ok"
+        if r.status_code >= 500:
+            # A gateway 404 (no /models) is a benign quirk, but a 5xx means the
+            # provider isn't serving — report it as down so the reason shows
+            # instead of a misleading "● LLM online".
+            return False, f"server error (HTTP {r.status_code})"
         return True, f"up (HTTP {r.status_code})"
 
     def model_info(self) -> dict:

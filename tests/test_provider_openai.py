@@ -103,6 +103,19 @@ def test_reachable_true_on_404_no_models_endpoint(monkeypatch):
     assert "404" in reason
 
 
+def test_reachable_false_on_5xx_server_error(monkeypatch):
+    """A 5xx from /models means the provider isn't serving — report it as down."""
+    def fake_get(url, headers=None, timeout=None):
+        return _SSEResp([], status=503)
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    p = OpenAIProvider("m", base_url="https://api.example.com/v1", api_key="k")
+    ok, reason = p.reachable_detail()
+    assert p.reachable() is False
+    assert ok is False
+    assert "503" in reason
+
+
 def test_reachable_false_on_401_unauthorized(monkeypatch):
     """401/403 means the server is up but misconfigured — not "reachable"."""
     def fake_get(url, headers=None, timeout=None):
