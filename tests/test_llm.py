@@ -79,6 +79,14 @@ def test_enhance_transcript_connection_error():
         assert result is None
 
 
+def test_enhance_transcript_empty_response_is_failure():
+    """A stream with zero content chunks must return None, not "" (silent success)."""
+    resp = make_streaming_response([])
+    with patch("podscribe.providers.ollama.requests.post", return_value=resp):
+        result = enhance_transcript("llama3.2", "fix this")
+        assert result is None
+
+
 def test_enhance_transcript_http_error():
     """Generic HTTP error → retried, returns None after exhaustion."""
     bad_resp = MagicMock()

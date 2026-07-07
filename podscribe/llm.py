@@ -90,10 +90,11 @@ def enhance_transcript(
         (so views can show "retrying…").
     """
     provider = provider or OllamaProvider(model)
-    return provider.generate(
+    text = provider.generate(
         prompt, max_retries=max_retries,
         on_token=on_token, on_stats=on_stats, on_retry=on_retry,
     )
+    return text or None  # empty string → failure, not "got text"
 
 
 def build_consolidate_prompt(template: str, summary: str) -> str:
