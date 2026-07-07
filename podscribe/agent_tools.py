@@ -193,6 +193,7 @@ def is_recording_active() -> bool:
 def start_recording(
     pod_name: str,
     model: str = "large-v3-turbo",
+    backend: str = "auto",
     vad: int = 2,
     meeting_type: Optional[str] = None,
 ) -> dict:
@@ -215,7 +216,7 @@ def start_recording(
     pod = load_pod(pod_name)
     meeting = start_meeting(pod, meeting_type=mt)
     capture = AudioCapture(vad_aggressiveness=vad)
-    transcriber = Transcriber(model=model)
+    transcriber = Transcriber(model=model, backend=backend)
     effective_glossary = get_effective_glossary(pod)
     glossary = format_glossary_prompt(effective_glossary) if effective_glossary else None
     lines: list = []
@@ -224,6 +225,13 @@ def start_recording(
         nonlocal lines
         with meeting.transcript_path.open("w") as f:
             f.write(f"# Meeting: {meeting.id}\n\n")
+            f.write(f"- pod: {pod.name} ({pod.display_name})\n")
+            f.write(f"- started: {meeting.started_at}\n")
+            f.write(f"- model: {transcriber.model_name}\n")
+            f.write(f"- vad: webrtcvad (aggressiveness={capture.vad_aggressiveness})\n\n")
+            f.write("## Transcript\n\n")
+        meeting.model = transcriber.model_name
+        meeting.vad_enabled = True
         start_ts = time.monotonic()
         try:
             for audio_segment in capture.segments():

@@ -139,6 +139,11 @@ def _build_tool_defs() -> list[dict]:
                     "properties": {
                         "pod_name": {"type": "string", "description": "Pod name"},
                         "model": {"type": "string", "description": "Whisper model"},
+                        "backend": {
+                            "type": "string",
+                            "description": "ASR backend (default: auto — picks the best backend for the host)",
+                            "enum": ["auto", "whisper-mlx", "whisper-faster", "parakeet-mlx", "parakeet-nemo"],
+                        },
                         "vad": {"type": "integer", "description": "VAD aggressiveness 0-3"},
                         "meeting_type": {"type": "string", "description": "Meeting type"},
                     },

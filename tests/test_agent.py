@@ -42,6 +42,17 @@ def test_build_tool_defs_has_all_tools():
     assert names == expected
 
 
+def test_start_recording_tool_def_exposes_backend():
+    """#18: the agent must be able to pick a backend, not just a model."""
+    defs = _build_tool_defs()
+    start_recording_def = next(t for t in defs if t["function"]["name"] == "start_recording")
+    props = start_recording_def["function"]["parameters"]["properties"]
+    assert "backend" in props
+    assert set(props["backend"]["enum"]) == {
+        "auto", "whisper-mlx", "whisper-faster", "parakeet-mlx", "parakeet-nemo",
+    }
+
+
 # ── Model resolution ──────────────────────────────────────────────────────────
 
 def test_resolve_model_uses_flag_first():
